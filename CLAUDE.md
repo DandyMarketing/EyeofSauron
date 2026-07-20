@@ -82,6 +82,12 @@ I'm Khai — many years in F&B, building this as the company AI. I code alongsid
 
 StaffAny API grant method · Revel report frequency · Revel venue-key mapping (Khai to gather one filename per venue) · user scale (managers only vs all staff) · exact StaffAny fields to ingest · Telegram allowlist owner · Supabase hosted vs self-hosted.
 
+## Working style — hard rules
+
+- **Do not overcomplicate.** Try the simplest, most direct fix first. Exhaust the obvious before reaching for workarounds, CLI installs, or multi-step procedures.
+- **When troubleshooting:** diagnose the root cause, propose the shortest path to fix it, then act. Do not send the user on a wild goose chase.
+- **Khai is on Windows PC.** Keep platform-specific instructions Windows-friendly.
+
 ## Reference
 
 Two companion documents exist (HTML): the visual **blueprint** (architecture, diagrams, security, roadmap) and the **Phase 0 checklist**. Ask Khai for them if useful.
