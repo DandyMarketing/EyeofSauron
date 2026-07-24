@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "parse": "tsx src/scripts/parse-sample.ts"
+    "parse": "tsx src/scripts/parse-sample.ts",
+    "ingest": "NODE_USE_ENV_PROXY=1 tsx src/scripts/ingest.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
