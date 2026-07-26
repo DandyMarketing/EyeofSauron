@@ -8,7 +8,7 @@
     "parse": "tsx src/scripts/parse-sample.ts",
     "ingest": "NODE_USE_ENV_PROXY=1 tsx src/scripts/ingest.ts",
     "dev": "NODE_USE_ENV_PROXY=1 tsx watch src/server.ts",
-    "start": "NODE_USE_ENV_PROXY=1 node dist/server.js",
+    "start": "node dist/server.js",
     "ask": "NODE_USE_ENV_PROXY=1 tsx src/scripts/ask.ts"
   },
   "dependencies": {
