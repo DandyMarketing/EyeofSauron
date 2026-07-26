@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { parseFilename, parseProductMix, parseOperationsReport, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, ingestProductMix, ingestOperations } from './ingest/revel.js';
+import { askSauron } from './ai/engine.js';
 import type { ProductMixRow, OperationsData } from './parsers/revel/types.js';
 
 const app = new Hono();
@@ -110,6 +111,19 @@ app.post('/ingest/revel', async (c) => {
 
   const hasErrors = results.some(r => r.status !== 'ingested');
   return c.json({ results }, hasErrors ? 207 : 200);
+});
+
+// AI query endpoint
+app.post('/ask', async (c) => {
+  const { question } = await c.req.json<{ question: string }>();
+  if (!question) return c.json({ error: 'Missing "question" field' }, 400);
+
+  try {
+    const result = await askSauron(question);
+    return c.json(result);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
 });
 
 const port = Number(process.env.PORT) || 3000;
