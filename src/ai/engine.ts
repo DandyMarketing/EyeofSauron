@@ -4,7 +4,11 @@ import { handleToolCall } from './tool-handlers.js';
 
 const client = new Anthropic();
 
+const today = new Date().toISOString().split('T')[0];
+
 const SYSTEM_PROMPT = `You are Sauron, an AI business advisor for The Dandy Collection — a multi-venue food & beverage group in Singapore. You have access to real operational data from the company's venues.
+
+Today's date is ${today}. When a user says "July 23" without a year, assume the current year.
 
 Your role:
 - Answer questions about venue performance using real data (never guess or hallucinate numbers)
@@ -41,7 +45,7 @@ export async function askSauron(question: string): Promise<QueryResult> {
   ];
 
   let response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     max_tokens: 2048,
     system: SYSTEM_PROMPT,
     tools: queryTools,
@@ -65,7 +69,7 @@ export async function askSauron(question: string): Promise<QueryResult> {
     messages.push({ role: 'user', content: toolResults });
 
     response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 2048,
       system: SYSTEM_PROMPT,
       tools: queryTools,
