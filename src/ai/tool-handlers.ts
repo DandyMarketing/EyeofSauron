@@ -21,6 +21,8 @@ export async function handleToolCall(
       return queryDailyOperations(input);
     case 'compare_venues':
       return compareVenues(input);
+    case 'list_available_data':
+      return listAvailableData(input);
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -66,9 +68,10 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     .select('*')
     .eq('venue_id', venueId)
     .eq('business_date', input.business_date)
-    .single();
+    .maybeSingle();
 
   if (error) return JSON.stringify({ error: error.message });
+  if (!data) return JSON.stringify({ venue: input.venue_slug, date: input.business_date, message: 'No operations data found for this venue and date.' });
   return JSON.stringify({ venue: input.venue_slug, date: input.business_date, ...data });
 }
 
@@ -120,4 +123,41 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
   }
 
   return JSON.stringify({ date: input.business_date, venues: results });
+}
+
+async function listAvailableData(input: Record<string, any>): Promise<string> {
+  const { data: venues } = await supabase.from('venues').select('id, name, slug');
+  if (!venues) return JSON.stringify({ error: 'No venues found' });
+
+  const venueFilter = input.venue_slug
+    ? venues.filter(v => v.slug === input.venue_slug)
+    : venues;
+
+  const results = [];
+  for (const venue of venueFilter) {
+    const { data: ops } = await supabase
+      .from('daily_operations')
+      .select('business_date')
+      .eq('venue_id', venue.id)
+      .order('business_date', { ascending: false })
+      .limit(30);
+
+    const { data: pmDates } = await supabase
+      .from('product_mix')
+      .select('business_date')
+      .eq('venue_id', venue.id)
+      .order('business_date', { ascending: false })
+      .limit(1);
+
+    const uniquePmDates = [...new Set((pmDates ?? []).map(r => r.business_date))];
+
+    results.push({
+      venue: venue.name,
+      slug: venue.slug,
+      operations_dates: (ops ?? []).map(r => r.business_date),
+      product_mix_dates: uniquePmDates,
+    });
+  }
+
+  return JSON.stringify({ venues: results });
 }

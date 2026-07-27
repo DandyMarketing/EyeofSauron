@@ -75,4 +75,18 @@ export const queryTools: Tool[] = [
       required: ['business_date'],
     },
   },
+  {
+    name: 'list_available_data',
+    description: 'List which dates have data for each venue. Use this FIRST when unsure what data is available, or when a query returns no results. Shows the most recent dates with operations summaries and product mix data.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Optional: filter to a specific venue. Omit to see all venues.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
