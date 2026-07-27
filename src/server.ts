@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { parseFilename, parseProductMix, parseOperationsReport, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, ingestProductMix, ingestOperations } from './ingest/revel.js';
+import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import type { ProductMixRow, OperationsData } from './parsers/revel/types.js';
 
@@ -55,6 +56,7 @@ app.post('/ingest/revel', async (c) => {
       }
     } catch (e: any) {
       results.push({ filename: file.name, status: 'parse_error', detail: e.message });
+      await logIngestion({ filename: file.name, report_type: 'product_mix', status: 'parse_error', error_message: e.message });
     }
   }
 
@@ -75,8 +77,14 @@ app.post('/ingest/revel', async (c) => {
     try {
       venueId = await resolveVenueId(venueKey);
     } catch (e: any) {
-      if (pm) results.push({ filename: pm.filename, status: 'error', detail: e.message });
-      if (ops) results.push({ filename: ops.filename, status: 'error', detail: e.message });
+      if (pm) {
+        results.push({ filename: pm.filename, status: 'error', detail: e.message });
+        await logIngestion({ venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'unknown_venue', error_message: e.message });
+      }
+      if (ops) {
+        results.push({ filename: ops.filename, status: 'error', detail: e.message });
+        await logIngestion({ venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'unknown_venue', error_message: e.message });
+      }
       continue;
     }
 
@@ -84,8 +92,11 @@ app.post('/ingest/revel', async (c) => {
     if (pm?.productMix && ops?.operations) {
       const recon = reconcile(pm.productMix, ops.operations);
       if (!recon.passed) {
-        results.push({ filename: pm.filename, status: 'reconciliation_failed', detail: `diff $${recon.difference.toFixed(2)}` });
-        results.push({ filename: ops.filename, status: 'reconciliation_failed', detail: `diff $${recon.difference.toFixed(2)}` });
+        const detail = `diff $${recon.difference.toFixed(2)}`;
+        results.push({ filename: pm.filename, status: 'reconciliation_failed', detail });
+        results.push({ filename: ops.filename, status: 'reconciliation_failed', detail });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'reconciliation_failed', error_message: detail });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'reconciliation_failed', error_message: detail });
         continue;
       }
     }
@@ -94,8 +105,10 @@ app.post('/ingest/revel', async (c) => {
       try {
         const count = await ingestProductMix(venueId, businessDate, pm.productMix);
         results.push({ filename: pm.filename, status: 'ingested', detail: `${count} rows` });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'success', row_count: count });
       } catch (e: any) {
         results.push({ filename: pm.filename, status: 'error', detail: e.message });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'ingestion_error', error_message: e.message });
       }
     }
 
@@ -103,8 +116,10 @@ app.post('/ingest/revel', async (c) => {
       try {
         await ingestOperations(venueId, businessDate, ops.operations);
         results.push({ filename: ops.filename, status: 'ingested' });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success' });
       } catch (e: any) {
         results.push({ filename: ops.filename, status: 'error', detail: e.message });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'ingestion_error', error_message: e.message });
       }
     }
   }
@@ -124,6 +139,14 @@ app.post('/ask', async (c) => {
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
   }
+});
+
+// Watchdog: check for missing data and recent errors
+app.get('/watchdog', async (c) => {
+  const days = Number(c.req.query('days') ?? 3);
+  const report = await checkDataGaps(days);
+  const healthy = report.missing.length === 0 && report.recent_errors.length === 0;
+  return c.json({ healthy, ...report });
 });
 
 const port = Number(process.env.PORT) || 3000;
