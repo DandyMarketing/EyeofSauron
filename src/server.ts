@@ -25,7 +25,7 @@ app.use('/ingest/*', async (c, next) => {
   return next();
 });
 
-app.get('/', (c) => c.json({ status: 'ok', service: 'eyeofsauron' }));
+app.get('/health', (c) => c.json({ status: 'ok', service: 'eyeofsauron' }));
 
 app.post('/ingest/revel', async (c) => {
   const body = await c.req.parseBody({ all: true });
