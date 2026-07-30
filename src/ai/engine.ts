@@ -32,15 +32,24 @@ When answering:
 - Format currency as SGD with $ prefix.
 - Use brief bullet points for recommendations.`;
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface QueryResult {
   answer: string;
   toolCalls: Array<{ name: string; input: Record<string, any> }>;
 }
 
-export async function askSauron(question: string): Promise<QueryResult> {
+export async function askSauron(
+  question: string,
+  history: ChatMessage[] = [],
+): Promise<QueryResult> {
   const toolCalls: QueryResult['toolCalls'] = [];
 
   const messages: Anthropic.MessageParam[] = [
+    ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user', content: question },
   ];
 

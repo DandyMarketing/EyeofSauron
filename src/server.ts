@@ -1,13 +1,18 @@
 import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { cors } from 'hono/cors';
 import { parseFilename, parseProductMix, parseOperationsReport, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, ingestProductMix, ingestOperations } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
+import type { ChatMessage } from './ai/engine.js';
 import type { ProductMixRow, OperationsData } from './parsers/revel/types.js';
 
 const app = new Hono();
+
+app.use('/ask', cors());
 
 const API_KEY = process.env.INGEST_API_KEY;
 
@@ -130,11 +135,11 @@ app.post('/ingest/revel', async (c) => {
 
 // AI query endpoint
 app.post('/ask', async (c) => {
-  const { question } = await c.req.json<{ question: string }>();
-  if (!question) return c.json({ error: 'Missing "question" field' }, 400);
+  const body = await c.req.json<{ question: string; history?: ChatMessage[] }>();
+  if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   try {
-    const result = await askSauron(question);
+    const result = await askSauron(body.question, body.history ?? []);
     return c.json(result);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
@@ -148,6 +153,9 @@ app.get('/watchdog', async (c) => {
   const healthy = report.missing.length === 0 && report.recent_errors.length === 0;
   return c.json({ healthy, ...report });
 });
+
+// Serve static frontend
+app.use('/*', serveStatic({ root: './public' }));
 
 const port = Number(process.env.PORT) || 3000;
 serve({ fetch: app.fetch, port }, () => {
