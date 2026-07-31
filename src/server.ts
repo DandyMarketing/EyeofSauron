@@ -7,12 +7,27 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
+import { validateSession, listUsers, inviteUser, assignRole, removeRole, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
+import type { SessionUser } from './auth/session.js';
 import type { ProductMixRow, OperationsData, HourlySalesData } from './parsers/revel/types.js';
 
 const app = new Hono();
 
 app.use('/ask', cors());
+app.use('/api/*', cors());
+app.use('/admin/api/*', cors());
+
+// --- Public config endpoint (anon key + URL for frontend auth) ---
+
+app.get('/api/config', (c) => {
+  return c.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  });
+});
+
+// --- Ingest auth (API key) ---
 
 const API_KEY = process.env.INGEST_API_KEY;
 
@@ -25,12 +40,44 @@ app.use('/ingest/*', async (c, next) => {
   return next();
 });
 
+// --- User auth middleware (session token) ---
+
+async function requireAuth(c: any): Promise<SessionUser | null> {
+  const auth = c.req.header('Authorization');
+  if (!auth?.startsWith('Bearer ')) return null;
+  const token = auth.slice(7);
+  return validateSession(token);
+}
+
+async function requireOwner(c: any): Promise<SessionUser | null> {
+  const user = await requireAuth(c);
+  if (!user || !user.isOwner) return null;
+  return user;
+}
+
+// --- Health ---
+
 app.get('/health', (c) => c.json({ status: 'ok', service: 'eyeofsauron' }));
+
+// --- Auth info ---
+
+app.get('/api/me', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated' }, 401);
+  return c.json({
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    venues: user.venues,
+    isOwner: user.isOwner,
+  });
+});
+
+// --- Ingest (unchanged) ---
 
 app.post('/ingest/revel', async (c) => {
   const body = await c.req.parseBody({ all: true });
 
-  // Accept one or more files under the "files" field
   let uploads = body['files'];
   if (!uploads) return c.json({ error: 'No files provided. Send as multipart field "files".' }, 400);
   if (!Array.isArray(uploads)) uploads = [uploads];
@@ -40,7 +87,6 @@ app.post('/ingest/revel', async (c) => {
 
   const results: Array<{ filename: string; status: string; detail?: string }> = [];
 
-  // Parse all files first
   const parsed: Array<{
     filename: string;
     venueKey: string;
@@ -77,7 +123,6 @@ app.post('/ingest/revel', async (c) => {
     }
   }
 
-  // Group by venueKey + businessDate
   const groups = new Map<string, { pm?: typeof parsed[0]; ops?: typeof parsed[0] }>();
   for (const p of parsed) {
     const key = `${p.venueKey}|${p.businessDate}`;
@@ -105,7 +150,6 @@ app.post('/ingest/revel', async (c) => {
       continue;
     }
 
-    // Reconcile if both files present
     if (pm?.productMix && ops?.operations) {
       const recon = reconcile(pm.productMix, ops.operations);
       if (!recon.passed) {
@@ -141,7 +185,6 @@ app.post('/ingest/revel', async (c) => {
     }
   }
 
-  // Hourly sales files are independent (not grouped with PM/Ops)
   const hourlyFiles = parsed.filter(p => p.hourlySales);
   for (const hf of hourlyFiles) {
     let venueId: string;
@@ -168,20 +211,102 @@ app.post('/ingest/revel', async (c) => {
   return c.json({ results }, hasErrors ? 207 : 200);
 });
 
-// AI query endpoint
+// --- AI query endpoint (auth required) ---
+
 app.post('/ask', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
   const body = await c.req.json<{ question: string; history?: ChatMessage[] }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   try {
-    const result = await askSauron(body.question, body.history ?? []);
+    const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+    const result = await askSauron(body.question, body.history ?? [], venueFilter);
     return c.json(result);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
   }
 });
 
-// Watchdog: check for missing data and recent errors
+// --- Admin API (owner only) ---
+
+app.get('/admin/api/users', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const users = await listUsers();
+  return c.json({ users });
+});
+
+app.post('/admin/api/users/invite', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { email, full_name } = await c.req.json();
+  if (!email) return c.json({ error: 'Email required' }, 400);
+
+  try {
+    const invited = await inviteUser(email, full_name ?? '');
+    return c.json({ user: { id: invited.id, email: invited.email } });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.post('/admin/api/users/:userId/roles', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const userId = c.req.param('userId');
+  const { venue_id, role } = await c.req.json();
+  if (!venue_id || !role) return c.json({ error: 'venue_id and role required' }, 400);
+
+  try {
+    const result = await assignRole(userId, venue_id, role);
+    return c.json({ role: result });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.delete('/admin/api/roles/:roleId', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  try {
+    await removeRole(c.req.param('roleId'));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.get('/admin/api/venues', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data } = await supabaseAdmin.from('venues').select('id, name, slug');
+  return c.json({ venues: data ?? [] });
+});
+
+app.get('/admin/api/system', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const days = Number(c.req.query('days') ?? 3);
+  const report = await checkDataGaps(days);
+
+  const { data: recentLogs } = await supabaseAdmin
+    .from('ingestion_log')
+    .select('filename, report_type, status, row_count, created_at, business_date')
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  return c.json({ ...report, recent_ingestions: recentLogs ?? [] });
+});
+
+// --- Watchdog (public for monitoring) ---
+
 app.get('/watchdog', async (c) => {
   const days = Number(c.req.query('days') ?? 3);
   const report = await checkDataGaps(days);
@@ -189,7 +314,8 @@ app.get('/watchdog', async (c) => {
   return c.json({ healthy, ...report });
 });
 
-// Serve static frontend
+// --- Static frontend ---
+
 app.use('/*', serveStatic({ root: './public' }));
 
 const port = Number(process.env.PORT) || 3000;
