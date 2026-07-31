@@ -100,8 +100,9 @@ export async function removeRole(roleId: string) {
 export async function deleteUser(userId: string) {
   await supabaseAdmin.from('user_venue_roles').delete().eq('user_id', userId);
   await supabaseAdmin.from('profiles').delete().eq('id', userId);
+  // Auth user may not exist for seeded/test profiles — ignore that error
   const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-  if (error) throw new Error(error.message);
+  if (error && !error.message.includes('not found')) throw new Error(error.message);
 }
 
 export async function resetUserPassword(userId: string, newPassword: string) {
