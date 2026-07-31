@@ -3,12 +3,12 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
-import { parseFilename, parseProductMix, parseOperationsReport, reconcile } from './parsers/revel/index.js';
-import { resolveVenueId, ingestProductMix, ingestOperations } from './ingest/revel.js';
+import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
+import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import type { ChatMessage } from './ai/engine.js';
-import type { ProductMixRow, OperationsData } from './parsers/revel/types.js';
+import type { ProductMixRow, OperationsData, HourlySalesData } from './parsers/revel/types.js';
 
 const app = new Hono();
 
@@ -47,16 +47,28 @@ app.post('/ingest/revel', async (c) => {
     businessDate: string;
     productMix?: ProductMixRow[];
     operations?: OperationsData;
+    hourlySales?: HourlySalesData;
   }> = [];
 
   for (const file of files) {
     try {
       const meta = parseFilename(file.name);
-      const content = await file.text();
 
       if (meta.reportType === 'product_mix') {
+        const content = await file.text();
         parsed.push({ filename: file.name, venueKey: meta.venueKey, businessDate: meta.businessDate, productMix: parseProductMix(content) });
+      } else if (meta.reportType === 'hourly_sales') {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        let hourlySales: HourlySalesData;
+        if (ext === 'xlsx') {
+          const buf = Buffer.from(await file.arrayBuffer());
+          hourlySales = parseHourlySalesXlsx(buf);
+        } else {
+          hourlySales = parseHourlySalesCsv(await file.text());
+        }
+        parsed.push({ filename: file.name, venueKey: meta.venueKey, businessDate: meta.businessDate, hourlySales });
       } else {
+        const content = await file.text();
         parsed.push({ filename: file.name, venueKey: meta.venueKey, businessDate: meta.businessDate, operations: parseOperationsReport(content) });
       }
     } catch (e: any) {
@@ -126,6 +138,29 @@ app.post('/ingest/revel', async (c) => {
         results.push({ filename: ops.filename, status: 'error', detail: e.message });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'ingestion_error', error_message: e.message });
       }
+    }
+  }
+
+  // Hourly sales files are independent (not grouped with PM/Ops)
+  const hourlyFiles = parsed.filter(p => p.hourlySales);
+  for (const hf of hourlyFiles) {
+    let venueId: string;
+    try {
+      venueId = await resolveVenueId(hf.venueKey);
+    } catch (e: any) {
+      results.push({ filename: hf.filename, status: 'error', detail: e.message });
+      await logIngestion({ venue_key: hf.venueKey, business_date: hf.businessDate, filename: hf.filename, report_type: 'hourly_sales', status: 'unknown_venue', error_message: e.message });
+      continue;
+    }
+
+    try {
+      const venueSlug = await resolveVenueSlug(venueId);
+      const count = await ingestHourlySales(venueId, venueSlug, hf.businessDate, hf.hourlySales!);
+      results.push({ filename: hf.filename, status: 'ingested', detail: `${count} hours` });
+      await logIngestion({ venue_id: venueId, venue_key: hf.venueKey, business_date: hf.businessDate, filename: hf.filename, report_type: 'hourly_sales', status: 'success', row_count: count });
+    } catch (e: any) {
+      results.push({ filename: hf.filename, status: 'error', detail: e.message });
+      await logIngestion({ venue_id: venueId, venue_key: hf.venueKey, business_date: hf.businessDate, filename: hf.filename, report_type: 'hourly_sales', status: 'ingestion_error', error_message: e.message });
     }
   }
 

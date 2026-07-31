@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
-import type { ProductMixRow, OperationsData } from '../parsers/revel/types.js';
+import type { ProductMixRow, OperationsData, HourlySalesData, MealPeriodSummary } from '../parsers/revel/types.js';
+import { deriveMealPeriods } from '../parsers/revel/meal-periods.js';
 
 export async function resolveVenueId(reportKey: string): Promise<string> {
   const { data, error } = await supabase
@@ -12,6 +13,17 @@ export async function resolveVenueId(reportKey: string): Promise<string> {
     throw new Error(`Unknown venue key: "${reportKey}". Register it in revel_venue_keys first.`);
   }
   return data.venue_id;
+}
+
+export async function resolveVenueSlug(venueId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('venues')
+    .select('slug')
+    .eq('id', venueId)
+    .single();
+
+  if (error || !data) return 'unknown';
+  return data.slug;
 }
 
 export async function ingestProductMix(
@@ -105,4 +117,52 @@ export async function ingestOperations(
     .upsert(record, { onConflict: 'venue_id,business_date' });
 
   if (error) throw new Error(`Operations upsert failed: ${error.message}`);
+}
+
+export async function ingestHourlySales(
+  venueId: string,
+  venueSlug: string,
+  businessDate: string,
+  data: HourlySalesData,
+): Promise<number> {
+  const periods = deriveMealPeriods(data, { venueSlug, businessDate });
+  const periodByHour = new Map<number, string>();
+  for (const h of data.hours) {
+    if (h.hour < 17) {
+      const lunchPeriod = periods.find(p => p.period === 'lunch' || p.period === 'brunch');
+      periodByHour.set(h.hour, lunchPeriod?.period ?? 'lunch');
+    } else {
+      periodByHour.set(h.hour, 'dinner');
+    }
+  }
+
+  const { error: delError } = await supabase
+    .from('hourly_sales')
+    .delete()
+    .eq('venue_id', venueId)
+    .eq('business_date', businessDate);
+
+  if (delError) throw new Error(`Hourly sales delete failed: ${delError.message}`);
+
+  const records = data.hours
+    .filter(h => h.transactions > 0 || h.sales > 0)
+    .map(h => ({
+      venue_id: venueId,
+      business_date: businessDate,
+      hour: h.hour,
+      time_label: h.timeLabel,
+      transactions: h.transactions,
+      items: h.items,
+      avg_check: h.avgCheck,
+      sales: h.sales,
+      pct_sales: h.pctSales,
+      meal_period: periodByHour.get(h.hour) ?? 'dinner',
+    }));
+
+  if (records.length > 0) {
+    const { error } = await supabase.from('hourly_sales').insert(records);
+    if (error) throw new Error(`Hourly sales insert failed: ${error.message}`);
+  }
+
+  return records.length;
 }

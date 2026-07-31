@@ -6,7 +6,7 @@ interface LogEntry {
   venue_id?: string;
   venue_key?: string;
   business_date?: string;
-  report_type: 'product_mix' | 'operations';
+  report_type: 'product_mix' | 'operations' | 'hourly_sales';
   filename: string;
   status: IngestionStatus;
   row_count?: number;

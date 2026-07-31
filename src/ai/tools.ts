@@ -100,6 +100,50 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_meal_period_sales',
+    description: 'Query sales breakdown by meal period (lunch/brunch/dinner) for a venue. Derived from hourly sales data. Use this to answer questions about lunch vs dinner performance, brunch sales on weekends, or meal period trends. Note: Fat Prince Saturday/Sunday lunch is labelled "brunch", Super Firangi Saturday lunch is labelled "brunch".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        business_date: {
+          type: 'string',
+          description: 'Single business date in YYYY-MM-DD format. Use this OR start_date/end_date, not both.',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of date range (inclusive) in YYYY-MM-DD format. Use with end_date.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of date range (inclusive) in YYYY-MM-DD format. Use with start_date.',
+        },
+      },
+      required: ['venue_slug'],
+    },
+  },
+  {
+    name: 'query_hourly_sales',
+    description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        business_date: {
+          type: 'string',
+          description: 'Business date in YYYY-MM-DD format.',
+        },
+      },
+      required: ['venue_slug', 'business_date'],
+    },
+  },
+  {
     name: 'list_available_data',
     description: 'List which dates have data for each venue. Use this FIRST when unsure what data is available, or when a query returns no results. Shows the most recent dates with operations summaries and product mix data.',
     input_schema: {

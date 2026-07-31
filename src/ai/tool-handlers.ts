@@ -39,6 +39,10 @@ export async function handleToolCall(
       return queryDailyOperations(input);
     case 'compare_venues':
       return compareVenues(input);
+    case 'query_meal_period_sales':
+      return queryMealPeriodSales(input);
+    case 'query_hourly_sales':
+      return queryHourlySales(input);
     case 'list_available_data':
       return listAvailableData(input);
     default:
@@ -291,13 +295,106 @@ async function listAvailableData(input: Record<string, any>): Promise<string> {
 
     const uniquePmDates = [...new Set((pmDates ?? []).map(r => r.business_date))];
 
+    const { data: hsDates } = await supabase
+      .from('hourly_sales')
+      .select('business_date')
+      .eq('venue_id', venue.id)
+      .order('business_date', { ascending: false })
+      .limit(30);
+
+    const uniqueHsDates = [...new Set((hsDates ?? []).map(r => r.business_date))];
+
     results.push({
       venue: venue.name,
       slug: venue.slug,
       operations_dates: (ops ?? []).map(r => r.business_date),
       product_mix_dates: uniquePmDates,
+      hourly_sales_dates: uniqueHsDates,
     });
   }
 
   return JSON.stringify({ venues: results });
+}
+
+async function queryMealPeriodSales(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  const dateFilter = getDateFilter(input);
+
+  let query = supabase
+    .from('hourly_sales')
+    .select('business_date, meal_period, transactions, items, sales')
+    .eq('venue_id', venueId);
+
+  query = applyDateFilter(query, dateFilter);
+
+  const { data, error } = await query;
+  if (error) return JSON.stringify({ error: error.message });
+  if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No hourly sales data found. This data comes from the Hourly Sales Report.' });
+
+  const periods = new Map<string, { period: string; transactions: number; items: number; sales: number; days: Set<string> }>();
+
+  for (const row of data) {
+    const key = row.meal_period;
+    const existing = periods.get(key);
+    if (existing) {
+      existing.transactions += Number(row.transactions);
+      existing.items += Number(row.items);
+      existing.sales += Number(row.sales);
+      existing.days.add(row.business_date);
+    } else {
+      periods.set(key, {
+        period: row.meal_period,
+        transactions: Number(row.transactions),
+        items: Number(row.items),
+        sales: Number(row.sales),
+        days: new Set([row.business_date]),
+      });
+    }
+  }
+
+  const totalSales = [...periods.values()].reduce((s, p) => s + p.sales, 0);
+
+  const result = [...periods.values()].map(p => ({
+    period: p.period,
+    transactions: p.transactions,
+    items: p.items,
+    sales: p.sales,
+    pct_of_total: totalSales > 0 ? Number((p.sales / totalSales * 100).toFixed(1)) : 0,
+    avg_check: p.transactions > 0 ? Number((p.sales / p.transactions).toFixed(2)) : null,
+    days_counted: p.days.size,
+  }));
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    date: dateLabel(dateFilter),
+    total_sales: totalSales,
+    periods: result,
+  });
+}
+
+async function queryHourlySales(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  const businessDate = input.business_date;
+  if (!businessDate) return JSON.stringify({ error: 'business_date is required for hourly sales query' });
+
+  const { data, error } = await supabase
+    .from('hourly_sales')
+    .select('hour, time_label, transactions, items, avg_check, sales, pct_sales, meal_period')
+    .eq('venue_id', venueId)
+    .eq('business_date', businessDate)
+    .order('hour', { ascending: true });
+
+  if (error) return JSON.stringify({ error: error.message });
+  if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date: businessDate, message: 'No hourly sales data found for this date.' });
+
+  const totalSales = data.reduce((s, r) => s + Number(r.sales), 0);
+  const totalTx = data.reduce((s, r) => s + Number(r.transactions), 0);
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    date: businessDate,
+    total_sales: totalSales,
+    total_transactions: totalTx,
+    hours: data,
+  });
 }

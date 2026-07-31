@@ -1,5 +1,5 @@
 export interface FilenameMetadata {
-  reportType: 'product_mix' | 'operations';
+  reportType: 'product_mix' | 'operations' | 'hourly_sales';
   venueKey: string;
   businessDate: string; // YYYY-MM-DD
   startDateRaw: string; // YYYYMMDD
@@ -101,6 +101,35 @@ export interface OperationsData {
   };
   discountReasons: DiscountReasonRow[];
   voidCompReasons: VoidCompReasonRow[];
+}
+
+export interface HourlySalesRow {
+  hour: number; // 0-23
+  timeLabel: string; // "12:00 PM - 12:59 PM"
+  transactions: number;
+  items: number;
+  avgCheck: number | null;
+  sales: number;
+  pctSales: number;
+}
+
+export interface MealPeriodSummary {
+  period: 'lunch' | 'brunch' | 'dinner';
+  transactions: number;
+  items: number;
+  sales: number;
+  pctSales: number;
+  avgCheck: number | null;
+}
+
+export interface HourlySalesData {
+  hours: HourlySalesRow[];
+  totals: {
+    transactions: number;
+    items: number;
+    avgCheck: number | null;
+    sales: number;
+  };
 }
 
 export interface ReconciliationResult {
