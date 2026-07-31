@@ -305,11 +305,79 @@
     justify-content: flex-end;
   }
 
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 36px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 12px;
+  }
+
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(232, 147, 58, 0.04);
+  }
+
+  .drop-zone p { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
+
+  .drop-zone strong { color: var(--accent); font-size: 14px; }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+
+  .file-item .fname { flex: 1; word-break: break-all; }
+  .file-item .fsize { color: var(--text-muted); flex-shrink: 0; }
+  .file-item .fstatus { flex-shrink: 0; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .fstatus-pending { color: var(--text-muted); }
+  .fstatus-ok { color: var(--success); background: rgba(64,192,96,0.1); }
+  .fstatus-err { color: var(--error); background: rgba(232,64,64,0.1); }
+  .fstatus-warn { color: #e8c840; background: rgba(232,200,64,0.1); }
+
+  .file-item .fremove {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 16px; padding: 0 4px;
+  }
+
+  .file-item .fremove:hover { color: var(--error); }
+
+  .upload-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+
+  .upload-progress {
+    height: 4px; background: var(--border); border-radius: 2px;
+    margin-top: 12px; overflow: hidden; display: none;
+  }
+
+  .upload-progress .fill {
+    height: 100%; background: var(--accent); border-radius: 2px;
+    transition: width 0.3s; width: 0%;
+  }
+
+  .upload-summary {
+    margin-top: 12px; padding: 12px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; display: none;
+  }
+
+  .upload-summary .ustat { display: flex; justify-content: space-between; padding: 3px 0; }
+  .upload-summary .ustat .ulabel { color: var(--text-muted); }
+
   @media (max-width: 600px) {
     .invite-form { flex-direction: column; }
     .invite-form input { min-width: unset; }
     table { font-size: 13px; }
     th, td { padding: 8px 6px; }
+    .drop-zone { padding: 24px 16px; }
   }
 </style>
 </head>
@@ -538,6 +606,116 @@ function render(users, system) {
   sysSection.appendChild(ingCard);
 
   app.appendChild(sysSection);
+
+  // Upload section
+  const uploadSection = el('div', 'section');
+  uploadSection.innerHTML = `
+    <h2>Upload Reports</h2>
+    <div class="drop-zone" id="drop-zone">
+      <strong>Drop CSV/XLSX files here or click to browse</strong>
+      <p>Product_Mix, Operations_Report, Hourly_Sales_Report files</p>
+    </div>
+    <input type="file" id="file-input" multiple accept=".csv,.xlsx" style="display:none">
+    <div id="upload-file-list"></div>
+    <div class="upload-actions" id="upload-actions" style="display:none">
+      <button class="btn btn-small" id="upload-btn">Upload All</button>
+      <button class="btn btn-small btn-outline" id="upload-clear">Clear</button>
+      <span id="upload-count" style="color:var(--text-muted);font-size:12px"></span>
+    </div>
+    <div class="upload-progress" id="upload-progress"><div class="fill" id="upload-progress-fill"></div></div>
+    <div class="upload-summary" id="upload-summary"></div>
+  `;
+  app.appendChild(uploadSection);
+  initUpload();
+}
+
+function initUpload() {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  let uploadFiles = [];
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); addUploadFiles(e.dataTransfer.files); });
+  fileInput.addEventListener('change', () => { addUploadFiles(fileInput.files); fileInput.value = ''; });
+
+  document.getElementById('upload-btn').addEventListener('click', () => doUpload());
+  document.getElementById('upload-clear').addEventListener('click', () => { uploadFiles = []; renderUploadList(); document.getElementById('upload-summary').style.display = 'none'; document.getElementById('upload-progress').style.display = 'none'; });
+
+  function addUploadFiles(newFiles) {
+    for (const f of newFiles) {
+      if (!uploadFiles.some(x => x.name === f.name && x.size === f.size)) uploadFiles.push(f);
+    }
+    renderUploadList();
+  }
+
+  function renderUploadList() {
+    const list = document.getElementById('upload-file-list');
+    list.innerHTML = '';
+    uploadFiles.forEach((f, i) => {
+      const valid = /^(Product_Mix|Operations_Report|Hourly_Sales_Report)/i.test(f.name);
+      const item = document.createElement('div');
+      item.className = 'file-item';
+      item.id = 'ufile-' + i;
+      const sz = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
+      item.innerHTML = `<span class="fname">${esc(f.name)}</span><span class="fsize">${sz}</span>
+        <span class="fstatus ${valid ? 'fstatus-pending' : 'fstatus-warn'}">${valid ? 'Ready' : 'Unknown'}</span>
+        <button class="fremove" onclick="this.closest('.file-item').remove(); void 0">&times;</button>`;
+      list.appendChild(item);
+    });
+    document.getElementById('upload-actions').style.display = uploadFiles.length > 0 ? 'flex' : 'none';
+    document.getElementById('upload-count').textContent = uploadFiles.length + ' file' + (uploadFiles.length !== 1 ? 's' : '');
+  }
+
+  async function doUpload() {
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true; btn.textContent = 'Uploading...';
+    const progress = document.getElementById('upload-progress');
+    const fill = document.getElementById('upload-progress-fill');
+    progress.style.display = 'block';
+    document.getElementById('upload-summary').style.display = 'none';
+
+    let ok = 0, err = 0, warn = 0;
+    const batchSize = 6;
+
+    for (let i = 0; i < uploadFiles.length; i += batchSize) {
+      const batch = uploadFiles.slice(i, i + batchSize);
+      const formData = new FormData();
+      batch.forEach(f => formData.append('files', f));
+
+      batch.forEach((_, j) => { const el = document.getElementById('ufile-' + (i+j)); if (el) el.querySelector('.fstatus').textContent = 'Uploading...'; });
+
+      try {
+        const res = await fetch('/ingest/revel', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.results) {
+          data.results.forEach((r, j) => {
+            const el = document.getElementById('ufile-' + (i+j));
+            if (!el) return;
+            const st = el.querySelector('.fstatus');
+            if (r.status === 'ingested') { st.textContent = 'Ingested'; st.className = 'fstatus fstatus-ok'; ok++; }
+            else if (r.status === 'reconciliation_failed') { st.textContent = 'Recon failed'; st.className = 'fstatus fstatus-warn'; warn++; }
+            else { st.textContent = r.status; st.className = 'fstatus fstatus-err'; err++; }
+          });
+        }
+      } catch (e) {
+        batch.forEach((_, j) => { const el = document.getElementById('ufile-' + (i+j)); if (el) { const st = el.querySelector('.fstatus'); st.textContent = 'Error'; st.className = 'fstatus fstatus-err'; } err++; });
+      }
+
+      fill.style.width = Math.min(100, Math.round(((i + batch.length) / uploadFiles.length) * 100)) + '%';
+    }
+
+    fill.style.width = '100%';
+    btn.disabled = false; btn.textContent = 'Upload All';
+
+    const summary = document.getElementById('upload-summary');
+    summary.style.display = 'block';
+    summary.innerHTML = `<div class="ustat"><span class="ulabel">Total</span><span>${uploadFiles.length}</span></div>
+      <div class="ustat"><span class="ulabel">Ingested</span><span style="color:var(--success)">${ok}</span></div>
+      ${warn > 0 ? `<div class="ustat"><span class="ulabel">Warnings</span><span style="color:#e8c840">${warn}</span></div>` : ''}
+      ${err > 0 ? `<div class="ustat"><span class="ulabel">Errors</span><span style="color:var(--error)">${err}</span></div>` : ''}`;
+  }
 }
 
 async function assignRole(userId) {
