@@ -291,7 +291,7 @@ async function listAvailableData(input: Record<string, any>): Promise<string> {
       .select('business_date')
       .eq('venue_id', venue.id)
       .order('business_date', { ascending: false })
-      .limit(30);
+      .limit(5000);
 
     const uniquePmDates = [...new Set((pmDates ?? []).map(r => r.business_date))];
 
@@ -300,7 +300,7 @@ async function listAvailableData(input: Record<string, any>): Promise<string> {
       .select('business_date')
       .eq('venue_id', venue.id)
       .order('business_date', { ascending: false })
-      .limit(30);
+      .limit(1000);
 
     const uniqueHsDates = [...new Set((hsDates ?? []).map(r => r.business_date))];
 
