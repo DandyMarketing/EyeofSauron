@@ -133,6 +133,14 @@
 
   .btn-danger:hover { background: #c03030; }
 
+  .btn-outline {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .btn-outline:hover { border-color: var(--text-muted); color: var(--text); background: transparent; }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -172,6 +180,12 @@
     display: flex;
     gap: 6px;
     align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .user-actions {
+    display: flex;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
@@ -246,6 +260,51 @@
     padding: 40px;
   }
 
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .modal h3 {
+    font-size: 16px;
+    margin-bottom: 16px;
+  }
+
+  .modal input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    margin-bottom: 16px;
+  }
+
+  .modal input:focus { border-color: var(--accent); }
+
+  .modal-btns {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
   @media (max-width: 600px) {
     .invite-form { flex-direction: column; }
     .invite-form input { min-width: unset; }
@@ -275,6 +334,7 @@
 <script>
 let token = null;
 let venues = [];
+let currentUserId = null;
 
 (async function init() {
   const cfg = await fetch('/api/config').then(r => r.json());
@@ -294,7 +354,6 @@ let venues = [];
 
   token = session.access_token;
 
-  // Check admin access
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
   if (!meRes.ok) {
     window.location.href = '/login.html';
@@ -302,6 +361,7 @@ let venues = [];
   }
 
   const me = await meRes.json();
+  currentUserId = me.id;
   if (!me.isOwner) {
     document.getElementById('app').innerHTML = '<div class="loading">Admin access required. You do not have the owner role.</div>';
     return;
@@ -326,6 +386,12 @@ async function api(method, path, body) {
   return res.json();
 }
 
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString('en-SG', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 async function loadAll() {
   const [usersData, venuesData, systemData] = await Promise.all([
     api('GET', '/admin/api/users'),
@@ -341,7 +407,7 @@ function render(users, system) {
   const app = document.getElementById('app');
   app.innerHTML = '';
 
-  // Invite section
+  // Add User section
   const inviteSection = el('div', 'section');
   inviteSection.innerHTML = `
     <h2>Add User</h2>
@@ -377,7 +443,7 @@ function render(users, system) {
   const usersSection = el('div', 'section');
   let tableHtml = `<h2>Users (${users.length})</h2>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Venue Roles</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
       <tbody>`;
 
   for (const user of users) {
@@ -387,6 +453,7 @@ function render(users, system) {
     ).join(' ');
 
     const venueOpts = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+    const isSelf = user.id === currentUserId;
 
     tableHtml += `<tr>
       <td>${esc(user.full_name || '-')}</td>
@@ -402,6 +469,12 @@ function render(users, system) {
             <option value="owner">Owner</option>
           </select>
           <button class="btn btn-small" onclick="assignRole('${user.id}')">Add</button>
+        </div>
+      </td>
+      <td>
+        <div class="user-actions">
+          <button class="btn btn-small btn-outline" onclick="showResetPassword('${user.id}', '${esc(user.email)}')">Reset pw</button>
+          ${isSelf ? '' : `<button class="btn btn-small btn-danger" onclick="confirmDeleteUser('${user.id}', '${esc(user.email)}')">Delete</button>`}
         </div>
       </td>
     </tr>`;
@@ -437,7 +510,8 @@ function render(users, system) {
       const row = el('div', 'ingestion-row');
       row.innerHTML = `<span class="status-err">${esc(err.status)}</span>
         <span>${esc(err.filename)}</span>
-        <span style="color:var(--text-muted)">${esc(err.error)}</span>`;
+        <span style="color:var(--text-muted)">${esc(err.error)}</span>
+        <span style="color:var(--text-muted)">${fmtTime(err.created_at)}</span>`;
       errCard.appendChild(row);
     }
   } else {
@@ -456,7 +530,8 @@ function render(users, system) {
       row.innerHTML = `<span class="${cls}">${esc(ing.status)}</span>
         <span>${esc(ing.filename)}</span>
         <span style="color:var(--text-muted)">${ing.business_date || ''}</span>
-        <span style="color:var(--text-muted)">${ing.row_count ? ing.row_count + ' rows' : ''}</span>`;
+        <span style="color:var(--text-muted)">${ing.row_count ? ing.row_count + ' rows' : ''}</span>
+        <span style="color:var(--text-muted)">${fmtTime(ing.created_at)}</span>`;
       ingCard.appendChild(row);
     }
   }
@@ -485,6 +560,52 @@ async function removeRole(roleId) {
     toast('success', 'Role removed');
     await loadAll();
   }
+}
+
+function confirmDeleteUser(userId, email) {
+  if (!confirm('Delete user ' + email + '? This removes all their roles and access.')) return;
+  doDeleteUser(userId);
+}
+
+async function doDeleteUser(userId) {
+  const res = await api('DELETE', `/admin/api/users/${userId}`);
+  if (res.error) {
+    toast('error', res.error);
+  } else {
+    toast('success', 'User deleted');
+    await loadAll();
+  }
+}
+
+function showResetPassword(userId, email) {
+  const overlay = el('div', 'modal-overlay');
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Reset password</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">${email}</p>
+      <input type="password" id="reset-pw-input" placeholder="New password">
+      <div class="modal-btns">
+        <button class="btn btn-small btn-outline" id="reset-cancel">Cancel</button>
+        <button class="btn btn-small" id="reset-confirm">Reset</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('reset-cancel').onclick = () => overlay.remove();
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  document.getElementById('reset-confirm').onclick = async () => {
+    const pw = document.getElementById('reset-pw-input').value;
+    if (!pw) return;
+    const res = await api('POST', `/admin/api/users/${userId}/reset-password`, { password: pw });
+    overlay.remove();
+    if (res.error) {
+      toast('error', res.error);
+    } else {
+      toast('success', 'Password reset');
+    }
+  };
 }
 
 function el(tag, cls) {

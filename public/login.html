@@ -148,6 +148,14 @@
     </form>
 
     <div id="msg" class="message"></div>
+
+    <div id="forgot-section" style="margin-top:20px">
+      <a href="#" id="forgot-link" style="color:var(--text-muted);font-size:13px;text-decoration:none">Forgot password?</a>
+      <div id="forgot-form" style="display:none;margin-top:12px">
+        <input type="email" id="forgot-email" placeholder="Enter your email" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:14px;font-family:inherit;outline:none;margin-bottom:10px">
+        <button class="btn" id="forgot-btn" style="font-size:13px;padding:10px">Send reset link</button>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -191,6 +199,34 @@
       submitBtn.textContent = 'Sign in';
     } else {
       window.location.href = '/';
+    }
+  });
+
+  // Forgot password
+  document.getElementById('forgot-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('forgot-form').style.display = 'block';
+    document.getElementById('forgot-link').style.display = 'none';
+  });
+
+  document.getElementById('forgot-btn').addEventListener('click', async () => {
+    const email = document.getElementById('forgot-email').value.trim();
+    if (!email) return;
+    const forgotBtn = document.getElementById('forgot-btn');
+    forgotBtn.disabled = true;
+    forgotBtn.textContent = 'Sending...';
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + '/reset-password.html',
+    });
+
+    if (error) {
+      showMsg('error', error.message);
+      forgotBtn.disabled = false;
+      forgotBtn.textContent = 'Send reset link';
+    } else {
+      showMsg('success', 'Check your email for the password reset link.');
+      forgotBtn.textContent = 'Sent';
     }
   });
 })();

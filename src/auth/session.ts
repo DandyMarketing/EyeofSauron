@@ -97,4 +97,16 @@ export async function removeRole(roleId: string) {
   if (error) throw new Error(error.message);
 }
 
+export async function deleteUser(userId: string) {
+  await supabaseAdmin.from('user_venue_roles').delete().eq('user_id', userId);
+  await supabaseAdmin.from('profiles').delete().eq('id', userId);
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function resetUserPassword(userId: string, newPassword: string) {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) throw new Error(error.message);
+}
+
 export { supabaseAdmin };

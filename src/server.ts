@@ -7,7 +7,7 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
-import { validateSession, listUsers, inviteUser, assignRole, removeRole, supabaseAdmin } from './auth/session.js';
+import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
 import type { ProductMixRow, OperationsData, HourlySalesData } from './parsers/revel/types.js';
@@ -275,6 +275,36 @@ app.delete('/admin/api/roles/:roleId', async (c) => {
 
   try {
     await removeRole(c.req.param('roleId'));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.delete('/admin/api/users/:userId', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const userId = c.req.param('userId');
+  if (userId === user.id) return c.json({ error: 'Cannot delete yourself' }, 400);
+
+  try {
+    await deleteUser(userId);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.post('/admin/api/users/:userId/reset-password', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { password } = await c.req.json();
+  if (!password) return c.json({ error: 'Password required' }, 400);
+
+  try {
+    await resetUserPassword(c.req.param('userId'), password);
     return c.json({ ok: true });
   } catch (e: any) {
     return c.json({ error: e.message }, 400);
