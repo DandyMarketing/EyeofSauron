@@ -60,7 +60,8 @@ async function queryProductMix(input: Record<string, any>): Promise<string> {
   let query = supabase
     .from('product_mix')
     .select('name, row_type, class, category, subcategory, qty, sales, pct_total, parent_product, business_date')
-    .eq('venue_id', venueId);
+    .eq('venue_id', venueId)
+    .limit(10000);
 
   query = applyDateFilter(query, dateFilter);
   if (rowType !== 'all') query = query.eq('row_type', rowType);
@@ -220,6 +221,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       .eq('venue_id', venue.id);
 
     query = applyDateFilter(query, dateFilter);
+    query = query.limit(1000);
     const { data: rows } = await query;
     if (!rows || rows.length === 0) continue;
 
@@ -323,7 +325,8 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
   let query = supabase
     .from('hourly_sales')
     .select('business_date, meal_period, transactions, items, sales')
-    .eq('venue_id', venueId);
+    .eq('venue_id', venueId)
+    .limit(5000);
 
   query = applyDateFilter(query, dateFilter);
 
