@@ -53,6 +53,13 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
         .eq('business_date', date);
       if (!count || count === 0) gaps.push('product_mix');
 
+      const { count: hsCount } = await supabase
+        .from('hourly_sales')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venue.id)
+        .eq('business_date', date);
+      if (!hsCount || hsCount === 0) gaps.push('hourly_sales');
+
       if (gaps.length > 0) {
         missing.push({ venue: venue.name, slug: venue.slug, date, missing: gaps });
       }

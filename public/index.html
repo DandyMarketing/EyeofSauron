@@ -342,9 +342,10 @@
       <h1>Sauron</h1>
       <div class="subtitle">The Dandy Collection - AI Business Advisor</div>
     </div>
-    <nav style="margin-left:auto;display:flex;gap:16px;font-size:14px">
+    <nav id="nav" style="margin-left:auto;display:flex;gap:16px;font-size:14px">
       <a href="/" style="color:var(--accent);text-decoration:none">Chat</a>
-      <a href="/upload.html" style="color:var(--text-muted);text-decoration:none">Upload</a>
+      <a href="/admin.html" id="admin-link" style="color:var(--text-muted);text-decoration:none;display:none">Admin</a>
+      <a href="#" id="logout-link" style="color:var(--text-muted);text-decoration:none;display:none">Logout</a>
     </nav>
   </header>
 
@@ -382,6 +383,42 @@ const welcome = document.getElementById('welcome');
 
 let history = [];
 let busy = false;
+let authToken = null;
+let supabaseClient = null;
+
+(async function initAuth() {
+  const cfg = await fetch('/api/config').then(r => r.json());
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
+
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  supabaseClient = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) {
+    window.location.href = '/login.html';
+    return;
+  }
+
+  authToken = session.access_token;
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    authToken = session?.access_token || null;
+    if (!authToken) window.location.href = '/login.html';
+  });
+
+  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } });
+  if (meRes.ok) {
+    const me = await meRes.json();
+    if (me.isOwner) document.getElementById('admin-link').style.display = '';
+  }
+
+  document.getElementById('logout-link').style.display = '';
+  document.getElementById('logout-link').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await supabaseClient.auth.signOut();
+    window.location.href = '/login.html';
+  });
+})();
 
 function autoResize() {
   input.style.height = 'auto';
@@ -520,9 +557,12 @@ async function send() {
   addTyping();
 
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
     const res = await fetch('/ask', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ question, history }),
     });
 

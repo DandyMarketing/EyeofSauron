@@ -45,8 +45,14 @@ export interface QueryResult {
 export async function askSauron(
   question: string,
   history: ChatMessage[] = [],
+  venueFilter?: string[],
 ): Promise<QueryResult> {
   const toolCalls: QueryResult['toolCalls'] = [];
+
+  let systemPrompt = SYSTEM_PROMPT;
+  if (venueFilter && venueFilter.length > 0) {
+    systemPrompt += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
+  }
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -56,7 +62,7 @@ export async function askSauron(
   let response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 2048,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     tools: queryTools,
     messages,
   });
@@ -80,7 +86,7 @@ export async function askSauron(
     response = await client.messages.create({
       model: 'claude-sonnet-5',
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: queryTools,
       messages,
     });
