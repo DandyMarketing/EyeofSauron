@@ -264,7 +264,7 @@
     <div class="drop-zone" id="drop-zone">
       <div class="icon">+</div>
       <strong>Drop CSV/XLSX files here or click to browse</strong>
-      <p>Accepts Product_Mix_*.csv and Operations_Report_*.csv</p>
+      <p>Accepts Product_Mix, Operations_Report, and Hourly_Sales_Report files (.csv/.xlsx)</p>
     </div>
     <input type="file" id="file-input" multiple accept=".csv,.xlsx">
 
@@ -287,7 +287,8 @@
       Expected patterns:<br>
       <code>Product_Mix_Report_[venue]_YYYYMMDD_YYYYMMDD.csv</code><br>
       <code>Product_Mix_Daily_Report_[venue]_YYYYMMDD_YYYYMMDD.csv</code><br>
-      <code>Operations_Report_[venue]_YYYYMMDD_YYYYMMDD.csv</code>
+      <code>Operations_Report_[venue]_YYYYMMDD_YYYYMMDD.csv</code><br>
+      <code>Hourly_Sales_Report_[venue]_YYYY-MM-DD_YYYY-MM-DD.xlsx</code>
     </div>
   </div>
 
@@ -360,7 +361,7 @@ function renderList() {
     item.className = 'file-item';
     item.id = 'file-' + i;
 
-    const isValid = /^(Product_Mix|Operations_Report)/i.test(f.name);
+    const isValid = /^(Product_Mix|Operations_Report|Hourly_Sales_Report)/i.test(f.name);
 
     item.innerHTML =
       '<span class="name">' + escapeHtml(f.name) + '</span>' +
