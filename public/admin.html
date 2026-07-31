@@ -344,11 +344,12 @@ function render(users, system) {
   // Invite section
   const inviteSection = el('div', 'section');
   inviteSection.innerHTML = `
-    <h2>Invite User</h2>
+    <h2>Add User</h2>
     <form class="invite-form" id="invite-form">
       <input type="email" id="invite-email" placeholder="Email address" required>
       <input type="text" id="invite-name" placeholder="Full name (optional)">
-      <button type="submit" class="btn">Invite</button>
+      <input type="password" id="invite-password" placeholder="Password" required style="min-width:140px">
+      <button type="submit" class="btn">Create</button>
     </form>
   `;
   app.appendChild(inviteSection);
@@ -357,15 +358,17 @@ function render(users, system) {
     e.preventDefault();
     const email = document.getElementById('invite-email').value.trim();
     const name = document.getElementById('invite-name').value.trim();
-    if (!email) return;
+    const password = document.getElementById('invite-password').value;
+    if (!email || !password) return;
 
-    const res = await api('POST', '/admin/api/users/invite', { email, full_name: name });
+    const res = await api('POST', '/admin/api/users/invite', { email, full_name: name, password });
     if (res.error) {
       toast('error', res.error);
     } else {
-      toast('success', 'Invite sent to ' + email);
+      toast('success', 'User created: ' + email);
       document.getElementById('invite-email').value = '';
       document.getElementById('invite-name').value = '';
+      document.getElementById('invite-password').value = '';
       await loadAll();
     }
   });

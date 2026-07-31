@@ -68,9 +68,12 @@ export async function listUsers() {
   }));
 }
 
-export async function inviteUser(email: string, fullName: string) {
-  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    data: { full_name: fullName },
+export async function inviteUser(email: string, fullName: string, password: string) {
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: fullName },
   });
   if (error) throw new Error(error.message);
   return data.user;

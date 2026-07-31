@@ -60,7 +60,7 @@
   }
 
   .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     text-align: left;
   }
 
@@ -71,7 +71,8 @@
     margin-bottom: 6px;
   }
 
-  input[type="email"] {
+  input[type="email"],
+  input[type="password"] {
     width: 100%;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -84,8 +85,8 @@
     transition: border-color 0.2s;
   }
 
-  input[type="email"]:focus { border-color: var(--accent); }
-  input[type="email"]::placeholder { color: var(--text-muted); }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--text-muted); }
 
   .btn {
     width: 100%;
@@ -99,6 +100,7 @@
     font-family: inherit;
     cursor: pointer;
     transition: background 0.2s, opacity 0.2s;
+    margin-top: 8px;
   }
 
   .btn:hover { background: var(--accent-dim); }
@@ -125,13 +127,6 @@
     background: rgba(64, 192, 96, 0.08);
     border: 1px solid rgba(64, 192, 96, 0.2);
   }
-
-  .message.info {
-    display: block;
-    color: var(--text-muted);
-    background: rgba(136, 136, 160, 0.08);
-    border: 1px solid rgba(136, 136, 160, 0.2);
-  }
 </style>
 </head>
 <body>
@@ -142,10 +137,14 @@
 
     <form id="login-form">
       <div class="form-group">
-        <label for="email">Email address</label>
+        <label for="email">Email</label>
         <input type="email" id="email" placeholder="you@staydandy.com" required>
       </div>
-      <button type="submit" class="btn" id="submit-btn">Send magic link</button>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" required>
+      </div>
+      <button type="submit" class="btn" id="submit-btn">Sign in</button>
     </form>
 
     <div id="msg" class="message"></div>
@@ -162,23 +161,6 @@
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
-  // Check if returning from magic link (hash contains access_token)
-  if (window.location.hash.includes('access_token')) {
-    const params = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
-    if (accessToken && refreshToken) {
-      const { error } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-      if (!error) {
-        window.location.href = '/';
-        return;
-      }
-    }
-  }
-
   // Check existing session
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
@@ -188,29 +170,27 @@
 
   const form = document.getElementById('login-form');
   const emailInput = document.getElementById('email');
+  const passwordInput = document.getElementById('password');
   const submitBtn = document.getElementById('submit-btn');
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = emailInput.value.trim();
-    if (!email) return;
+    const password = passwordInput.value;
+    if (!email || !password) return;
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Sending...';
+    submitBtn.textContent = 'Signing in...';
     hideMsg();
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin + '/login.html' },
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       showMsg('error', error.message);
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Send magic link';
+      submitBtn.textContent = 'Sign in';
     } else {
-      showMsg('success', 'Check your email for the login link.');
-      submitBtn.textContent = 'Link sent';
+      window.location.href = '/';
     }
   });
 })();

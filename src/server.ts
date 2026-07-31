@@ -242,11 +242,11 @@ app.post('/admin/api/users/invite', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { email, full_name } = await c.req.json();
-  if (!email) return c.json({ error: 'Email required' }, 400);
+  const { email, full_name, password } = await c.req.json();
+  if (!email || !password) return c.json({ error: 'Email and password required' }, 400);
 
   try {
-    const invited = await inviteUser(email, full_name ?? '');
+    const invited = await inviteUser(email, full_name ?? '', password);
     return c.json({ user: { id: invited.id, email: invited.email } });
   } catch (e: any) {
     return c.json({ error: e.message }, 400);
