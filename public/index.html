@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Sauron - The Dandy Collection</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -21,11 +21,16 @@
     --error: #e84040;
   }
 
+  html, body {
+    height: 100%;
+  }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -214,6 +219,7 @@
 
   #input-area {
     padding: 16px 20px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
@@ -329,9 +335,13 @@
   @media (max-width: 600px) {
     header { padding: 12px 16px; }
     #chat { padding: 12px; gap: 12px; }
-    .bubble { max-width: 92%; }
-    #input-area { padding: 12px 16px; }
+    .bubble { max-width: 92%; font-size: 14px; }
+    #input-area { padding: 12px 16px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+    .welcome { padding: 24px 16px; }
+    .welcome h2 { font-size: 20px; }
+    .welcome p { font-size: 13px; }
     .suggestions { flex-direction: column; }
+    .suggestion { font-size: 13px; padding: 10px 12px; }
   }
 </style>
 </head>
@@ -380,6 +390,12 @@ const chat = document.getElementById('chat');
 const input = document.getElementById('question');
 const sendBtn = document.getElementById('send');
 const welcome = document.getElementById('welcome');
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    document.body.style.height = window.visualViewport.height + 'px';
+  });
+}
 
 let history = [];
 let busy = false;
