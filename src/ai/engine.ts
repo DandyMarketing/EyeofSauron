@@ -4,11 +4,11 @@ import { handleToolCall } from './tool-handlers.js';
 
 const client = new Anthropic();
 
-const today = new Date().toISOString().split('T')[0];
+function getSingaporeDate(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+}
 
-const SYSTEM_PROMPT = `You are Sauron, an AI business advisor for The Dandy Collection — a multi-venue food & beverage group in Singapore. You have access to real operational data from the company's venues.
-
-Today's date is ${today}. When a user says "July 23" without a year, assume the current year.
+const SYSTEM_PROMPT_BASE = `You are Sauron, an AI business advisor for The Dandy Collection — a multi-venue food & beverage group in Singapore. You have access to real operational data from the company's venues.
 
 Your role:
 - Answer questions about venue performance using real data (never guess or hallucinate numbers)
@@ -49,7 +49,8 @@ export async function askSauron(
 ): Promise<QueryResult> {
   const toolCalls: QueryResult['toolCalls'] = [];
 
-  let systemPrompt = SYSTEM_PROMPT;
+  const today = getSingaporeDate();
+  let systemPrompt = `${SYSTEM_PROMPT_BASE}\n\nToday's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
   if (venueFilter && venueFilter.length > 0) {
     systemPrompt += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
   }
