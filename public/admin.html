@@ -461,17 +461,18 @@ function fmtTime(iso) {
 }
 
 async function loadAll() {
-  const [usersData, venuesData, systemData] = await Promise.all([
+  const [usersData, venuesData, systemData, notesData] = await Promise.all([
     api('GET', '/admin/api/users'),
     api('GET', '/admin/api/venues'),
     api('GET', '/admin/api/system?days=3'),
+    api('GET', '/admin/api/notes'),
   ]);
 
   venues = venuesData.venues || [];
-  render(usersData.users || [], systemData);
+  render(usersData.users || [], systemData, notesData.notes || []);
 }
 
-function render(users, system) {
+function render(users, system, notes) {
   const app = document.getElementById('app');
   app.innerHTML = '';
 
@@ -606,6 +607,60 @@ function render(users, system) {
   sysSection.appendChild(ingCard);
 
   app.appendChild(sysSection);
+
+  // Venue Notes section (AI context)
+  const notesSection = el('div', 'section');
+  const venueOpts2 = '<option value="">All venues</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+  let notesHtml = `<h2>AI Context Notes</h2>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Notes you add here are fed to the AI on every query. Use them to give Sauron business context it can't get from numbers alone — promotions, events, operational changes, goals.</p>
+    <div class="invite-form" id="note-form-container">
+      <select id="note-venue" style="min-width:140px">${venueOpts2}</select>
+      <select id="note-category" style="min-width:120px">
+        <option value="general">General</option>
+        <option value="operations">Operations</option>
+        <option value="menu">Menu</option>
+        <option value="events">Events</option>
+        <option value="promotions">Promotions</option>
+        <option value="goals">Goals</option>
+      </select>
+      <input type="text" id="note-text" placeholder="e.g. Fat Prince runs happy hour 5-7pm weekdays with 20% off drinks" style="flex:2;min-width:240px">
+      <button class="btn" id="note-add-btn">Add</button>
+    </div>`;
+
+  if (notes.length > 0) {
+    notesHtml += '<div style="margin-top:12px">';
+    for (const n of notes) {
+      const venueName = n.venues?.name || 'All venues';
+      notesHtml += `<div class="file-item" style="margin-bottom:6px">
+        <span class="role-badge role-${n.category === 'operations' ? 'manager' : n.category === 'promotions' ? 'owner' : n.category === 'goals' ? 'finance' : 'staff'}">${esc(n.category)}</span>
+        <span style="color:var(--accent);font-size:12px;flex-shrink:0">${esc(venueName)}</span>
+        <span class="fname">${esc(n.note)}</span>
+        <span class="fsize">${fmtTime(n.created_at)}</span>
+        <button class="fremove" onclick="deleteNote('${n.id}')">&times;</button>
+      </div>`;
+    }
+    notesHtml += '</div>';
+  } else {
+    notesHtml += '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">No notes yet. Add context to make the AI smarter about your business.</div>';
+  }
+
+  notesSection.innerHTML = notesHtml;
+  app.appendChild(notesSection);
+
+  document.getElementById('note-add-btn').addEventListener('click', async () => {
+    const noteText = document.getElementById('note-text').value.trim();
+    if (!noteText) return;
+    const venueId = document.getElementById('note-venue').value;
+    const category = document.getElementById('note-category').value;
+    const res = await api('POST', '/admin/api/notes', { venue_id: venueId || null, note: noteText, category });
+    if (res.error) {
+      toast('error', res.error);
+    } else {
+      toast('success', 'Note added');
+      document.getElementById('note-text').value = '';
+      await loadAll();
+    }
+  });
 
   // Upload section
   const uploadSection = el('div', 'section');
@@ -784,6 +839,16 @@ function showResetPassword(userId, email) {
       toast('success', 'Password reset');
     }
   };
+}
+
+async function deleteNote(noteId) {
+  const res = await api('DELETE', `/admin/api/notes/${noteId}`);
+  if (res.error) {
+    toast('error', res.error);
+  } else {
+    toast('success', 'Note deleted');
+    await loadAll();
+  }
 }
 
 function el(tag, cls) {

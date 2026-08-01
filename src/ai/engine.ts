@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
+import { supabase } from '../lib/supabase.js';
 
 const client = new Anthropic();
 
@@ -53,6 +54,19 @@ export async function askSauron(
   let systemPrompt = `${SYSTEM_PROMPT_BASE}\n\nToday's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
   if (venueFilter && venueFilter.length > 0) {
     systemPrompt += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
+  }
+
+  const { data: notes } = await supabase
+    .from('venue_notes')
+    .select('note, category, venues(name)')
+    .order('created_at', { ascending: false });
+
+  if (notes && notes.length > 0) {
+    const notesText = notes.map((n: any) => {
+      const venue = n.venues?.name ?? 'All venues';
+      return `- [${venue}/${n.category}] ${n.note}`;
+    }).join('\n');
+    systemPrompt += `\n\nVenue context notes (use these to inform your analysis and recommendations):\n${notesText}`;
   }
 
   const messages: Anthropic.MessageParam[] = [

@@ -311,6 +311,50 @@ app.post('/admin/api/users/:userId/reset-password', async (c) => {
   }
 });
 
+// --- Venue notes (AI context) ---
+
+app.get('/admin/api/notes', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data } = await supabaseAdmin
+    .from('venue_notes')
+    .select('id, venue_id, note, category, created_at, venues(name)')
+    .order('created_at', { ascending: false });
+
+  return c.json({ notes: data ?? [] });
+});
+
+app.post('/admin/api/notes', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { venue_id, note, category } = await c.req.json();
+  if (!note) return c.json({ error: 'Note text required' }, 400);
+
+  const { data, error } = await supabaseAdmin
+    .from('venue_notes')
+    .insert({ venue_id: venue_id || null, note, category: category || 'general' })
+    .select()
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ note: data });
+});
+
+app.delete('/admin/api/notes/:noteId', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { error } = await supabaseAdmin
+    .from('venue_notes')
+    .delete()
+    .eq('id', c.req.param('noteId'));
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ ok: true });
+});
+
 app.get('/admin/api/venues', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
