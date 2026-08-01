@@ -8,16 +8,17 @@ if (!apiToken) {
   process.exit(1);
 }
 
-const lookbackDays = parseInt(process.argv[2] || '7', 10);
 const dryRun = process.argv.includes('--dry-run');
 
 if (dryRun) console.log('=== DRY RUN — no database writes ===\n');
 
-console.log(`Monday.com meal period ingestion — last ${lookbackDays} days\n`);
+console.log('Monday.com meal period ingestion\n');
 
 const venueBoards = getVenueBoards();
-let totalInserted = 0, totalUpdated = 0, totalMerged = 0, totalSkipped = 0;
-let reconciliationWarnings: string[] = [];
+let totalInserted = 0, totalUpdated = 0, totalMerged = 0;
+let totalLocked = 0, totalBlocked = 0, totalSkipped = 0;
+const reconciliationFailures: string[] = [];
+const postLockChanges: string[] = [];
 
 for (const [slug, config] of Object.entries(venueBoards)) {
   for (const boardId of config.boards) {
@@ -25,7 +26,7 @@ for (const [slug, config] of Object.entries(venueBoards)) {
 
     let items;
     try {
-      items = await fetchBoardItems(boardId, apiToken, lookbackDays);
+      items = await fetchBoardItems(boardId, apiToken);
     } catch (err: any) {
       console.error(`  FETCH ERROR: ${err.message}`);
       await logIngestion({
@@ -43,19 +44,30 @@ for (const [slug, config] of Object.entries(venueBoards)) {
     const results = await ingestMondayItems(slug, items, { dryRun });
 
     for (const r of results) {
-      if (r.action === 'inserted') totalInserted++;
-      if (r.action === 'updated') totalUpdated++;
-      if (r.action === 'merged') totalMerged++;
-      if (r.action === 'skipped') totalSkipped++;
+      switch (r.action) {
+        case 'inserted': totalInserted++; break;
+        case 'updated': totalUpdated++; break;
+        case 'merged': totalMerged++; break;
+        case 'locked': totalLocked++; break;
+        case 'blocked': totalBlocked++; break;
+        case 'skipped': totalSkipped++; break;
+      }
 
-      if (r.error) {
+      if (r.error && r.action === 'blocked') {
+        postLockChanges.push(`${slug} ${r.date}: ${r.error}`);
+        console.warn(`  [BLOCKED] ${r.date}: post-lock change detected`);
+      } else if (r.error) {
         console.error(`  [ERROR] ${r.date}: ${r.error}`);
       }
 
       if (r.reconciliation && !r.reconciliation.passed) {
         const msg = `${slug} ${r.date}: Monday $${r.reconciliation.mondayGross.toFixed(2)} vs Revel $${r.reconciliation.revelGross.toFixed(2)} (diff $${r.reconciliation.difference.toFixed(2)})`;
-        reconciliationWarnings.push(msg);
-        console.warn(`  [RECON WARN] ${msg}`);
+        reconciliationFailures.push(msg);
+        console.warn(`  [RECON FAIL] ${msg}`);
+      }
+
+      if (r.action === 'locked') {
+        console.log(`  [LOCKED] ${r.date}: reconciled & frozen`);
       }
     }
 
@@ -70,26 +82,41 @@ for (const [slug, config] of Object.entries(venueBoards)) {
         venue_id: config.venueId,
         report_type: 'monday_meals' as any,
         filename: `board:${boardId}`,
-        status: 'success',
-        row_count: results.filter(r => r.action !== 'skipped').length,
+        status: totalSkipped > 0 ? 'ingestion_error' : 'success',
+        row_count: results.filter(r => r.action !== 'skipped' && r.action !== 'blocked').length,
       });
     }
   }
 }
 
 console.log('\n--- Summary ---');
-console.log(`Inserted: ${totalInserted}`);
-console.log(`Updated:  ${totalUpdated}`);
-console.log(`Merged:   ${totalMerged} (Revel + Monday meal periods)`);
-console.log(`Skipped:  ${totalSkipped}`);
+console.log(`Inserted:  ${totalInserted} (new Monday-only rows)`);
+console.log(`Updated:   ${totalUpdated} (meal periods refreshed)`);
+console.log(`Merged:    ${totalMerged} (added to Revel row, awaiting exact match)`);
+console.log(`Locked:    ${totalLocked} (reconciled to the cent, frozen)`);
+console.log(`Blocked:   ${totalBlocked} (post-lock change rejected)`);
+console.log(`Skipped:   ${totalSkipped} (errors)`);
 
-if (reconciliationWarnings.length > 0) {
-  console.log(`\n⚠ ${reconciliationWarnings.length} RECONCILIATION WARNING(S):`);
-  for (const w of reconciliationWarnings) {
-    console.log(`  ${w}`);
+if (reconciliationFailures.length > 0) {
+  console.log(`\nRECONCILIATION FAILURES (${reconciliationFailures.length}):`);
+  console.log('  Monday meal period totals do NOT match Revel daily totals.');
+  console.log('  These rows are ingested but NOT locked — they need review.');
+  for (const w of reconciliationFailures) {
+    console.log(`  - ${w}`);
   }
-} else {
-  console.log('\nReconciliation: all merged rows within tolerance');
 }
 
-process.exit(totalSkipped > 0 ? 1 : 0);
+if (postLockChanges.length > 0) {
+  console.log(`\nPOST-LOCK CHANGES BLOCKED (${postLockChanges.length}):`);
+  console.log('  Someone changed data on Monday.com after it was reconciled & locked.');
+  console.log('  Changes were REJECTED. Alerts logged to reconciliation_alerts table.');
+  for (const w of postLockChanges) {
+    console.log(`  - ${w}`);
+  }
+}
+
+if (reconciliationFailures.length === 0 && postLockChanges.length === 0) {
+  console.log('\nAll clear — no reconciliation issues.');
+}
+
+process.exit(totalSkipped > 0 || postLockChanges.length > 0 ? 1 : 0);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
@@ -30,13 +31,12 @@ export interface ReconciliationResult {
   mondayGross: number;
   revelGross: number;
   difference: number;
-  tolerance: number;
 }
 
 export interface IngestionResult {
   venue: string;
   date: string;
-  action: 'inserted' | 'updated' | 'merged' | 'skipped';
+  action: 'inserted' | 'updated' | 'merged' | 'locked' | 'blocked' | 'skipped';
   reconciliation?: ReconciliationResult;
   error?: string;
 }
@@ -204,70 +204,53 @@ function deriveTotals(mealPeriods: Record<string, MealPeriodData>, totalScManual
   return { grossSales, netSales, totalCovers, totalDiscounts, effectiveSC };
 }
 
-const RECONCILIATION_TOLERANCE = 5.0; // $5 tolerance
+export function hashMealPeriods(mealPeriods: Record<string, MealPeriodData>): string {
+  const sorted = JSON.stringify(mealPeriods, Object.keys(mealPeriods).sort());
+  return createHash('sha256').update(sorted).digest('hex');
+}
 
 export function reconcileMondayVsRevel(
   mondayGross: number,
   revelGross: number,
 ): ReconciliationResult {
-  const difference = Math.abs(mondayGross - revelGross);
+  const difference = Math.round(Math.abs(mondayGross - revelGross) * 100) / 100;
   return {
-    passed: difference <= RECONCILIATION_TOLERANCE,
+    passed: difference === 0,
     mondayGross,
     revelGross,
     difference,
-    tolerance: RECONCILIATION_TOLERANCE,
   };
+}
+
+async function raiseAlert(alert: {
+  venue_id: string;
+  business_date: string;
+  alert_type: 'mismatch' | 'post_lock_change' | 'reconciliation_failed';
+  monday_gross?: number;
+  revel_gross?: number;
+  difference?: number;
+  old_hash?: string;
+  new_hash?: string;
+  old_meal_periods?: Record<string, MealPeriodData>;
+  new_meal_periods?: Record<string, MealPeriodData>;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('reconciliation_alerts')
+    .insert(alert);
+  if (error) {
+    console.error(`  [ALERT DB ERROR] ${error.message}`);
+  }
 }
 
 export async function fetchBoardItems(
   boardId: number,
   apiToken: string,
-  lookbackDays: number,
 ): Promise<MondayItem[]> {
   const allItems: MondayItem[] = [];
   let cursor: string | null = null;
-
-  const query = cursor === null
-    ? `query ($boardId: [ID!]!, $limit: Int!) {
-        boards(ids: $boardId) {
-          items_page(limit: $limit) {
-            cursor
-            items {
-              id
-              name
-              created_at
-              column_values { id text }
-            }
-          }
-        }
-      }`
-    : `query ($boardId: [ID!]!, $limit: Int!, $cursor: String!) {
-        boards(ids: $boardId) {
-          items_page(limit: $limit, cursor: $cursor) {
-            cursor
-            items {
-              id
-              name
-              created_at
-              column_values { id text }
-            }
-          }
-        }
-      }`;
-
   const LIMIT = 500;
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
-  const cutoff = cutoffDate.toISOString().split('T')[0];
 
   while (true) {
-    const variables: Record<string, unknown> = {
-      boardId: [String(boardId)],
-      limit: LIMIT,
-    };
-    if (cursor) variables.cursor = cursor;
-
     const gqlQuery = cursor
       ? `query ($boardId: [ID!]!, $limit: Int!, $cursor: String!) {
           boards(ids: $boardId) {
@@ -285,6 +268,12 @@ export async function fetchBoardItems(
             }
           }
         }`;
+
+    const variables: Record<string, unknown> = {
+      boardId: [String(boardId)],
+      limit: LIMIT,
+    };
+    if (cursor) variables.cursor = cursor;
 
     const res = await fetch(MONDAY_API, {
       method: 'POST',
@@ -367,43 +356,92 @@ export async function ingestMondayItems(
 
     const totalScManual = getCol(item, COLUMN_IDS.total_sc_manual);
     const totals = deriveTotals(mealPeriods, totalScManual);
+    const newHash = hashMealPeriods(mealPeriods);
 
     const { data: existing } = await supabase
       .from('daily_operations')
-      .select('id, data_source, gross_sales')
+      .select('id, data_source, gross_sales, locked_at, meal_periods_hash, meal_periods')
       .eq('venue_id', venueId)
       .eq('business_date', date)
       .maybeSingle();
+
+    // ── LOCKED ROW: reject changes, raise alert if data differs ──
+    if (existing?.locked_at) {
+      if (existing.meal_periods_hash !== newHash) {
+        if (!options.dryRun) {
+          await raiseAlert({
+            venue_id: venueId,
+            business_date: date,
+            alert_type: 'post_lock_change',
+            old_hash: existing.meal_periods_hash,
+            new_hash: newHash,
+            old_meal_periods: existing.meal_periods,
+            new_meal_periods: mealPeriods,
+          });
+        }
+        results.push({
+          venue: venueSlug, date, action: 'blocked',
+          error: `Row locked at ${existing.locked_at} — incoming data differs (alert raised)`,
+        });
+      }
+      // Same hash = no change, nothing to do
+      continue;
+    }
 
     let action: IngestionResult['action'];
     let reconciliation: ReconciliationResult | undefined;
 
     if (existing && existing.data_source === 'revel') {
-      // Revel row exists — merge in meal periods, reconcile first
-      if (existing.gross_sales && totals.grossSales > 0) {
-        reconciliation = reconcileMondayVsRevel(totals.grossSales, existing.gross_sales);
-      }
+      // ── MERGE: Revel row exists, add meal periods ──
+      reconciliation = (existing.gross_sales && totals.grossSales > 0)
+        ? reconcileMondayVsRevel(totals.grossSales, existing.gross_sales)
+        : undefined;
 
       if (!options.dryRun) {
+        const updateData: Record<string, unknown> = {
+          meal_periods: mealPeriods,
+          meal_periods_hash: newHash,
+          data_source: 'both',
+        };
+
+        // Lock if reconciliation passes (exact match)
+        if (reconciliation?.passed) {
+          updateData.locked_at = new Date().toISOString();
+        }
+
         const { error } = await supabase
           .from('daily_operations')
-          .update({
-            meal_periods: mealPeriods,
-            data_source: 'both',
-          })
+          .update(updateData)
           .eq('id', existing.id);
 
         if (error) {
           results.push({ venue: venueSlug, date, action: 'skipped', reconciliation, error: error.message });
           continue;
         }
+
+        if (reconciliation && !reconciliation.passed) {
+          await raiseAlert({
+            venue_id: venueId,
+            business_date: date,
+            alert_type: 'reconciliation_failed',
+            monday_gross: reconciliation.mondayGross,
+            revel_gross: reconciliation.revelGross,
+            difference: reconciliation.difference,
+          });
+        }
       }
-      action = 'merged';
+      action = reconciliation?.passed ? 'locked' : 'merged';
 
     } else if (existing && (existing.data_source === 'monday' || existing.data_source === 'both')) {
-      // Monday or merged row — update meal periods
+      // ── UPDATE: Monday/both row exists — overwrite meal periods ──
+      if (existing.meal_periods_hash === newHash) continue; // no change
+
       if (!options.dryRun) {
-        const updateData: Record<string, unknown> = { meal_periods: mealPeriods };
+        const updateData: Record<string, unknown> = {
+          meal_periods: mealPeriods,
+          meal_periods_hash: newHash,
+        };
+
         if (existing.data_source === 'monday') {
           updateData.gross_sales = totals.grossSales || null;
           updateData.net_sales = totals.netSales || null;
@@ -411,6 +449,24 @@ export async function ingestMondayItems(
           updateData.taxed_service_fee = totals.effectiveSC;
           updateData.total_guests = totals.totalCovers || null;
         }
+
+        // If data_source is 'both', try reconciliation for locking
+        if (existing.data_source === 'both' && existing.gross_sales && totals.grossSales > 0) {
+          reconciliation = reconcileMondayVsRevel(totals.grossSales, existing.gross_sales);
+          if (reconciliation.passed) {
+            updateData.locked_at = new Date().toISOString();
+          } else {
+            await raiseAlert({
+              venue_id: venueId,
+              business_date: date,
+              alert_type: 'reconciliation_failed',
+              monday_gross: reconciliation.mondayGross,
+              revel_gross: reconciliation.revelGross,
+              difference: reconciliation.difference,
+            });
+          }
+        }
+
         const { error } = await supabase
           .from('daily_operations')
           .update(updateData)
@@ -421,10 +477,10 @@ export async function ingestMondayItems(
           continue;
         }
       }
-      action = 'updated';
+      action = (reconciliation?.passed) ? 'locked' : 'updated';
 
     } else {
-      // No existing row — insert as monday source
+      // ── INSERT: no existing row ──
       if (!options.dryRun) {
         const { error } = await supabase
           .from('daily_operations')
@@ -437,6 +493,7 @@ export async function ingestMondayItems(
             taxed_service_fee: totals.effectiveSC,
             total_guests: totals.totalCovers || null,
             meal_periods: mealPeriods,
+            meal_periods_hash: newHash,
             data_source: 'monday',
           });
 
@@ -456,9 +513,4 @@ export async function ingestMondayItems(
 
 export function getVenueBoards(): typeof VENUE_BOARDS {
   return VENUE_BOARDS;
-}
-
-export function updateVenueBoards(slug: string, boardIds: number[]): void {
-  if (!VENUE_BOARDS[slug]) throw new Error(`Unknown venue: ${slug}`);
-  VENUE_BOARDS[slug].boards = boardIds;
 }
