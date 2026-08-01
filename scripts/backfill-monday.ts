@@ -183,6 +183,12 @@ interface ParsedRecord {
   total_sc_manual: number;
 }
 
+const JUNK_NAMES = new Set(['bluesheets_21feb_lunch', 'test 2', 'new item']);
+
+function parseDateFromCreatedAt(iso: string): string {
+  return iso.substring(0, 10);
+}
+
 function getCol(item: MondayItem, colId: string): number {
   return parseNum(item.column_values[colId]);
 }
@@ -212,11 +218,15 @@ function processBoard(items: MondayItem[], board: BoardConfig): ParsedRecord[] {
   let unparsed = 0;
 
   for (const item of items) {
-    const date = parseDate(item.name);
-    if (!date) {
-      unparsed++;
-      console.warn(`  [SKIP] Unparseable: "${item.name}"`);
+    if (JUNK_NAMES.has(item.name.toLowerCase().trim())) {
+      console.warn(`  [JUNK] Skipping: "${item.name}"`);
       continue;
+    }
+
+    let date = parseDate(item.name);
+    if (!date) {
+      date = parseDateFromCreatedAt(item.created_at);
+      console.warn(`  [FALLBACK] "${item.name}" -> created_at ${date}`);
     }
 
     const year = parseInt(date.substring(0, 4));
