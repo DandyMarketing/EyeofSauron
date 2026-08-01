@@ -83,36 +83,66 @@ const MONTHS: Record<string, string> = {
   october: '10', november: '11', december: '12',
 };
 
+function isValidDate(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+}
+
+function validOrNull(y: number, m: number, d: number): string | null {
+  if (!isValidDate(y, m, d)) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 function parseDate(raw: string): string | null {
   const s = raw.trim()
-    .replace(/\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i, '')
+    .replace(/[–—]/g, '-')
     .replace(/\s*\(.*\)$/, '')
+    .replace(/[,]+/g, '')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/-+(mon|tue|wed|thu|fri|sat|sun)\w*\.?$/i, '')
+    .replace(/\s+(mon|tue|wed|thu|fri|sat|sun|thr)\w*\.?$/i, '')
+    .replace(/\.+$/, '')
     .trim();
 
+  let m: RegExpMatchArray | null;
+
   // YYYY-MM-DD
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return validOrNull(+m[1], +m[2], +m[3]);
+
+  // YY-MM-DD (e.g. "22-08-17")
+  m = s.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+  if (m) return validOrNull(2000 + +m[1], +m[2], +m[3]);
+
+  // YY-MMDD (e.g. "23-1226")
+  m = s.match(/^(\d{2})-(\d{2})(\d{2})$/);
+  if (m) return validOrNull(2000 + +m[1], +m[2], +m[3]);
+
+  // YYYY-MMDD (e.g. "2023-0728")
+  m = s.match(/^(\d{4})-(\d{2})(\d{2})$/);
+  if (m) return validOrNull(+m[1], +m[2], +m[3]);
+
+  // YY MMDD with space (e.g. "23 0913")
+  m = s.match(/^(\d{2})\s+(\d{2})(\d{2})$/);
+  if (m) return validOrNull(2000 + +m[1], +m[2], +m[3]);
 
   // DD/MM/YYYY
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (m) return validOrNull(+m[3], +m[2], +m[1]);
 
   // DD/MM/YY
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
-  if (m) {
-    const yy = parseInt(m[3]);
-    const year = 2000 + yy;
-    return `${year}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  }
+  if (m) return validOrNull(2000 + +m[3], +m[2], +m[1]);
 
   // DD-Mon-YY or DD Mon YYYY
   m = s.match(/^(\d{1,2})[\s-]([A-Za-z]+)[\s-](\d{2,4})$/);
   if (m) {
     const month = MONTHS[m[2].toLowerCase()];
     if (!month) return null;
-    let year = parseInt(m[3]);
+    let year = +m[3];
     if (year < 100) year = 2000 + year;
-    return `${year}-${month}-${m[1].padStart(2, '0')}`;
+    return validOrNull(year, +month, +m[1]);
   }
 
   return null;
@@ -319,14 +349,25 @@ async function main() {
     console.log(`  ${name}: ${recs.length} days (${dates[0]} to ${dates[dates.length - 1]})`);
   }
 
+  // Deduplicate: if multiple records exist for the same venue+date, keep the primary one
+  const deduped = new Map<string, ParsedRecord>();
+  for (const rec of allRecords) {
+    const key = `${rec.venue_id}:${rec.business_date}`;
+    const existing = deduped.get(key);
+    if (!existing || (rec.is_primary && !existing.is_primary)) {
+      deduped.set(key, rec);
+    }
+  }
+  const finalRecords = [...deduped.values()].sort((a, b) => a.business_date.localeCompare(b.business_date));
+  console.log(`After dedup: ${finalRecords.length} unique records`);
+
   console.log('\nUpserting to daily_operations...');
-  allRecords.sort((a, b) => a.business_date.localeCompare(b.business_date));
 
   let upserted = 0, errors = 0;
   const CHUNK = 50;
 
-  for (let i = 0; i < allRecords.length; i += CHUNK) {
-    const chunk = allRecords.slice(i, i + CHUNK);
+  for (let i = 0; i < finalRecords.length; i += CHUNK) {
+    const chunk = finalRecords.slice(i, i + CHUNK);
     const rows = chunk.map(deriveRow);
 
     const { error } = await supabase
@@ -338,8 +379,8 @@ async function main() {
       errors++;
     } else {
       upserted += rows.length;
-      if ((i + CHUNK) % 500 === 0 || i + CHUNK >= allRecords.length) {
-        console.log(`  ${Math.min(i + CHUNK, allRecords.length)}/${allRecords.length}`);
+      if ((i + CHUNK) % 500 === 0 || i + CHUNK >= finalRecords.length) {
+        console.log(`  ${Math.min(i + CHUNK, finalRecords.length)}/${finalRecords.length}`);
       }
     }
   }
