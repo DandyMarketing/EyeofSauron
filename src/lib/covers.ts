@@ -35,6 +35,42 @@ const CANCELED = 'Canceled';
 const NO_SHOW = 'No Show';
 
 /**
+ * Normalise SevenRooms shift names to canonical meal periods.
+ *
+ * Each venue names its own shifts, and they do not agree. Fat Prince has no
+ * shift called LUNCH or DINNER at all -- its service periods are named "Day"
+ * (arrivals 12-14h) and "Legacy" (arrivals 17-22h), the latter almost
+ * certainly an old shift name that was never renamed. Reporting those
+ * verbatim would give Fat Prince a meal-period breakdown of "legacy" and
+ * "day", which is useless next to the other two venues.
+ *
+ * Known names are mapped explicitly. Anything unrecognised falls back to the
+ * arrival hour rather than being passed through, so a new shift name added in
+ * SevenRooms degrades to a sensible bucket instead of appearing as a
+ * phantom meal period.
+ */
+const SHIFT_MAP: Record<string, string> = {
+  BRUNCH: 'brunch',
+  LUNCH: 'lunch',
+  DINNER: 'dinner',
+  DAY: 'lunch',      // Fat Prince's lunch service
+  LEGACY: 'dinner',  // Fat Prince's dinner service
+};
+
+export function normaliseShift(
+  shiftCategory: string | null | undefined,
+  arrivalTime: string | null | undefined,
+): string {
+  const raw = (shiftCategory ?? '').trim().toUpperCase();
+  const mapped = SHIFT_MAP[raw];
+  if (mapped) return mapped;
+
+  const hour = parseInt(String(arrivalTime ?? '').split(':')[0], 10);
+  if (!Number.isNaN(hour)) return hour < 15 ? 'lunch' : 'dinner';
+  return 'unknown';
+}
+
+/**
  * Fetch SevenRooms covers for a venue across a date range, one summary per day.
  * Returns an empty map when no reservations exist -- callers must handle the
  * gap rather than silently reporting zero covers.
@@ -54,7 +90,7 @@ export async function getCovers(
   for (let offset = 0; ; offset += PAGE) {
     const { data, error } = await supabase
       .from('reservations')
-      .select('business_date, party_size, status_simple, shift_category, is_walk_in')
+      .select('business_date, party_size, status_simple, shift_category, arrival_time, is_walk_in')
       .eq('venue_id', venueId)
       .gte('business_date', fromDate)
       .lte('business_date', toDate)
@@ -92,7 +128,7 @@ export async function getCovers(
 
     if (r.status_simple === COMPLETE) {
       s.covers += size;
-      const shift = (r.shift_category ?? 'UNKNOWN').toLowerCase();
+      const shift = normaliseShift(r.shift_category, r.arrival_time);
       s.by_shift[shift] = (s.by_shift[shift] ?? 0) + size;
       if (r.is_walk_in) s.walk_in_covers += size;
     } else if (r.status_simple === CANCELED) {
