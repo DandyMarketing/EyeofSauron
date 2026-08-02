@@ -110,6 +110,10 @@ function isValidDate(y: number, m: number, d: number): boolean {
 }
 
 function validOrNull(y: number, m: number, d: number): string | null {
+  // A typo'd year (e.g. "2925") is a syntactically valid date, so reject
+  // anything outside the business's plausible range and let the caller fall
+  // back to the item's created_at instead.
+  if (y < 2015 || y > new Date().getFullYear() + 1) return null;
   if (!isValidDate(y, m, d)) return null;
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
