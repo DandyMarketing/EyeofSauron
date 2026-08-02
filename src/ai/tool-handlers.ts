@@ -91,7 +91,56 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     }
 
     if (rows.length === 0) {
-      results.push({ venue: venue.name, slug: venue.slug, message: 'No SevenRooms reservations for this date range.' });
+      // No reservations is ambiguous on its own: the venue may have been shut,
+      // or the feed may have failed. Revel settles it. If the POS took money
+      // and served guests, reservations are genuinely missing and someone
+      // should look. If it took nothing, the venue was closed and there is
+      // nothing to chase -- Super Firangi is shut every Sunday, so treating
+      // those as failures would cry wolf weekly.
+      const { data: posRows } = await supabase
+        .from('daily_operations')
+        .select('business_date, gross_sales, total_guests')
+        .eq('venue_id', venue.id)
+        .gte('business_date', range.from)
+        .lte('business_date', range.to);
+
+      const posGross = (posRows ?? []).reduce((a: number, o: any) => a + Number(o.gross_sales ?? 0), 0);
+      const posGuests = (posRows ?? []).reduce((a: number, o: any) => a + Number(o.total_guests ?? 0), 0);
+
+      // Revel lands nightly (~04:26 SGT), so a missing POS row means different
+      // things depending on the date's age: recently, that it has not arrived
+      // yet; a week back, that the venue never traded.
+      const ageDays = Math.floor((Date.now() - new Date(`${range.to}T00:00:00Z`).getTime()) / 86_400_000);
+
+      let status: string;
+      let message: string;
+      if (!posRows || posRows.length === 0) {
+        if (ageDays <= 1) {
+          status = 'awaiting_revel';
+          message = 'No SevenRooms reservations, and Revel has not landed for this date yet — it arrives nightly around 4:26am SGT. Check again tomorrow before treating this as a gap.';
+        } else {
+          status = 'venue_closed';
+          message = 'Venue was closed — no reservations, and Revel recorded no trading day at all. Not a data gap.';
+        }
+      } else if (posGross <= 0) {
+        status = 'venue_closed';
+        message = 'Venue was closed — no reservations and no POS sales. Not a data gap.';
+      } else if (posGuests <= 0) {
+        status = 'minimal_pos_activity';
+        message = `No reservations, and the POS recorded $${posGross.toLocaleString()} but zero guests — too small to be a service. Likely a test transaction or a private/staff sale rather than a missing feed.`;
+      } else {
+        status = 'data_gap';
+        message = `Reservations are MISSING: the POS recorded $${posGross.toLocaleString()} across ${posGuests} guests but SevenRooms has no bookings. This is a genuine ingestion gap worth escalating.`;
+      }
+
+      results.push({
+        venue: venue.name,
+        slug: venue.slug,
+        status,
+        message,
+        pos_gross_sales: posGross || null,
+        pos_guests: posGuests || null,
+      });
       continue;
     }
 
