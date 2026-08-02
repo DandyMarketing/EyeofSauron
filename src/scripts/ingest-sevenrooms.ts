@@ -6,8 +6,24 @@ import {
 } from '../ingest/sevenrooms.js';
 import { logIngestion } from '../ingest/log.js';
 
-const clientId = process.env.SEVENROOMS_CLIENT_ID;
-const clientSecret = process.env.SEVENROOMS_CLIENT_SECRET;
+// Trim and strip wrapping quotes. Both are 128-char hex, and the API rejects
+// the credential outright for a single leading space, a trailing newline, or
+// a surrounding quote -- all trivially easy to pick up when pasting a value
+// that long into a dashboard, and all indistinguishable from a wrong secret
+// in the resulting 401.
+function cleanCredential(v: string | undefined): string | undefined {
+  if (!v) return v;
+  // Strip ALL whitespace, not just the ends. These credentials are 128-char
+  // hex, so no internal whitespace is ever legitimate -- and a value that long
+  // is usually copied from somewhere that wrapped it, carrying a newline into
+  // the middle of the string. The API rejects that with a plain 401, identical
+  // to a wrong secret, which is near-impossible to spot in a dashboard field
+  // that soft-wraps anyway. Quotes are stripped for the same reason.
+  return v.replace(/\s+/g, '').replace(/^["']|["']$/g, '');
+}
+
+const clientId = cleanCredential(process.env.SEVENROOMS_CLIENT_ID);
+const clientSecret = cleanCredential(process.env.SEVENROOMS_CLIENT_SECRET);
 
 // Print which variables are present before doing anything else. A cron whose
 // config is wrong otherwise dies silently -- no rows written, no log entry,
@@ -15,17 +31,17 @@ const clientSecret = process.env.SEVENROOMS_CLIENT_SECRET;
 // Report lengths, never values. Both SevenRooms credentials are 128-char hex
 // strings -- indistinguishable by eye -- so a swapped or truncated paste is
 // invisible without this. Anything other than 128 is the bug.
-function describe(v: string | undefined): string {
-  if (!v) return 'MISSING';
-  const trimmed = v.trim();
-  const ws = trimmed.length !== v.length ? ' +whitespace' : '';
-  return `set(len ${trimmed.length}${ws})`;
+function describe(raw: string | undefined, cleaned: string | undefined): string {
+  if (!cleaned) return 'MISSING';
+  const fixed = raw !== cleaned ? ' [whitespace/quotes stripped — fix the value in Railway]' : '';
+  const bad = cleaned.length !== 128 ? '  <-- EXPECTED 128' : '';
+  return `set(len ${cleaned.length})${fixed}${bad}`;
 }
 console.log('env: ' + [
   `SUPABASE_URL=${process.env.SUPABASE_URL ? 'set' : 'MISSING'}`,
   `SUPABASE_SERVICE_ROLE_KEY=${process.env.SUPABASE_SERVICE_ROLE_KEY ? 'set' : 'MISSING'}`,
-  `SEVENROOMS_CLIENT_ID=${describe(clientId)}`,
-  `SEVENROOMS_CLIENT_SECRET=${describe(clientSecret)}`,
+  `SEVENROOMS_CLIENT_ID=${describe(process.env.SEVENROOMS_CLIENT_ID, clientId)}`,
+  `SEVENROOMS_CLIENT_SECRET=${describe(process.env.SEVENROOMS_CLIENT_SECRET, clientSecret)}`,
 ].join('  '));
 
 if (!clientId || !clientSecret) {
