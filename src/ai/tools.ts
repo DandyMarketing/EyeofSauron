@@ -48,7 +48,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'query_daily_operations',
-    description: 'Query daily operations summary for a venue: gross/net sales, discounts, taxes, tips, payments, guest count, average check, service fees. Supports single date or date range. For ranges, returns daily breakdown plus totals. Use this for revenue questions, financial summaries, payment breakdowns, discount analysis, trends, and service performance metrics.',
+    description: 'Query daily operations summary for a venue: gross/net sales, discounts, taxes, tips, payments, guest count, average check, average spend per head (gross_sales / guests), service fees. Supports single date or date range. For ranges, returns daily breakdown plus totals with avg_spend_per_head. Use this for revenue questions, financial summaries, payment breakdowns, discount analysis, trends, per-guest spending, and service performance metrics.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -74,7 +74,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'compare_venues',
-    description: 'Compare key metrics across venues for the same date or date range. Returns side-by-side gross sales, net sales, guest count, average check, food/beverage split, and discount rates. For date ranges, metrics are totalled across the period. Use this for benchmarking and cross-venue analysis.',
+    description: 'Compare key metrics across venues for the same date or date range. Returns side-by-side gross sales, net sales, guest count, average check, average spend per head, food/beverage split, and discount rates. For date ranges, metrics are totalled across the period. Use this for benchmarking and cross-venue analysis.',
     input_schema: {
       type: 'object' as const,
       properties: {

@@ -180,6 +180,9 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     totals.total_transactions += Number(d.total_transactions ?? 0);
     totals.total_guests += Number(d.total_guests ?? 0);
 
+    const dayGuests = Number(d.total_guests ?? 0);
+    const dayGross = Number(d.gross_sales ?? 0);
+
     return {
       date: d.business_date,
       gross_sales: d.gross_sales,
@@ -187,6 +190,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
       guests: d.total_guests,
       avg_check: d.avg_check,
+      avg_spend_per_head: dayGuests > 0 ? Number((dayGross / dayGuests).toFixed(2)) : null,
       transactions: d.total_transactions,
     };
   });
@@ -194,12 +198,15 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const avgCheck = totals.total_transactions > 0
     ? Number((totals.net_to_account_for / totals.total_transactions).toFixed(2))
     : 0;
+  const avgSpendPerHead = totals.total_guests > 0
+    ? Number((totals.gross_sales / totals.total_guests).toFixed(2))
+    : null;
   const avgDailyGross = Number((totals.gross_sales / totals.days).toFixed(2));
 
   return JSON.stringify({
     venue: input.venue_slug,
     date_range: dateLabel(dateFilter),
-    totals: { ...totals, avg_check_overall: avgCheck, avg_daily_gross: avgDailyGross },
+    totals: { ...totals, avg_check_overall: avgCheck, avg_spend_per_head: avgSpendPerHead, avg_daily_gross: avgDailyGross },
     daily,
   });
 }
@@ -250,6 +257,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     const discRate = grossSales > 0 ? (totalDisc / grossSales * 100) : 0;
     const avgCheck = transactions > 0 ? Number((netToAccount / transactions).toFixed(2)) : 0;
 
+    const avgSpendPerHead = guests > 0 ? Number((grossSales / guests).toFixed(2)) : null;
+
     results.push({
       venue: venue.name,
       slug: venue.slug,
@@ -266,6 +275,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       net_to_account_for: netToAccount,
       guests,
       avg_check: avgCheck,
+      avg_spend_per_head: avgSpendPerHead,
       transactions,
     });
   }
