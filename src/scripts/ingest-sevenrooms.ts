@@ -12,12 +12,21 @@ const clientSecret = process.env.SEVENROOMS_CLIENT_SECRET;
 // Print which variables are present before doing anything else. A cron whose
 // config is wrong otherwise dies silently -- no rows written, no log entry,
 // indistinguishable from a schedule that never fired.
+// Report lengths, never values. Both SevenRooms credentials are 128-char hex
+// strings -- indistinguishable by eye -- so a swapped or truncated paste is
+// invisible without this. Anything other than 128 is the bug.
+function describe(v: string | undefined): string {
+  if (!v) return 'MISSING';
+  const trimmed = v.trim();
+  const ws = trimmed.length !== v.length ? ' +whitespace' : '';
+  return `set(len ${trimmed.length}${ws})`;
+}
 console.log('env: ' + [
-  ['SUPABASE_URL', !!process.env.SUPABASE_URL],
-  ['SUPABASE_SERVICE_ROLE_KEY', !!process.env.SUPABASE_SERVICE_ROLE_KEY],
-  ['SEVENROOMS_CLIENT_ID', !!clientId],
-  ['SEVENROOMS_CLIENT_SECRET', !!clientSecret],
-].map(([k, v]) => `${k}=${v ? 'set' : 'MISSING'}`).join('  '));
+  `SUPABASE_URL=${process.env.SUPABASE_URL ? 'set' : 'MISSING'}`,
+  `SUPABASE_SERVICE_ROLE_KEY=${process.env.SUPABASE_SERVICE_ROLE_KEY ? 'set' : 'MISSING'}`,
+  `SEVENROOMS_CLIENT_ID=${describe(clientId)}`,
+  `SEVENROOMS_CLIENT_SECRET=${describe(clientSecret)}`,
+].join('  '));
 
 if (!clientId || !clientSecret) {
   console.error('Missing SEVENROOMS_CLIENT_ID or SEVENROOMS_CLIENT_SECRET environment variable');
@@ -86,6 +95,22 @@ try {
   console.log('Authenticated.\n');
 } catch (err: any) {
   console.error(`AUTH FAILED: ${err.message}`);
+  if (/401/.test(err.message)) {
+    console.error('  A 401 means the credentials were rejected, not that they are absent.');
+    console.error('  Both values are 128-char hex and look identical -- check they are not');
+    console.error('  swapped, and that neither was truncated when pasted.');
+  }
+  // Record it. Previously this exited without logging, so an auth failure was
+  // indistinguishable from a cron that never fired.
+  for (const cfg of Object.values(getSevenroomsVenues())) {
+    await logIngestion({
+      venue_id: cfg.venueId,
+      report_type: 'sevenrooms' as any,
+      filename: 'sevenrooms:auth-error',
+      status: 'ingestion_error',
+      error_message: err.message,
+    }).catch(() => {});
+  }
   process.exit(1);
 }
 
