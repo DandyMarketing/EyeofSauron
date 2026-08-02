@@ -327,16 +327,37 @@ export async function ingestReservations(
   }
 
   // Upsert in batches -- a wide date range can exceed a comfortable payload.
+  // Retry transient network failures: a multi-year backfill pushes hundreds of
+  // batches, and a single connection reset would otherwise drop 500 rows and
+  // still report the run as mostly successful.
   const BATCH = 500;
+  const MAX_ATTEMPTS = 4;
+
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    const { error } = await supabase
-      .from('reservations')
-      .upsert(batch, { onConflict: 'sevenrooms_id' });
-    if (error) {
-      summary.errors.push(`batch ${i}-${i + batch.length}: ${error.message}`);
-    } else {
-      summary.upserted += batch.length;
+    let lastError = '';
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const { error } = await supabase
+        .from('reservations')
+        .upsert(batch, { onConflict: 'sevenrooms_id' });
+
+      if (!error) {
+        summary.upserted += batch.length;
+        lastError = '';
+        break;
+      }
+
+      lastError = error.message;
+      const transient = /timeout|connect|reset|network|fetch failed|502|503|504/i.test(error.message);
+      if (!transient || attempt === MAX_ATTEMPTS) break;
+
+      // 1s, 2s, 4s
+      await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+    }
+
+    if (lastError) {
+      summary.errors.push(`batch ${i}-${i + batch.length}: ${lastError}`);
     }
   }
 
