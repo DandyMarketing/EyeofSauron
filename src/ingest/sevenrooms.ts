@@ -199,6 +199,8 @@ export interface IngestSummary {
   fetched: number;
   upserted: number;
   skipped: number;
+  /** Rows the API returned more than once -- see the pagination note below. */
+  duplicates: number;
   errors: string[];
 }
 
@@ -212,19 +214,32 @@ export async function ingestReservations(
   const config = SEVENROOMS_VENUES[slug];
   if (!config) throw new Error(`Unknown venue: ${slug}`);
 
-  const summary: IngestSummary = { slug, fetched: 0, upserted: 0, skipped: 0, errors: [] };
+  const summary: IngestSummary = { slug, fetched: 0, upserted: 0, skipped: 0, duplicates: 0, errors: [] };
 
   const raw = await fetchReservations(token, config.sevenroomsId, fromDate, toDate);
   summary.fetched = raw.length;
 
-  const rows: ReservationRow[] = [];
+  // Deduplicate by reservation id, keeping the last copy seen.
+  //
+  // SevenRooms paginates by integer offset. During service the underlying set
+  // is changing under us -- a booking created or updated between two page
+  // requests shifts every later row along, which can return the same row on
+  // consecutive pages. Postgres then rejects the whole batch with
+  // "ON CONFLICT DO UPDATE command cannot affect row a second time".
+  //
+  // The same race can also push a row across a page boundary so it is never
+  // returned at all. That is not fixable here, but it is self-healing: every
+  // run re-pulls a multi-day window, so a row missed once is picked up next run.
+  const byId = new Map<string, ReservationRow>();
   for (const r of raw) {
     if (!r.id || !r.date) {
       summary.skipped++;
       continue;
     }
-    rows.push(mapReservation(r, config.venueId));
+    byId.set(r.id, mapReservation(r, config.venueId));
   }
+  const rows = [...byId.values()];
+  summary.duplicates = raw.length - summary.skipped - rows.length;
 
   if (options.dryRun || rows.length === 0) {
     summary.upserted = options.dryRun ? rows.length : 0;

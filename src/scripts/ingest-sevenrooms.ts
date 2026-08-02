@@ -78,7 +78,8 @@ for (const [slug, config] of Object.entries(venues)) {
     totalUpserted += s.upserted;
     totalSkipped += s.skipped;
 
-    console.log(`  fetched ${s.fetched} | upserted ${s.upserted} | skipped ${s.skipped}`);
+    const dupNote = s.duplicates > 0 ? ` | deduped ${s.duplicates}` : '';
+    console.log(`  fetched ${s.fetched} | upserted ${s.upserted} | skipped ${s.skipped}${dupNote}`);
     for (const e of s.errors) {
       console.error(`  [ERROR] ${e}`);
       failures.push(`${slug}: ${e}`);

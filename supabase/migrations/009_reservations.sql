@@ -84,6 +84,11 @@ create index if not exists idx_reservations_client
 
 alter table public.reservations enable row level security;
 
+-- Dropped first so this migration can be re-run safely. create policy has no
+-- "if not exists" form, so a second pass would otherwise fail on 42710 and
+-- abort every statement after it.
+drop policy if exists "Users can view reservations for their venues" on public.reservations;
+
 create policy "Users can view reservations for their venues"
   on public.reservations for select
   using (
