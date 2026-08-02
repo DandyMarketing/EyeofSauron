@@ -9,8 +9,33 @@ import { logIngestion } from '../ingest/log.js';
 const clientId = process.env.SEVENROOMS_CLIENT_ID;
 const clientSecret = process.env.SEVENROOMS_CLIENT_SECRET;
 
+// Print which variables are present before doing anything else. A cron whose
+// config is wrong otherwise dies silently -- no rows written, no log entry,
+// indistinguishable from a schedule that never fired.
+console.log('env: ' + [
+  ['SUPABASE_URL', !!process.env.SUPABASE_URL],
+  ['SUPABASE_SERVICE_ROLE_KEY', !!process.env.SUPABASE_SERVICE_ROLE_KEY],
+  ['SEVENROOMS_CLIENT_ID', !!clientId],
+  ['SEVENROOMS_CLIENT_SECRET', !!clientSecret],
+].map(([k, v]) => `${k}=${v ? 'set' : 'MISSING'}`).join('  '));
+
 if (!clientId || !clientSecret) {
   console.error('Missing SEVENROOMS_CLIENT_ID or SEVENROOMS_CLIENT_SECRET environment variable');
+  // Record the misconfiguration if we can reach the database, so the failure
+  // shows up in ingestion-status rather than as an absence of runs.
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { logIngestion: log } = await import('../ingest/log.js');
+    const { getSevenroomsVenues: venues } = await import('../ingest/sevenrooms.js');
+    for (const cfg of Object.values(venues())) {
+      await log({
+        venue_id: cfg.venueId,
+        report_type: 'sevenrooms' as any,
+        filename: 'sevenrooms:config-error',
+        status: 'ingestion_error',
+        error_message: `Missing ${!clientId ? 'SEVENROOMS_CLIENT_ID' : ''}${!clientId && !clientSecret ? ' and ' : ''}${!clientSecret ? 'SEVENROOMS_CLIENT_SECRET' : ''}`,
+      }).catch(() => {});
+    }
+  }
   process.exit(1);
 }
 
