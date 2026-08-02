@@ -44,17 +44,32 @@ export async function getCovers(
   fromDate: string,
   toDate: string,
 ): Promise<Map<string, CoversSummary>> {
-  const { data, error } = await supabase
-    .from('reservations')
-    .select('business_date, party_size, status_simple, shift_category, is_walk_in')
-    .eq('venue_id', venueId)
-    .gte('business_date', fromDate)
-    .lte('business_date', toDate);
+  // Page explicitly. PostgREST caps a single response at 1000 rows, and a
+  // wide date range across a busy venue exceeds that easily -- 60 days of
+  // Fat Prince is ~1650 reservations. Without paging the tail is dropped
+  // silently, which reads as "no SevenRooms data" for the most recent dates
+  // rather than as an error.
+  const PAGE = 1000;
+  const rows: any[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase
+      .from('reservations')
+      .select('business_date, party_size, status_simple, shift_category, is_walk_in')
+      .eq('venue_id', venueId)
+      .gte('business_date', fromDate)
+      .lte('business_date', toDate)
+      .order('business_date', { ascending: true })
+      .range(offset, offset + PAGE - 1);
+
+    if (error) return new Map();
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
 
   const out = new Map<string, CoversSummary>();
-  if (error || !data) return out;
 
-  for (const r of data as any[]) {
+  for (const r of rows) {
     const date = r.business_date;
     let s = out.get(date);
     if (!s) {
