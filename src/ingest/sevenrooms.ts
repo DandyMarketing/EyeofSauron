@@ -77,20 +77,40 @@ export interface RawReservation {
 }
 
 /**
- * Fetch every reservation for a venue across a date range, following the
- * cursor until the API stops returning one. The cursor is an integer offset.
+ * SevenRooms refuses to page beyond 4000 results for a single query --
+ * "Result set limited to 4000 results". Any date range busier than that
+ * cannot be read in one go, so ranges are split into windows small enough to
+ * stay under it, and a window that still hits the cap is halved and retried.
  */
-export async function fetchReservations(
+const MAX_RESULT_SET = 4000;
+const DEFAULT_WINDOW_DAYS = 28;
+
+function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
+function daysBetween(from: string, to: string): number {
+  return Math.round(
+    (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000,
+  );
+}
+
+/** Page through one window. Throws CAP_HIT if the window is too busy to read. */
+const CAP_HIT = Symbol('result-set-cap');
+
+async function fetchWindow(
   token: string,
   sevenroomsVenueId: string,
   fromDate: string,
   toDate: string,
 ): Promise<RawReservation[]> {
-  const all: RawReservation[] = [];
+  const rows: RawReservation[] = [];
   let cursor: number | null = null;
   let guard = 0;
 
-  while (guard++ < 500) {
+  while (guard++ < 200) {
     const params = new URLSearchParams({
       venue_id: sevenroomsVenueId,
       from_date: fromDate,
@@ -102,18 +122,78 @@ export async function fetchReservations(
     const res = await fetch(`${API_BASE}/reservations?${params}`, {
       headers: { Authorization: token },
     });
-    if (!res.ok) throw new Error(`SevenRooms reservations failed: HTTP ${res.status}`);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (res.status === 400 && /limited to \d+ results/i.test(body)) throw CAP_HIT;
+      throw new Error(`SevenRooms reservations failed: HTTP ${res.status}`);
+    }
 
     const json: any = await res.json();
     const results: RawReservation[] = json?.data?.results ?? [];
-    all.push(...results);
+    rows.push(...results);
+
+    // Treat reaching the cap as a truncated read, not a complete one. Silently
+    // returning 4000 of 5000 rows would look like a successful ingest.
+    if (rows.length >= MAX_RESULT_SET) throw CAP_HIT;
 
     const next = json?.data?.cursor;
     if (next === null || next === undefined || results.length === 0) break;
     cursor = next;
   }
 
+  return rows;
+}
+
+/**
+ * Fetch every reservation for a venue across a date range, splitting the range
+ * into windows that stay under the API's 4000-result ceiling.
+ */
+export async function fetchReservations(
+  token: string,
+  sevenroomsVenueId: string,
+  fromDate: string,
+  toDate: string,
+  windowDays: number = DEFAULT_WINDOW_DAYS,
+): Promise<RawReservation[]> {
+  const all: RawReservation[] = [];
+
+  for (let start = fromDate; start <= toDate; start = addDays(start, windowDays)) {
+    const rawEnd = addDays(start, windowDays - 1);
+    const end = rawEnd > toDate ? toDate : rawEnd;
+    all.push(...(await fetchRangeSplitting(token, sevenroomsVenueId, start, end)));
+    if (end === toDate) break;
+  }
+
   return all;
+}
+
+/** Fetch one window, halving it if the venue was busy enough to hit the cap. */
+async function fetchRangeSplitting(
+  token: string,
+  sevenroomsVenueId: string,
+  from: string,
+  to: string,
+): Promise<RawReservation[]> {
+  try {
+    return await fetchWindow(token, sevenroomsVenueId, from, to);
+  } catch (err) {
+    if (err !== CAP_HIT) throw err;
+
+    const span = daysBetween(from, to);
+    if (span < 1) {
+      // A single day over the cap is not splittable further. Surface it rather
+      // than returning a partial day and calling the ingest a success.
+      throw new Error(
+        `SevenRooms returned more than ${MAX_RESULT_SET} results for a single day (${from}); cannot page past the API limit`,
+      );
+    }
+
+    const mid = addDays(from, Math.floor(span / 2));
+    const left = await fetchRangeSplitting(token, sevenroomsVenueId, from, mid);
+    const right = await fetchRangeSplitting(token, sevenroomsVenueId, addDays(mid, 1), to);
+    return [...left, ...right];
+  }
 }
 
 /**
