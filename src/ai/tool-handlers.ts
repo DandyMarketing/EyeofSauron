@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { getCovers, coversVariance } from '../lib/covers.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -148,13 +149,35 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     const { data, error } = await query.maybeSingle();
     if (error) return JSON.stringify({ error: error.message });
     if (!data) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No operations data found for this venue and date.' });
-    return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), ...data });
+
+    // Covers come from SevenRooms, revenue from Revel. See src/lib/covers.ts.
+    const coversMap = await getCovers(venueId, dateFilter.single, dateFilter.single);
+    const c = coversMap.get(dateFilter.single);
+    const gross = Number(data.gross_sales ?? 0);
+
+    return JSON.stringify({
+      venue: input.venue_slug,
+      date: dateLabel(dateFilter),
+      ...data,
+      covers_source: 'sevenrooms',
+      covers: c?.covers ?? null,
+      covers_by_meal_period: c?.by_shift ?? null,
+      booked_covers: c?.booked_covers ?? null,
+      walk_in_covers: c?.walk_in_covers ?? null,
+      cancelled_covers: c?.cancelled_covers ?? null,
+      no_show_covers: c?.no_show_covers ?? null,
+      avg_spend_per_head: c?.covers ? Number((gross / c.covers).toFixed(2)) : null,
+      covers_check: coversVariance(c?.covers ?? null, data.total_guests),
+    });
   }
 
   // Date range — return daily breakdown + totals
   const { data, error } = await query.order('business_date', { ascending: true });
   if (error) return JSON.stringify({ error: error.message });
   if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date_range: dateLabel(dateFilter), message: 'No operations data found for this venue and date range.' });
+
+  // Covers come from SevenRooms, revenue from Revel. See src/lib/covers.ts.
+  const coversMap = await getCovers(venueId, dateFilter.start, dateFilter.end);
 
   const totals = {
     days: data.length,
@@ -167,7 +190,10 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     net_to_account_for: 0,
     total_transactions: 0,
     total_guests: 0,
+    covers: 0,
   };
+  const coversByShift: Record<string, number> = {};
+  const sopBreaches: Array<{ date: string; sevenrooms_covers: number | null; revel_guests: number | null; variance: number | null }> = [];
 
   const daily = data.map(d => {
     totals.gross_sales += Number(d.gross_sales);
@@ -180,17 +206,38 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     totals.total_transactions += Number(d.total_transactions ?? 0);
     totals.total_guests += Number(d.total_guests ?? 0);
 
-    const dayGuests = Number(d.total_guests ?? 0);
     const dayGross = Number(d.gross_sales ?? 0);
+    const c = coversMap.get(d.business_date);
+    const dayCovers = c?.covers ?? null;
+
+    if (dayCovers !== null) {
+      totals.covers += dayCovers;
+      for (const [shift, n] of Object.entries(c!.by_shift)) {
+        coversByShift[shift] = (coversByShift[shift] ?? 0) + n;
+      }
+    }
+
+    const check = coversVariance(dayCovers, d.total_guests);
+    if (check.status === 'review') {
+      sopBreaches.push({
+        date: d.business_date,
+        sevenrooms_covers: check.sevenrooms_covers,
+        revel_guests: check.revel_guests,
+        variance: check.variance,
+      });
+    }
 
     return {
       date: d.business_date,
       gross_sales: d.gross_sales,
       net_sales: d.net_sales,
       total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
-      guests: d.total_guests,
+      covers: dayCovers,
+      covers_by_meal_period: c?.by_shift ?? null,
+      walk_in_covers: c?.walk_in_covers ?? null,
+      no_show_covers: c?.no_show_covers ?? null,
       avg_check: d.avg_check,
-      avg_spend_per_head: dayGuests > 0 ? Number((dayGross / dayGuests).toFixed(2)) : null,
+      avg_spend_per_head: dayCovers ? Number((dayGross / dayCovers).toFixed(2)) : null,
       transactions: d.total_transactions,
     };
   });
@@ -198,15 +245,27 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const avgCheck = totals.total_transactions > 0
     ? Number((totals.net_to_account_for / totals.total_transactions).toFixed(2))
     : 0;
-  const avgSpendPerHead = totals.total_guests > 0
-    ? Number((totals.gross_sales / totals.total_guests).toFixed(2))
+  const avgSpendPerHead = totals.covers > 0
+    ? Number((totals.gross_sales / totals.covers).toFixed(2))
     : null;
   const avgDailyGross = Number((totals.gross_sales / totals.days).toFixed(2));
 
   return JSON.stringify({
     venue: input.venue_slug,
     date_range: dateLabel(dateFilter),
-    totals: { ...totals, avg_check_overall: avgCheck, avg_spend_per_head: avgSpendPerHead, avg_daily_gross: avgDailyGross },
+    covers_source: 'sevenrooms',
+    revenue_source: 'revel',
+    totals: {
+      ...totals,
+      covers_by_meal_period: coversByShift,
+      avg_check_overall: avgCheck,
+      avg_spend_per_head: avgSpendPerHead,
+      avg_daily_gross: avgDailyGross,
+    },
+    // Days where SevenRooms covers and Revel's paid-guest count disagree by
+    // more than 2. Covers are the SevenRooms number by design; a gap here
+    // means the floor SOP was not followed, not that the figure is wrong.
+    covers_sop_review: sopBreaches.length > 0 ? sopBreaches : undefined,
     daily,
   });
 }
@@ -257,7 +316,22 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     const discRate = grossSales > 0 ? (totalDisc / grossSales * 100) : 0;
     const avgCheck = transactions > 0 ? Number((netToAccount / transactions).toFixed(2)) : 0;
 
-    const avgSpendPerHead = guests > 0 ? Number((grossSales / guests).toFixed(2)) : null;
+    // Covers from SevenRooms, revenue from Revel. See src/lib/covers.ts.
+    const range = 'single' in dateFilter
+      ? { from: dateFilter.single, to: dateFilter.single }
+      : { from: dateFilter.start, to: dateFilter.end };
+    const coversMap = await getCovers(venue.id, range.from, range.to);
+
+    let covers = 0;
+    const coversByShift: Record<string, number> = {};
+    for (const c of coversMap.values()) {
+      covers += c.covers;
+      for (const [shift, n] of Object.entries(c.by_shift)) {
+        coversByShift[shift] = (coversByShift[shift] ?? 0) + n;
+      }
+    }
+
+    const avgSpendPerHead = covers > 0 ? Number((grossSales / covers).toFixed(2)) : null;
 
     results.push({
       venue: venue.name,
@@ -273,14 +347,22 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       tax_total: taxTotal,
       tips,
       net_to_account_for: netToAccount,
-      guests,
+      covers,
+      covers_by_meal_period: coversByShift,
+      revel_guests: guests,
+      covers_check: coversVariance(covers, guests),
       avg_check: avgCheck,
       avg_spend_per_head: avgSpendPerHead,
       transactions,
     });
   }
 
-  return JSON.stringify({ date: dateLabel(dateFilter), venues: results });
+  return JSON.stringify({
+    date: dateLabel(dateFilter),
+    covers_source: 'sevenrooms',
+    revenue_source: 'revel',
+    venues: results,
+  });
 }
 
 async function listAvailableData(input: Record<string, any>): Promise<string> {

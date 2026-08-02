@@ -27,10 +27,16 @@ function daysAgo(n: number): string {
 
 const dryRun = process.argv.includes('--dry-run');
 
-// Default to a rolling 7-day window. Reservations mutate after the fact --
-// a booking becomes COMPLETE or NO_SHOW well after it was made -- so we
-// re-pull recent days rather than only yesterday.
-const fromDate = arg('from') ?? daysAgo(7);
+// Reservations mutate after the fact -- a booking becomes COMPLETE or NO_SHOW
+// well after it was made -- so we always re-pull a window rather than just
+// yesterday. Hourly cron runs pass a tight --days window; the default of 7 is
+// for manual catch-up runs.
+const windowDays = Number(arg('days') ?? 7);
+if (!Number.isFinite(windowDays) || windowDays < 0) {
+  console.error(`Invalid --days "${arg('days')}" (expected a non-negative number)`);
+  process.exit(1);
+}
+const fromDate = arg('from') ?? daysAgo(windowDays);
 const toDate = arg('to') ?? daysAgo(0);
 const onlyVenue = arg('venue');
 

@@ -48,7 +48,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'query_daily_operations',
-    description: 'Query daily operations summary for a venue: gross/net sales, discounts, taxes, tips, payments, guest count, average check, average spend per head (gross_sales / guests), service fees. Supports single date or date range. For ranges, returns daily breakdown plus totals with avg_spend_per_head. Use this for revenue questions, financial summaries, payment breakdowns, discount analysis, trends, per-guest spending, and service performance metrics.',
+    description: 'Query daily operations summary for a venue: gross/net sales, discounts, taxes, tips, payments, covers, average check, average spend per head, service fees. Supports single date or date range. IMPORTANT — two different systems of record: REVENUE always comes from Revel (the POS), and COVERS always come from SevenRooms (the reservation system), because Revel cannot break covers down by meal period. avg_spend_per_head is Revel gross_sales divided by SevenRooms covers. covers_by_meal_period splits covers into brunch/lunch/dinner. Also returns walk_in_covers, no_show_covers and cancelled_covers, which only SevenRooms can see. The covers_check / covers_sop_review fields compare SevenRooms covers against Revel\'s paid-guest count: a gap means the floor team did not log walk-ins or adjust party sizes, so it is a data-entry issue to raise with the venue, NOT a reason to doubt the revenue figure. If covers are null, SevenRooms data has not been ingested for that date.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -74,7 +74,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'compare_venues',
-    description: 'Compare key metrics across venues for the same date or date range. Returns side-by-side gross sales, net sales, guest count, average check, average spend per head, food/beverage split, and discount rates. For date ranges, metrics are totalled across the period. Use this for benchmarking and cross-venue analysis.',
+    description: 'Compare key metrics across venues for the same date or date range. Returns side-by-side gross sales, net sales, covers, average check, average spend per head, food/beverage split, and discount rates. Revenue comes from Revel (the POS); covers come from SevenRooms (the reservation system), including a covers_by_meal_period breakdown. avg_spend_per_head is Revel gross_sales divided by SevenRooms covers. revel_guests and covers_check are included for transparency — a large covers_check variance means that venue is not logging walk-ins properly, which is worth flagging separately from performance. For date ranges, metrics are totalled across the period. Use this for benchmarking and cross-venue analysis.',
     input_schema: {
       type: 'object' as const,
       properties: {
