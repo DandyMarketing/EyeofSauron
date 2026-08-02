@@ -126,6 +126,32 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_reservations',
+    description: 'Query reservation and covers data from SevenRooms for one venue or all venues. This is the ONLY source of booking-level detail — use it for any question about reservations, walk-ins, no-shows, cancellations, booking channels, party sizes, VIPs, or table turn times. Revel (the POS) cannot answer these. Returns: total bookings and covers, a brunch/lunch/dinner split, walk-in vs reservation covers, no-show and cancellation counts and rates, a breakdown by booking channel (booked_by — e.g. "Walk In", "Google Reserve Integration", "Booking Widget", or a staff member\'s name), average party size, VIP count, and average table turn time in minutes. Note covers are the booked party size, so they may differ slightly from the POS guest count; that variance is reported as covers_check and reflects floor data-entry, not a revenue problem.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit to return all three venues side by side.',
+        },
+        business_date: {
+          type: 'string',
+          description: 'Single business date in YYYY-MM-DD format. Use this OR start_date/end_date, not both.',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of date range (inclusive) in YYYY-MM-DD format. Use with end_date.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of date range (inclusive) in YYYY-MM-DD format. Use with start_date.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'query_hourly_sales',
     description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
     input_schema: {

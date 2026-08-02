@@ -59,6 +59,21 @@ async function requireOwner(c: any): Promise<SessionUser | null> {
 
 app.get('/health', (c) => c.json({ status: 'ok', service: 'eyeofsauron' }));
 
+// Which build is actually live. A deploy pointing at a stale branch is
+// otherwise invisible from the outside -- the app answers normally, just with
+// old tools. `tools` lists the AI tool names in this build, so a missing tool
+// is diagnosable without reading deploy logs.
+app.get('/version', async (c) => {
+  const { queryTools } = await import('./ai/tools.js');
+  return c.json({
+    service: 'eyeofsauron',
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA ?? 'unknown',
+    branch: process.env.RAILWAY_GIT_BRANCH ?? 'unknown',
+    deployed_at: process.env.RAILWAY_DEPLOYMENT_ID ? undefined : 'local',
+    tools: queryTools.map(t => t.name),
+  });
+});
+
 // --- Auth info ---
 
 app.get('/api/me', async (c) => {

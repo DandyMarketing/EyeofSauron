@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase.js';
-import { getCovers, coversVariance } from '../lib/covers.js';
+import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -42,6 +42,8 @@ export async function handleToolCall(
       return compareVenues(input);
     case 'query_meal_period_sales':
       return queryMealPeriodSales(input);
+    case 'query_reservations':
+      return queryReservations(input);
     case 'query_hourly_sales':
       return queryHourlySales(input);
     case 'list_available_data':
@@ -51,6 +53,121 @@ export async function handleToolCall(
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
+}
+
+/**
+ * Booking-level detail from SevenRooms. This is the only tool that can answer
+ * walk-in, no-show, cancellation, booking-channel and table-turn questions --
+ * Revel has none of that.
+ */
+async function queryReservations(input: Record<string, any>): Promise<string> {
+  const dateFilter = getDateFilter(input);
+  const range = 'single' in dateFilter
+    ? { from: dateFilter.single, to: dateFilter.single }
+    : { from: dateFilter.start, to: dateFilter.end };
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : allVenues;
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const results = [];
+  for (const venue of venues) {
+    let rows: any[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data } = await supabase
+        .from('reservations')
+        .select('business_date, party_size, status_simple, shift_category, arrival_time, is_walk_in, is_vip, booked_by, duration_min, seated_at, left_at')
+        .eq('venue_id', venue.id)
+        .gte('business_date', range.from)
+        .lte('business_date', range.to)
+        .order('business_date', { ascending: true })
+        .range(offset, offset + 999);
+      if (!data || data.length === 0) break;
+      rows.push(...data);
+      if (data.length < 1000) break;
+    }
+
+    if (rows.length === 0) {
+      results.push({ venue: venue.name, slug: venue.slug, message: 'No SevenRooms reservations for this date range.' });
+      continue;
+    }
+
+    const covers = (f: (r: any) => boolean) =>
+      rows.filter(f).reduce((a, r) => a + Number(r.party_size ?? 0), 0);
+
+    const complete = rows.filter(r => r.status_simple === 'Complete');
+    const byShift: Record<string, number> = {};
+    for (const r of complete) {
+      const s = normaliseShift(r.shift_category, r.arrival_time);
+      byShift[s] = (byShift[s] ?? 0) + Number(r.party_size ?? 0);
+    }
+
+    const byChannel: Record<string, { bookings: number; covers: number }> = {};
+    for (const r of rows) {
+      const k = r.booked_by || 'Unknown';
+      byChannel[k] = byChannel[k] ?? { bookings: 0, covers: 0 };
+      byChannel[k].bookings++;
+      byChannel[k].covers += Number(r.party_size ?? 0);
+    }
+
+    const bookedCovers = covers(() => true);
+    const noShow = rows.filter(r => r.status_simple === 'No Show');
+    const cancelled = rows.filter(r => r.status_simple === 'Canceled');
+
+    // Table turn from actual seated/left stamps, not the booked duration.
+    const turns = complete
+      .filter(r => r.seated_at && r.left_at)
+      .map(r => (new Date(r.left_at).getTime() - new Date(r.seated_at).getTime()) / 60000)
+      .filter(m => m > 0 && m < 480);
+
+    const completedCovers = covers(r => r.status_simple === 'Complete');
+
+    // Revel's paid-guest count over the same range, for the SOP variance check.
+    const { data: ops } = await supabase
+      .from('daily_operations')
+      .select('total_guests')
+      .eq('venue_id', venue.id)
+      .gte('business_date', range.from)
+      .lte('business_date', range.to);
+    const revelGuests = (ops ?? []).reduce((a: number, o: any) => a + Number(o.total_guests ?? 0), 0);
+
+    results.push({
+      venue: venue.name,
+      slug: venue.slug,
+      bookings: rows.length,
+      covers: completedCovers,
+      booked_covers: bookedCovers,
+      covers_by_meal_period: byShift,
+      walk_in_covers: covers(r => r.is_walk_in && r.status_simple === 'Complete'),
+      reservation_covers: covers(r => !r.is_walk_in && r.status_simple === 'Complete'),
+      walk_in_pct: completedCovers > 0
+        ? Number((covers(r => r.is_walk_in && r.status_simple === 'Complete') / completedCovers * 100).toFixed(1))
+        : null,
+      no_show_bookings: noShow.length,
+      no_show_covers: covers(r => r.status_simple === 'No Show'),
+      no_show_rate_pct: rows.length > 0 ? Number((noShow.length / rows.length * 100).toFixed(1)) : null,
+      cancelled_bookings: cancelled.length,
+      cancelled_covers: covers(r => r.status_simple === 'Canceled'),
+      cancellation_rate_pct: rows.length > 0 ? Number((cancelled.length / rows.length * 100).toFixed(1)) : null,
+      avg_party_size: rows.length > 0 ? Number((bookedCovers / rows.length).toFixed(1)) : null,
+      vip_bookings: rows.filter(r => r.is_vip).length,
+      avg_table_turn_min: turns.length > 0 ? Math.round(turns.reduce((a, b) => a + b, 0) / turns.length) : null,
+      by_booking_channel: Object.fromEntries(
+        Object.entries(byChannel).sort((a, b) => b[1].covers - a[1].covers)
+      ),
+      covers_check: coversVariance(completedCovers, revelGuests || null),
+    });
+  }
+
+  return JSON.stringify({
+    date: dateLabel(dateFilter),
+    source: 'sevenrooms',
+    note: 'Covers are the booked party size. Revenue questions must use query_daily_operations (Revel).',
+    venues: results,
+  });
 }
 
 async function queryProductMix(input: Record<string, any>): Promise<string> {
