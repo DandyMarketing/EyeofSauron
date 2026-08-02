@@ -70,7 +70,11 @@ async function main() {
 
   await recentRuns('monday_meals', 'MONDAY.COM — meal periods, hourly 1pm-6pm SGT', 26);
   await recentRuns('sevenrooms', 'SEVENROOMS — reservations, hourly 11am-1am SGT', 4);
-  await recentRuns('operations', 'REVEL OPERATIONS — manual, no schedule yet', 999);
+  // Revel arrives nightly around 04:26 SGT via the Gmail -> n8n -> /ingest/revel
+  // path, not from this repo's cron. 30h allows for a late delivery before
+  // flagging; a genuinely missed night still shows as stale.
+  await recentRuns('operations', 'REVEL OPERATIONS — nightly ~4:26am SGT (Gmail -> n8n)', 30);
+  await recentRuns('product_mix', 'REVEL PRODUCT MIX — nightly ~4:26am SGT (Gmail -> n8n)', 30, 3);
 
   const { data: alerts } = await supabase
     .from('reconciliation_alerts')
