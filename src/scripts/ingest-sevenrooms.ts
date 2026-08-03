@@ -75,6 +75,12 @@ function daysAgo(n: number): string {
   return d.toISOString().split('T')[0];
 }
 
+function daysAhead(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
 const dryRun = process.argv.includes('--dry-run');
 
 // Reservations mutate after the fact -- a booking becomes COMPLETE or NO_SHOW
@@ -86,8 +92,19 @@ if (!Number.isFinite(windowDays) || windowDays < 0) {
   console.error(`Invalid --days "${arg('days')}" (expected a non-negative number)`);
   process.exit(1);
 }
+
+// Sauron is an operations tool, so the forward book matters as much as
+// history: "how many are we expecting tonight" is a more common question than
+// anything about last month. Reservations exist in SevenRooms weeks ahead, so
+// every run pulls forward as well as back.
+const forwardDays = Number(arg('forward') ?? 60);
+if (!Number.isFinite(forwardDays) || forwardDays < 0) {
+  console.error(`Invalid --forward "${arg('forward')}" (expected a non-negative number)`);
+  process.exit(1);
+}
+
 const fromDate = arg('from') ?? daysAgo(windowDays);
-const toDate = arg('to') ?? daysAgo(0);
+const toDate = arg('to') ?? daysAhead(forwardDays);
 const onlyVenue = arg('venue');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

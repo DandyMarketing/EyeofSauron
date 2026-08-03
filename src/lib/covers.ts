@@ -21,13 +21,27 @@ import { supabase } from './supabase.js';
 
 export interface CoversSummary {
   business_date: string;
-  covers: number;              // completed covers -- the headline number
+  covers: number;              // completed covers -- the headline for past dates
   booked_covers: number;       // includes cancellations and no-shows
   walk_in_covers: number;
   cancelled_covers: number;
   no_show_covers: number;
   by_shift: Record<string, number>;   // completed covers per meal period
   bookings: number;
+
+  /**
+   * Covers still expected to arrive: everything not cancelled and not a
+   * no-show. For a past date this equals completed covers; for a future one it
+   * is the book, which is what an operator actually asks for ("how many are we
+   * expecting tonight?").
+   *
+   * This distinction is not cosmetic. Future bookings come back from
+   * SevenRooms as status_simple 'Incomplete' -- never 'Complete' -- so any
+   * count keyed on completion reports zero for every upcoming date.
+   */
+  expected_covers: number;
+  expected_by_shift: Record<string, number>;
+  expected_bookings: number;
 }
 
 const COMPLETE = 'Complete';
@@ -118,6 +132,9 @@ export async function getCovers(
         no_show_covers: 0,
         by_shift: {},
         bookings: 0,
+        expected_covers: 0,
+        expected_by_shift: {},
+        expected_bookings: 0,
       };
       out.set(date, s);
     }
@@ -126,9 +143,18 @@ export async function getCovers(
     s.bookings++;
     s.booked_covers += size;
 
+    const shift = normaliseShift(r.shift_category, r.arrival_time);
+
+    // Anything not cancelled and not a no-show is still expected. Covers both
+    // completed past bookings and 'Incomplete' upcoming ones.
+    if (r.status_simple !== CANCELED && r.status_simple !== NO_SHOW) {
+      s.expected_covers += size;
+      s.expected_bookings++;
+      s.expected_by_shift[shift] = (s.expected_by_shift[shift] ?? 0) + size;
+    }
+
     if (r.status_simple === COMPLETE) {
       s.covers += size;
-      const shift = normaliseShift(r.shift_category, r.arrival_time);
       s.by_shift[shift] = (s.by_shift[shift] ?? 0) + size;
       if (r.is_walk_in) s.walk_in_covers += size;
     } else if (r.status_simple === CANCELED) {

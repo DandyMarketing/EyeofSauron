@@ -189,9 +189,16 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       // yet; a week back, that the venue never traded.
       const ageDays = Math.floor((Date.now() - new Date(`${range.to}T00:00:00Z`).getTime()) / 86_400_000);
 
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+
       let status: string;
       let message: string;
-      if (!posRows || posRows.length === 0) {
+      if (range.from > todayStr) {
+        // A future date with no bookings is an empty book, not a failure and
+        // not a closure. Revel obviously has nothing for it either.
+        status = 'no_bookings_yet';
+        message = 'No reservations on the book for this future date yet. That is an empty book, not a data problem.';
+      } else if (!posRows || posRows.length === 0) {
         if (ageDays <= 1) {
           status = 'awaiting_revel';
           message = 'No SevenRooms reservations, and Revel has not landed for this date yet — it arrives nightly around 4:26am SGT. Check again tomorrow before treating this as a gap.';
@@ -251,6 +258,26 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
 
     const completedCovers = covers(r => r.status_simple === 'Complete');
 
+    // Upcoming bookings are 'Incomplete' in SevenRooms, never 'Complete', so a
+    // completion-based count reports zero for every future date. Report the
+    // book instead: everything not cancelled and not a no-show.
+    const expectedCovers = covers(r => r.status_simple !== 'Canceled' && r.status_simple !== 'No Show');
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+    // Today is neither past nor future: service is part-done. Reporting
+    // completed covers for tonight answers "how many have finished eating",
+    // when the operator asked "how many are we expecting". Treat today like an
+    // upcoming date for the headline, and report arrivals separately.
+    const isToday = range.from === today && range.to === today;
+    const isUpcoming = range.from > today || isToday;
+    const spansFuture = range.to > today;
+
+    const expectedByShift: Record<string, number> = {};
+    for (const r of rows) {
+      if (r.status_simple === 'Canceled' || r.status_simple === 'No Show') continue;
+      const sh = normaliseShift(r.shift_category, r.arrival_time);
+      expectedByShift[sh] = (expectedByShift[sh] ?? 0) + Number(r.party_size ?? 0);
+    }
+
     // Revel's paid-guest count over the same range, for the SOP variance check.
     const { data: ops } = await supabase
       .from('daily_operations')
@@ -263,10 +290,20 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     results.push({
       venue: venue.name,
       slug: venue.slug,
+      period: isToday ? 'today_in_progress' : isUpcoming ? 'upcoming' : spansFuture ? 'includes_future_dates' : 'historical',
       bookings: rows.length,
-      covers: completedCovers,
+      // For upcoming dates report the book; for past dates report what actually
+      // happened. Both are always present so the model can be explicit.
+      covers: isUpcoming ? expectedCovers : completedCovers,
+      covers_meaning: isToday
+        ? `EXPECTED covers for today — service is still in progress. ${completedCovers} of these have finished dining so far; the rest are still to come or currently seated.`
+        : isUpcoming
+          ? 'EXPECTED covers — guests booked in and not yet cancelled. These have not happened yet.'
+          : 'COMPLETED covers — guests who actually dined.',
+      expected_covers: expectedCovers,
+      completed_covers: completedCovers,
       booked_covers: bookedCovers,
-      covers_by_meal_period: byShift,
+      covers_by_meal_period: isUpcoming ? expectedByShift : byShift,
       walk_in_covers: covers(r => r.is_walk_in && r.status_simple === 'Complete'),
       reservation_covers: covers(r => !r.is_walk_in && r.status_simple === 'Complete'),
       walk_in_pct: completedCovers > 0
@@ -284,7 +321,7 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       by_booking_channel: Object.fromEntries(
         Object.entries(byChannel).sort((a, b) => b[1].covers - a[1].covers)
       ),
-      covers_check: coversVariance(completedCovers, revelGuests || null),
+      covers_check: isUpcoming ? undefined : coversVariance(completedCovers, revelGuests || null),
     });
   }
 
