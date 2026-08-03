@@ -498,15 +498,32 @@ function renderMarkdown(text) {
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
   // Tables
+  //
+  // Split a "| a | b | c |" row into cells. Only the leading and trailing
+  // empties (either side of the outer pipes) are dropped -- an empty cell in
+  // the MIDDLE is a real column and must be kept. Discarding blanks shifts
+  // every later value one column left, so a row with no cancellations rendered
+  // its covers under "Avg Party Size".
+  function splitTableRow(row) {
+    const parts = row.split('|');
+    if (parts.length && parts[0].trim() === '') parts.shift();
+    if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
+    return parts.map(c => c.trim());
+  }
+
   html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (match, headerRow, sepRow, bodyRows) => {
-    const headers = headerRow.split('|').filter(c => c.trim());
+    const headers = splitTableRow(headerRow);
     let table = '<table><thead><tr>';
-    headers.forEach(h => { table += '<th>' + h.trim() + '</th>'; });
+    headers.forEach(h => { table += '<th>' + h + '</th>'; });
     table += '</tr></thead><tbody>';
     bodyRows.trim().split('\n').forEach(row => {
-      const cells = row.split('|').filter(c => c.trim());
+      if (!row.trim()) return;
+      const cells = splitTableRow(row);
+      // Pad short rows and drop overflow so every row keeps the header's shape.
+      // A ragged row should leave a blank cell, never re-align the ones after it.
+      while (cells.length < headers.length) cells.push('');
       table += '<tr>';
-      cells.forEach(c => { table += '<td>' + c.trim() + '</td>'; });
+      for (let i = 0; i < headers.length; i++) table += '<td>' + cells[i] + '</td>';
       table += '</tr>';
     });
     table += '</tbody></table>';
