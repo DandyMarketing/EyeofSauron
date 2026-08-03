@@ -323,6 +323,9 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     const isUpcoming = range.from > today || isToday;
     const spansFuture = range.to > today;
 
+    const activeBookings = rows.filter(r => r.status_simple !== 'Canceled' && r.status_simple !== 'No Show').length;
+    const completedBookings = rows.filter(r => r.status_simple === 'Complete').length;
+
     const expectedByShift: Record<string, number> = {};
     for (const r of rows) {
       if (r.status_simple === 'Canceled' || r.status_simple === 'No Show') continue;
@@ -367,7 +370,18 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       cancelled_bookings: cancelled.length,
       cancelled_covers: covers(r => r.status_simple === 'Canceled'),
       cancellation_rate_pct: rows.length > 0 ? Number((cancelled.length / rows.length * 100).toFixed(1)) : null,
-      avg_party_size: rows.length > 0 ? Number((bookedCovers / rows.length).toFixed(1)) : null,
+      // Average party size must sit on the same basis as the headline covers
+      // figure. Dividing booked covers (which include cancellations) by total
+      // bookings reported an average for guests who are not coming -- a fully
+      // cancelled day showed 0 expected covers and an average party of 4.5.
+      active_bookings: activeBookings,
+      cancelled_or_noshow_bookings: rows.length - activeBookings,
+      avg_party_size: isUpcoming
+        ? (activeBookings > 0 ? Number((expectedCovers / activeBookings).toFixed(1)) : null)
+        : (completedBookings > 0 ? Number((completedCovers / completedBookings).toFixed(1)) : null),
+      avg_party_size_basis: isUpcoming
+        ? 'expected covers / bookings still live (cancellations and no-shows excluded)'
+        : 'completed covers / completed bookings',
       vip_bookings: rows.filter(r => r.is_vip).length,
       avg_table_turn_min: turns.length > 0 ? Math.round(turns.reduce((a, b) => a + b, 0) / turns.length) : null,
       by_booking_channel: Object.fromEntries(
