@@ -184,6 +184,39 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'create_chart',
+    description: 'Draw a chart from warehouse data and show it to the user. Call this WHENEVER the answer covers a trend over time — several weeks, months or years — because a line is far easier to read than a column of numbers. Also use it to compare venues side by side. You supply only the metric, venues, dates and chart type; the server re-queries the warehouse and plots the real figures, so never put numbers in this call and never describe a chart you have not created. The chart appears above your reply — reference it and interpret it in words (what moved, when, and why it matters), do not just restate every value. Available metrics: gross_sales, net_sales, avg_check, covers, avg_spend_per_head, walk_in_pct, no_show_rate. Bucketing is chosen automatically — daily under ~5 weeks, weekly under ~4 months, monthly beyond — so a multi-month request produces a readable monthly line rather than hundreds of daily points. You may call this more than once for different metrics.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        metric: {
+          type: 'string',
+          enum: ['gross_sales', 'net_sales', 'avg_check', 'covers', 'avg_spend_per_head', 'walk_in_pct', 'no_show_rate'],
+          description: 'What to plot. Revenue metrics come from Revel; covers, walk-in and no-show come from SevenRooms.',
+        },
+        start_date: { type: 'string', description: 'Start of range (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of range (inclusive), YYYY-MM-DD.' },
+        venue_slugs: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Venues to plot: "neon-pigeon", "fat-prince", "super-firangi". Omit for all three, which draws one line per venue for comparison.',
+        },
+        granularity: {
+          type: 'string',
+          enum: ['day', 'week', 'month'],
+          description: 'Bucket size. Omit to let the server choose based on the range length — usually correct.',
+        },
+        chart_type: {
+          type: 'string',
+          enum: ['line', 'bar'],
+          description: 'Use "line" for anything over time (the default). Use "bar" only for comparing a handful of discrete buckets.',
+        },
+        title: { type: 'string', description: 'Optional title. Omit for a sensible default.' },
+      },
+      required: ['metric', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'web_search',
     description: 'Search the web for external context to enrich your analysis. Use this for: industry benchmarks (e.g. "average food cost % casual dining Singapore"), local events or holidays that may impact sales, F&B trends, weather data, competitive analysis, or any external reference that would strengthen a recommendation. Do NOT use this for internal data — use the database tools for that.',
     input_schema: {

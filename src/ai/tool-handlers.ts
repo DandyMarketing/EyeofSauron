@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
+import { buildChart } from './charts.js';
+import { renderChartSvg } from './chart-svg.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -48,11 +50,86 @@ export async function handleToolCall(
       return queryHourlySales(input);
     case 'list_available_data':
       return listAvailableData(input);
+    case 'create_chart':
+      return createChart(input);
     case 'web_search':
       return webSearch(input);
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
+}
+
+/**
+ * Build a chart from warehouse data.
+ *
+ * The model passes parameters only; every plotted number is re-queried here.
+ * The SVG is returned alongside a compact summary so the model can interpret
+ * the shape of the data without the full point list bloating its context.
+ */
+async function createChart(input: Record<string, any>): Promise<string> {
+  const spec = await buildChart({
+    metric: input.metric,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    venue_slugs: input.venue_slugs,
+    granularity: input.granularity,
+    chart_type: input.chart_type,
+    title: input.title,
+  });
+
+  if ('error' in spec) return JSON.stringify({ error: spec.error });
+
+  const svg = renderChartSvg(spec);
+
+  // Give the model first/last/min/max per series rather than every point, so it
+  // can describe the trend accurately without re-listing the data.
+  const firstLabel = spec.series[0]?.points[0]?.label;
+  const lastLabel = spec.series[0]?.points[spec.series[0].points.length - 1]?.label;
+
+  const summary = spec.series.map(s => {
+    const vals = s.points.filter(p => p.value !== null) as Array<{ label: string; value: number }>;
+    if (vals.length === 0) return { venue: s.name, note: 'no data in range' };
+
+    // Trend maths ignores partial buckets. A range ending today leaves a stub
+    // period, and measuring two days of a month against full months reads as a
+    // collapse that never happened.
+    const complete = vals.filter(v =>
+      !(spec.partial_first && v.label === firstLabel) &&
+      !(spec.partial_last && v.label === lastLabel));
+    const basis = complete.length >= 2 ? complete : vals;
+
+    const first = basis[0], last = basis[basis.length - 1];
+    const peak = basis.reduce((a, b) => (b.value > a.value ? b : a));
+    const low = basis.reduce((a, b) => (b.value < a.value ? b : a));
+    const partialTail = spec.partial_last && vals[vals.length - 1].label === lastLabel
+      ? { period: lastLabel, value: vals[vals.length - 1].value, note: 'PARTIAL period — not comparable to full ones' }
+      : undefined;
+
+    return {
+      venue: s.name,
+      first: { period: first.label, value: first.value },
+      last: { period: last.label, value: last.value },
+      peak: { period: peak.label, value: peak.value },
+      lowest: { period: low.label, value: low.value },
+      change_pct: first.value !== 0 ? Number((((last.value - first.value) / first.value) * 100).toFixed(1)) : null,
+      partial_final_period: partialTail,
+    };
+  });
+
+  return JSON.stringify({
+    chart_created: true,
+    title: spec.title,
+    metric: spec.metric,
+    granularity: spec.granularity,
+    source: spec.source,
+    periods: spec.series[0]?.points.length ?? 0,
+    summary,
+    note: 'The chart is already displayed to the user. Interpret what it shows — do not list every value.',
+    partial_periods_note: (spec.partial_first || spec.partial_last)
+      ? 'The first and/or last bucket covers only part of its period. change_pct already excludes them. Do NOT describe the final stub period as a decline — say the period is still in progress if you mention it at all.'
+      : undefined,
+    __chart_svg: svg,
+  });
 }
 
 /**

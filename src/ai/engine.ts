@@ -41,6 +41,8 @@ export interface ChatMessage {
 export interface QueryResult {
   answer: string;
   toolCalls: Array<{ name: string; input: Record<string, any> }>;
+  /** SVG charts produced by create_chart, in the order the model asked for them. */
+  charts: Array<{ title: string; svg: string }>;
 }
 
 export async function askSauron(
@@ -49,6 +51,7 @@ export async function askSauron(
   venueFilter?: string[],
 ): Promise<QueryResult> {
   const toolCalls: QueryResult['toolCalls'] = [];
+  const charts: QueryResult['charts'] = [];
 
   const today = getSingaporeDate();
   let systemPrompt = `${SYSTEM_PROMPT_BASE}\n\nToday's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
@@ -92,7 +95,26 @@ export async function askSauron(
       if (block.type === 'tool_use') {
         toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
         const result = await handleToolCall(block.name, block.input as Record<string, any>);
-        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+
+        // create_chart returns rendered SVG. Pull it out for the client and
+        // strip it before the result goes back to the model -- a chart is
+        // several KB of markup that would burn context to no purpose, since
+        // the model already gets a numeric summary alongside it.
+        let forModel = result;
+        if (block.name === 'create_chart') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.__chart_svg) {
+              charts.push({ title: parsed.title ?? 'Chart', svg: parsed.__chart_svg });
+              delete parsed.__chart_svg;
+              forModel = JSON.stringify(parsed);
+            }
+          } catch {
+            // Malformed result: pass it through untouched rather than losing it.
+          }
+        }
+
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: forModel });
       }
     }
 
@@ -110,5 +132,5 @@ export async function askSauron(
   const textBlocks = response.content.filter(b => b.type === 'text');
   const answer = textBlocks.map(b => b.text).join('\n');
 
-  return { answer, toolCalls };
+  return { answer, toolCalls, charts };
 }
