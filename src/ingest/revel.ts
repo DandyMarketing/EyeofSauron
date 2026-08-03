@@ -75,7 +75,7 @@ export async function ingestOperations(
   venueId: string,
   businessDate: string,
   ops: OperationsData,
-): Promise<void> {
+): Promise<number> {
   const totalRow = ops.salesByClass.find(r => r.class.toLowerCase() === 'total');
   const classRows = ops.salesByClass.filter(r => r.class.toLowerCase() !== 'total');
 
@@ -111,12 +111,26 @@ export async function ingestOperations(
     void_comp_reasons: ops.voidCompReasons,
   };
 
+  // A parse that yielded no sales-by-class rows AND no gross or net figure did
+  // not find an operations report -- it found something shaped like one. Fail
+  // loudly instead of writing an empty summary and logging success, which is
+  // indistinguishable from a healthy night once it is in the log.
+  if (classRows.length === 0 && !record.gross_sales && !record.net_sales) {
+    throw new Error(
+      'Operations parse produced no sales-by-class rows and no gross/net sales — treating as a failed extraction, not a zero-sales day',
+    );
+  }
+
   // Upsert by (venue_id, business_date)
   const { error } = await supabase
     .from('daily_operations')
     .upsert(record, { onConflict: 'venue_id,business_date' });
 
   if (error) throw new Error(`Operations upsert failed: ${error.message}`);
+
+  // Returned so the caller can log how much was actually extracted. Logging a
+  // bare "success" with no count made a thin parse look like a full one.
+  return classRows.length;
 }
 
 export async function ingestHourlySales(

@@ -190,9 +190,9 @@ app.post('/ingest/revel', async (c) => {
 
     if (ops?.operations) {
       try {
-        await ingestOperations(venueId, businessDate, ops.operations);
-        results.push({ filename: ops.filename, status: 'ingested' });
-        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success' });
+        const opsRows = await ingestOperations(venueId, businessDate, ops.operations);
+        results.push({ filename: ops.filename, status: 'ingested', detail: `${opsRows} sales-by-class rows` });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success', row_count: opsRows });
       } catch (e: any) {
         results.push({ filename: ops.filename, status: 'error', detail: e.message });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'ingestion_error', error_message: e.message });

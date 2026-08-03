@@ -94,7 +94,7 @@ export async function askSauron(
     for (const block of assistantContent) {
       if (block.type === 'tool_use') {
         toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
-        const result = await handleToolCall(block.name, block.input as Record<string, any>);
+        const result = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter);
 
         // create_chart returns rendered SVG. Pull it out for the client and
         // strip it before the result goes back to the model -- a chart is
