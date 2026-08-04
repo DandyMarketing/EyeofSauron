@@ -145,15 +145,72 @@
 
   .bubble strong { color: var(--accent); font-weight: 600; }
 
+  /* flex:1 + min-width:0 is what makes this fill the message row. Without it
+     the card is a shrink-to-fit flex item, so the SVG's width:100% resolves
+     against a collapsed box and the chart renders at a fraction of its size. */
   .chart-card {
+    flex: 1;
+    min-width: 0;
     background: var(--assistant-bg);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 14px;
-    max-width: 760px;
-    overflow-x: auto;
+    cursor: zoom-in;
+    position: relative;
+    transition: border-color 0.15s;
   }
-  .chart-card svg { display: block; height: auto; }
+  .chart-card:hover { border-color: var(--accent-dim); }
+  .chart-card svg { display: block; width: 100%; height: auto; }
+  .chart-card::after {
+    content: 'Click to enlarge';
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .chart-card:hover::after { opacity: 1; }
+
+  /* Full-screen chart view */
+  #chart-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,5,10,0.92);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    z-index: 1000;
+    cursor: zoom-out;
+  }
+  #chart-modal.open { display: flex; }
+  #chart-modal-inner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    width: 100%;
+    max-width: 1200px;
+    max-height: 90vh;
+    overflow: auto;
+    cursor: default;
+  }
+  #chart-modal-inner svg { display: block; width: 100%; height: auto; }
+  #chart-modal-close {
+    position: absolute;
+    top: 20px;
+    right: 26px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 26px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 10px;
+  }
+  #chart-modal-close:hover { color: var(--text); }
 
   .bubble code {
     background: rgba(255,255,255,0.06);
@@ -400,6 +457,11 @@
   </div>
 </div>
 
+<div id="chart-modal" aria-hidden="true">
+  <button id="chart-modal-close" aria-label="Close chart">&times;</button>
+  <div id="chart-modal-inner"></div>
+</div>
+
 <script>
 const chat = document.getElementById('chat');
 const input = document.getElementById('question');
@@ -547,6 +609,36 @@ function renderMarkdown(text) {
   return html;
 }
 
+// Charts render small inline to keep the conversation readable, so a click
+// opens the same SVG at full width. The SVG has a viewBox, so it scales
+// cleanly rather than being re-rendered at a second size.
+function openChart(svgHtml) {
+  const modal = document.getElementById('chart-modal');
+  document.getElementById('chart-modal-inner').innerHTML = svgHtml;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeChart() {
+  const modal = document.getElementById('chart-modal');
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  document.getElementById('chart-modal-inner').innerHTML = '';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('chart-modal');
+  if (!modal) return;
+  // Backdrop closes; clicks inside the panel do not bubble out and close it.
+  modal.addEventListener('click', closeChart);
+  document.getElementById('chart-modal-inner').addEventListener('click', e => e.stopPropagation());
+  document.getElementById('chart-modal-close').addEventListener('click', closeChart);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeChart();
+});
+
 function addMessage(role, content, isHtml) {
   if (welcome) welcome.remove();
 
@@ -652,6 +744,9 @@ async function send() {
         const wrap = document.createElement('div');
         wrap.className = 'message assistant';
         wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
+        const card = wrap.querySelector('.chart-card');
+        card.title = chart.title || 'Chart';
+        card.addEventListener('click', () => openChart(card.innerHTML));
         chat.appendChild(wrap);
       }
     }

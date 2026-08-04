@@ -19,7 +19,7 @@ const TEXT = '#e4e4ef';
 const MUTED = '#8888a0';
 
 const W = 720;
-const H = 320;
+const H = 360;
 const PAD = { top: 44, right: 20, bottom: 52, left: 64 };
 
 function esc(s: string): string {
@@ -73,7 +73,10 @@ export function renderChartSvg(spec: ChartSpec): string {
   const y = (v: number) => PAD.top + plotH - ((v - minV) / (maxV - minV)) * plotH;
 
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(spec.title)}" style="max-width:${W}px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
+  // No max-width: the viewBox lets this scale to whatever container it lands
+  // in, so the same markup serves the small inline card and the full-screen
+  // view without re-rendering at a second size.
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
   parts.push(`<title>${esc(spec.title)}</title>`);
   parts.push(`<text x="${PAD.left}" y="20" fill="${TEXT}" font-size="14" font-weight="600">${esc(spec.title)}</text>`);
   parts.push(`<text x="${PAD.left}" y="36" fill="${MUTED}" font-size="10">Source: ${esc(spec.source)} · by ${spec.granularity}</text>`);
