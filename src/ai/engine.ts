@@ -24,6 +24,12 @@ Key context:
 - All venues charge a 10% service fee
 - "Gross Sales" = product sales before discounts/tax
 - "Net to Account For" = total cash+card collected (gross - discounts + service fee + tax)
+
+Two per-unit metrics that are NOT interchangeable — always distinguish them:
+- "Average check" = revenue per BILL (per transaction). It rises simply because parties are larger, so it says as much about table mix as about how well the venue sells.
+- "Average spend per cover" (also called spend per head) = revenue per PERSON. This is the real productivity measure: it is what a guest is worth, independent of party size.
+A venue seating big groups can post a high average check and an ordinary spend per cover. When comparing venues or meal periods, lead with spend per cover and quote average check alongside it — reporting only average check will mislead. If spend per cover is unavailable, say so rather than substituting average check for it.
+Transactions are BILLS, never people. Never describe a transaction count as covers.
 - Food cost comes from Zeemart (not yet connected), so COGS in Revel is 0
 - Data is daily granularity from Revel POS
 

@@ -821,19 +821,56 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
 
   const totalSales = [...periods.values()].reduce((s, p) => s + p.sales, 0);
 
+  // Covers per meal period come from SevenRooms; Revel's hourly report has
+  // transactions (bills) but no head count. Without this, the only per-unit
+  // figure available was avg_check, which is revenue per BILL -- a venue
+  // seating large parties looks high on avg_check while its spend per person
+  // may be unremarkable. Both are needed to read a venue correctly.
+  //
+  // Covers must be counted over exactly the dates that have hourly sales, not
+  // the requested range. Hourly sales only exist for a handful of days so far,
+  // while reservations go back years -- summing four days of sales against
+  // thirty days of covers produced a spend per cover of $17 and an average
+  // party of 17 people.
+  const salesDates = new Set<string>(data.map((r: any) => r.business_date));
+  const sortedDates = [...salesDates].sort();
+  const coversMap = await getCovers(venueId, sortedDates[0], sortedDates[sortedDates.length - 1]);
+  const coversByPeriod: Record<string, number> = {};
+  let coversDatesMatched = 0;
+  for (const [date, c] of coversMap) {
+    if (!salesDates.has(date)) continue;
+    coversDatesMatched++;
+    for (const [shift, n] of Object.entries(c.by_shift)) {
+      coversByPeriod[shift] = (coversByPeriod[shift] ?? 0) + n;
+    }
+  }
+
   const result = [...periods.values()].map(p => ({
     period: p.period,
     transactions: p.transactions,
+    covers: coversByPeriod[p.period] ?? null,
     items: p.items,
     sales: p.sales,
     pct_of_total: totalSales > 0 ? Number((p.sales / totalSales * 100).toFixed(1)) : 0,
     avg_check: p.transactions > 0 ? Number((p.sales / p.transactions).toFixed(2)) : null,
+    avg_spend_per_cover: coversByPeriod[p.period]
+      ? Number((p.sales / coversByPeriod[p.period]).toFixed(2))
+      : null,
+    avg_party_size: coversByPeriod[p.period] && p.transactions > 0
+      ? Number((coversByPeriod[p.period] / p.transactions).toFixed(1))
+      : null,
     days_counted: p.days.size,
   }));
 
   return JSON.stringify({
     venue: input.venue_slug,
     date: dateLabel(dateFilter),
+    // Hourly sales only exist for a few days so far. Say which dates these
+    // figures actually cover so the model never presents them as the full range.
+    dates_with_sales_data: sortedDates,
+    days_covered: sortedDates.length,
+    covers_matched_days: coversDatesMatched,
+    coverage_note: `These figures cover only the ${sortedDates.length} day(s) that have hourly sales data, not the whole requested range. Covers are counted over the same days, so avg_spend_per_cover is like-for-like. State the actual dates when reporting.`,
     total_sales: totalSales,
     periods: result,
   });
