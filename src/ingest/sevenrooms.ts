@@ -25,7 +25,7 @@ export const SEVENROOMS_VENUES: Record<string, { venueId: string; sevenroomsId: 
     venueId: 'a0838494-04a6-4f04-8c1f-a8a2e01a3c07',
     // SevenRooms calls this venue "Firangi Superstar"
     sevenroomsId: 'ahNzfnNldmVucm9vbXMtc2VjdXJlchwLEg9uaWdodGxvb3BfVmVudWUYgID0-9f4jgsM',
-    name: 'Super Firangi',
+    name: 'Firangi Superstar',
   },
 };
 

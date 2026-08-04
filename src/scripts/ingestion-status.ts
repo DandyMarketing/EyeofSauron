@@ -15,7 +15,7 @@ import { getCovers, coversVariance } from '../lib/covers.js';
 const VENUE_NAMES: Record<string, string> = {
   '30f4ec07-afc6-4bb4-ba7c-10375b4f68c5': 'Neon Pigeon',
   'c0d03a78-7d28-4a4a-a908-d1719110e881': 'Fat Prince',
-  'a0838494-04a6-4f04-8c1f-a8a2e01a3c07': 'Super Firangi',
+  'a0838494-04a6-4f04-8c1f-a8a2e01a3c07': 'Firangi Superstar',
 };
 
 function venueName(id: string): string {

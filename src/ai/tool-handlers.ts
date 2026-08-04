@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
-import { buildChart } from './charts.js';
+import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 
 async function getVenueId(slug: string): Promise<string> {
@@ -175,6 +175,10 @@ async function createChart(input: Record<string, any>): Promise<string> {
     granularity: spec.granularity,
     source: spec.source,
     periods: spec.series[0]?.points.length ?? 0,
+    closed_days: spec.closed_days || undefined,
+    closed_days_note: spec.closed_days > 0
+      ? 'Some days are absent from the plot because the venue was closed (zero sales, zero transactions). They appear as gaps, not zeros. Do not read a gap as a sales collapse.'
+      : undefined,
     summary,
     note: 'The chart is already displayed to the user. Interpret what it shows — do not list every value.',
     partial_periods_note: (spec.partial_first || spec.partial_last)
@@ -224,7 +228,7 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       // or the feed may have failed. Revel settles it. If the POS took money
       // and served guests, reservations are genuinely missing and someone
       // should look. If it took nothing, the venue was closed and there is
-      // nothing to chase -- Super Firangi is shut every Sunday, so treating
+      // nothing to chase -- Firangi Superstar is shut every Sunday, so treating
       // those as failures would cry wolf weekly.
       const { data: posRows } = await supabase
         .from('daily_operations')
@@ -501,10 +505,15 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     const c = coversMap.get(dateFilter.single);
     const gross = Number(data.gross_sales ?? 0);
 
+    const closedToday = isClosedDay(data);
     return JSON.stringify({
       venue: input.venue_slug,
       date: dateLabel(dateFilter),
       ...data,
+      closed: closedToday,
+      closed_note: closedToday
+        ? 'The venue was CLOSED on this date — zero sales and zero transactions. Report it as a closure, not as poor trading, and leave it out of averages.'
+        : undefined,
       covers_source: 'sevenrooms',
       covers: c?.covers ?? null,
       covers_by_meal_period: c?.by_shift ?? null,
@@ -539,6 +548,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     covers: 0,
   };
   const coversByShift: Record<string, number> = {};
+  const closedDays: string[] = [];
+  let tradingDays = 0;
   const sopBreaches: Array<{ date: string; sevenrooms_covers: number | null; revel_guests: number | null; variance: number | null }> = [];
 
   const daily = data.map(d => {
@@ -555,6 +566,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     const dayGross = Number(d.gross_sales ?? 0);
     const c = coversMap.get(d.business_date);
     const dayCovers = c?.covers ?? null;
+    const dayClosed = isClosedDay(d);
+    if (dayClosed) closedDays.push(d.business_date); else tradingDays++;
 
     if (dayCovers !== null) {
       totals.covers += dayCovers;
@@ -575,6 +588,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
 
     return {
       date: d.business_date,
+      closed: dayClosed || undefined,
       gross_sales: d.gross_sales,
       net_sales: d.net_sales,
       total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
@@ -594,13 +608,20 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const avgSpendPerHead = totals.covers > 0
     ? Number((totals.gross_sales / totals.covers).toFixed(2))
     : null;
-  const avgDailyGross = Number((totals.gross_sales / totals.days).toFixed(2));
+  // Divide by days actually traded. Including a closure drags the average down
+  // and makes a venue that shuts one day a week look weaker than it is.
+  const avgDailyGross = Number((totals.gross_sales / Math.max(1, tradingDays)).toFixed(2));
 
   return JSON.stringify({
     venue: input.venue_slug,
     date_range: dateLabel(dateFilter),
     covers_source: 'sevenrooms',
     revenue_source: 'revel',
+    trading_days: tradingDays,
+    closed_days: closedDays.length > 0 ? closedDays : undefined,
+    closed_days_note: closedDays.length > 0
+      ? 'These dates had zero sales and zero transactions — the venue was closed. avg_daily_gross already excludes them. Describe them as closures, never as weak trading days.'
+      : undefined,
     totals: {
       ...totals,
       covers_by_meal_period: coversByShift,
@@ -671,6 +692,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
 
     let covers = 0;
     const coversByShift: Record<string, number> = {};
+  const closedDays: string[] = [];
+  let tradingDays = 0;
     for (const c of coversMap.values()) {
       covers += c.covers;
       for (const [shift, n] of Object.entries(c.by_shift)) {

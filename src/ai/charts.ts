@@ -34,6 +34,8 @@ export interface ChartSpec {
   granularity: Granularity;
   source: string;
   series: ChartSeries[];
+  /** Days excluded because the venue was closed (zero sales, zero transactions). */
+  closed_days: number;
   /**
    * Whether the first/last bucket covers only part of its period. A range
    * ending today leaves a stub month, and comparing two days of August against
@@ -118,31 +120,38 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
   if (venues.length === 0) return { error: `No venues matched: ${input.venue_slugs?.join(', ')}` };
 
   const granularity = input.granularity ?? autoGranularity(input.start_date, input.end_date);
-  const needsRevenue = ['gross_sales', 'net_sales', 'avg_check', 'avg_spend_per_head'].includes(input.metric);
   const needsCovers = ['covers', 'avg_spend_per_head', 'walk_in_pct', 'no_show_rate'].includes(input.metric);
 
   const series: ChartSeries[] = [];
   const allBuckets = new Set<string>();
+  let closedCount = 0;
 
   for (const venue of venues) {
     // bucket -> running totals, so ratios are computed on summed numerator and
     // denominator rather than averaging per-day ratios (which would weight a
     // quiet Monday the same as a busy Saturday).
-    const acc = new Map<string, { revenue: number; covers: number; checks: number; txns: number; walkIn: number; noShow: number; bookings: number }>();
+    const acc = new Map<string, { revenue: number; covers: number; checks: number; txns: number; walkIn: number; noShow: number; bookings: number; tradingDays: number }>();
+    const closedDates = new Set<string>();
     const touch = (b: string) => {
       allBuckets.add(b);
-      if (!acc.has(b)) acc.set(b, { revenue: 0, covers: 0, checks: 0, txns: 0, walkIn: 0, noShow: 0, bookings: 0 });
+      if (!acc.has(b)) acc.set(b, { revenue: 0, covers: 0, checks: 0, txns: 0, walkIn: 0, noShow: 0, bookings: 0, tradingDays: 0 });
       return acc.get(b)!;
     };
 
-    if (needsRevenue) {
-      const ops = await pagedSelect('daily_operations', 'business_date, gross_sales, net_sales, net_to_account_for, total_transactions', venue.id, input.start_date, input.end_date);
-      for (const o of ops) {
-        const a = touch(bucketOf(o.business_date, granularity));
-        a.revenue += Number((input.metric === 'net_sales' ? o.net_sales : o.gross_sales) ?? 0);
-        a.checks += Number(o.net_to_account_for ?? 0);
-        a.txns += Number(o.total_transactions ?? 0);
+    // Always read the POS rows, even for covers-only metrics: they are how a
+    // closed day is identified, and a closed day must not be plotted as a zero.
+    const ops = await pagedSelect('daily_operations', 'business_date, gross_sales, net_sales, net_to_account_for, total_transactions', venue.id, input.start_date, input.end_date);
+    for (const o of ops) {
+      if (isClosedDay(o)) {
+        closedDates.add(o.business_date);
+        touch(bucketOf(o.business_date, granularity));  // keep the bucket, add nothing
+        continue;
       }
+      const a = touch(bucketOf(o.business_date, granularity));
+      a.revenue += Number((input.metric === 'net_sales' ? o.net_sales : o.gross_sales) ?? 0);
+      a.checks += Number(o.net_to_account_for ?? 0);
+      a.txns += Number(o.total_transactions ?? 0);
+      a.tradingDays++;
     }
 
     if (needsCovers) {
@@ -159,6 +168,14 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
     const points = [...acc.entries()]
       .sort((x, y) => x[0].localeCompare(y[0]))
       .map(([label, a]) => {
+        // A closed day is a gap, not a zero. Plotting $0 makes the line dive to
+        // the axis and reads as a catastrophic trading day rather than a day the
+        // venue never opened. At week/month granularity the closed day simply
+        // contributes nothing to its bucket, which is correct.
+        if (granularity === 'day' && closedDates.has(label)) {
+          closedCount++;
+          return { label, value: null };
+        }
         let value: number | null;
         switch (input.metric) {
           case 'gross_sales':
@@ -197,7 +214,21 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
     series,
     partial_first: isPartialStart(input.start_date, granularity),
     partial_last: isPartialEnd(input.end_date, granularity),
+    closed_days: closedCount,
   };
+}
+
+/**
+ * A day the venue never opened.
+ *
+ * Revel still delivers a report for a closed day, with every figure at zero --
+ * Firangi Superstar is shut on Sundays and 2 Aug 2026 arrived as gross 0,
+ * transactions 0, guests 0. Across 4,643 warehouse rows that is the only
+ * zero-gross day, so the signal is unambiguous: no money and no transactions
+ * means closed, not a disastrous day of trading.
+ */
+export function isClosedDay(row: { gross_sales?: any; total_transactions?: any }): boolean {
+  return Number(row.gross_sales ?? 0) === 0 && Number(row.total_transactions ?? 0) === 0;
 }
 
 /** Does the range start part-way into its first bucket? */
