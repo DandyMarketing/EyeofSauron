@@ -751,10 +751,15 @@ async function send() {
       }
     }
 
-    addMessage('assistant', data.answer);
+    // Defence in depth: the server should never send an empty answer, but a
+    // blank bubble is the least useful possible failure, so never render one.
+    const answerText = (data.answer && data.answer.trim())
+      ? data.answer
+      : '_No response was returned. Please try asking again._';
+    addMessage('assistant', answerText);
 
     history.push({ role: 'user', content: question });
-    history.push({ role: 'assistant', content: data.answer });
+    history.push({ role: 'assistant', content: answerText });
 
     // Keep history manageable (last 10 turns)
     if (history.length > 20) {

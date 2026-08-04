@@ -45,6 +45,16 @@ export interface QueryResult {
   charts: Array<{ title: string; svg: string }>;
 }
 
+// 2048 was too tight once answers began carrying tables and chart commentary.
+// Running out mid-response is what produced empty replies: the turn ends with
+// stop_reason 'max_tokens' and, if the model was still emitting tool calls,
+// no text block at all.
+const MAX_TOKENS = 4096;
+
+// Ceiling on tool rounds. Nothing legitimate needs more, and without it a model
+// that keeps querying spins until the request times out with no answer.
+const MAX_TOOL_ROUNDS = 12;
+
 export async function askSauron(
   question: string,
   history: ChatMessage[] = [],
@@ -79,14 +89,15 @@ export async function askSauron(
 
   let response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 2048,
+    max_tokens: MAX_TOKENS,
     system: systemPrompt,
     tools: queryTools,
     messages,
   });
 
   // Tool use loop
-  while (response.stop_reason === 'tool_use') {
+  let rounds = 0;
+  while (response.stop_reason === 'tool_use' && rounds++ < MAX_TOOL_ROUNDS) {
     const assistantContent = response.content;
     messages.push({ role: 'assistant', content: assistantContent });
 
@@ -122,15 +133,52 @@ export async function askSauron(
 
     response = await client.messages.create({
       model: 'claude-sonnet-5',
-      max_tokens: 2048,
+      max_tokens: MAX_TOKENS,
       system: systemPrompt,
       tools: queryTools,
       messages,
     });
   }
 
-  const textBlocks = response.content.filter(b => b.type === 'text');
-  const answer = textBlocks.map(b => b.text).join('\n');
+  let answer = response.content
+    .filter(b => b.type === 'text')
+    .map(b => (b as Anthropic.TextBlock).text)
+    .join('\n');
+
+  // An empty answer is never acceptable -- it renders as a blank bubble with no
+  // clue what went wrong. Recover by asking for a reply from the data already
+  // gathered, with tools withheld so it must respond in prose.
+  //
+  // `messages` is safe to reuse: the loop only appends a response once it is a
+  // complete tool_use turn, so a truncated final response was never added.
+  if (!answer.trim()) {
+    const reason = response.stop_reason === 'max_tokens'
+      ? 'The previous reply was cut off before it finished.'
+      : rounds >= MAX_TOOL_ROUNDS
+        ? 'You have run enough queries.'
+        : 'No reply was produced.';
+
+    try {
+      const recovery = await client.messages.create({
+        model: 'claude-sonnet-5',
+        max_tokens: MAX_TOKENS,
+        system: `${systemPrompt}\n\n${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
+        messages,
+      });
+      answer = recovery.content
+        .filter(b => b.type === 'text')
+        .map(b => (b as Anthropic.TextBlock).text)
+        .join('\n');
+    } catch {
+      // fall through to the message below
+    }
+  }
+
+  if (!answer.trim()) {
+    answer = toolCalls.length > 0
+      ? `I queried the warehouse (${[...new Set(toolCalls.map(t => t.name.replace(/_/g, ' ')))].join(', ')}) but could not compose a reply. Please ask again, or narrow the question to a shorter date range.`
+      : 'I could not produce a reply to that. Please try rephrasing the question.';
+  }
 
   return { answer, toolCalls, charts };
 }
