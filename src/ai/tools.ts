@@ -185,7 +185,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'create_chart',
-    description: 'Draw a chart from warehouse data and show it to the user. Call this WHENEVER the answer covers a trend over time — several weeks, months or years — because a line is far easier to read than a column of numbers. Also use it to compare venues side by side. You supply only the metric, venues, dates and chart type; the server re-queries the warehouse and plots the real figures, so never put numbers in this call and never describe a chart you have not created. The chart appears above your reply — reference it and interpret it in words (what moved, when, and why it matters), do not just restate every value. Available metrics: gross_sales, net_sales, avg_check, covers, avg_spend_per_head, walk_in_pct, no_show_rate. Days when a venue was closed are plotted as a gap rather than a zero, and returned as closed_days — mention a closure if it is visible in the chart, but never read it as a sales collapse. Bucketing is chosen automatically — daily under ~5 weeks, weekly under ~4 months, monthly beyond — so a multi-month request produces a readable monthly line rather than hundreds of daily points. You may call this more than once for different metrics.',
+    description: 'Draw a chart from warehouse data and show it to the user. Call this WHENEVER the answer covers a trend over time — several weeks, months or years — because a line is far easier to read than a column of numbers. Also use it to compare venues side by side. You supply only the metric, venues, dates and chart type; the server re-queries the warehouse and plots the real figures, so never put numbers in this call and never describe a chart you have not created. The chart appears above your reply — reference it and interpret it in words (what moved, when, and why it matters), do not just restate every value. Available metrics: gross_sales, net_sales, avg_check, covers, avg_spend_per_head, walk_in_pct, no_show_rate. Days when a venue was closed are plotted as a gap rather than a zero, and returned as closed_days — mention a closure if it is visible in the chart, but never read it as a sales collapse. Bucketing is chosen automatically — daily under ~5 weeks, weekly under ~4 months, monthly beyond — so a multi-month request produces a readable monthly line rather than hundreds of daily points. To answer "which days of the week are slow / busy", set granularity to "day_of_week": that returns seven bars averaging every Monday, every Tuesday and so on across the range, which is the only way to see the weekly pattern — a daily line over several months is unreadable and cannot answer it. The reply for a day_of_week chart carries every weekday value in by_weekday, so quote those figures rather than estimating from the picture. You may call this more than once for different metrics.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -203,8 +203,8 @@ export const queryTools: Tool[] = [
         },
         granularity: {
           type: 'string',
-          enum: ['day', 'week', 'month'],
-          description: 'Bucket size. Omit to let the server choose based on the range length — usually correct.',
+          enum: ['day', 'week', 'month', 'day_of_week'],
+          description: 'How to bucket the data. Omit for time-series questions and the server picks day/week/month from the range length — usually correct. Set "day_of_week" ONLY for questions about the weekly pattern (which days trade well or badly): it collapses the whole range into seven bars, Monday to Sunday, each the AVERAGE of that weekday, and ignores the calendar order entirely. Note "by day" is ambiguous in plain English — if the user is asking which days of the week are quiet, they mean day_of_week, not daily granularity.',
         },
         chart_type: {
           type: 'string',

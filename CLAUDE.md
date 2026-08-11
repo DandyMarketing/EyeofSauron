@@ -78,6 +78,23 @@ I'm Khai — many years in F&B, building this as the company AI. I code alongsid
 - **Phase 3**: chatbot + Insight & Recommendation Engine + chart generation + Telegram.
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 
+### Deferred: read-only SQL query tool
+
+**Decided, not scheduled — belongs after the chatbot is settled, and gets its own piece of work.**
+
+Every query tool today is a fixed-shape question with blanks to fill in. That means each new *shape* of question needs new code and a deploy — day-of-week analysis, category splits, and so on. The `group_by` dimension widens the menu, but it is still a menu, and eventually a question will fall outside it again.
+
+The permanent answer is to let the model write SQL against the warehouse directly. This does **not** weaken the anti-hallucination rule: Postgres still does every calculation, so every number still comes from the database. The model would be choosing the *question*, never producing the *answer*. (Locking the questions down as well as the answers was an over-correction on my part, and it is what created the treadmill.)
+
+Do not build it without all four guardrails, because the service-role key bypasses RLS:
+
+1. **A separate read-only Postgres role** — no write, no DDL, no access to payroll tables.
+2. **Venue scoping injected server-side**, never trusted to the generated SQL. Same hole `enforceVenueScope()` already had to plug for the existing tools.
+3. **A statement timeout and a row cap**, so one bad query cannot lock the database for every venue.
+4. **Every generated query logged**, so a wrong answer can be traced back to the SQL that produced it.
+
+The honest trade-off: a tool I wrote is wrong the same way every time, so it gets found once and fixed forever. A query written fresh each time can be wrong a new way each time — harder to spot, harder to trust. That is the reason this is deferred rather than dropped.
+
 ## Open decisions (confirm with Khai, don't assume)
 
 StaffAny API grant method · Revel report frequency · Revel venue-key mapping (Khai to gather one filename per venue) · user scale (managers only vs all staff) · exact StaffAny fields to ingest · Telegram allowlist owner · Supabase hosted vs self-hosted.

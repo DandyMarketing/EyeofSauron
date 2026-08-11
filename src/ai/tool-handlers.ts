@@ -138,9 +138,29 @@ async function createChart(input: Record<string, any>): Promise<string> {
   const firstLabel = spec.series[0]?.points[0]?.label;
   const lastLabel = spec.series[0]?.points[spec.series[0].points.length - 1]?.label;
 
+  const byWeekday = spec.granularity === 'day_of_week';
+
   const summary = spec.series.map(s => {
-    const vals = s.points.filter(p => p.value !== null) as Array<{ label: string; value: number }>;
+    const vals = s.points.filter(p => p.value !== null) as Array<{ label: string; value: number; n?: number }>;
     if (vals.length === 0) return { venue: s.name, note: 'no data in range' };
+
+    // Seven weekdays are a comparison, not a trend. First-to-last and a change
+    // percentage are meaningless here ("Monday to Sunday, down 30%" describes
+    // nothing), so the whole set goes back instead -- it is only seven numbers,
+    // and handing them over stops the model estimating them off the picture.
+    if (byWeekday) {
+      const best = vals.reduce((a, b) => (b.value > a.value ? b : a));
+      const worst = vals.reduce((a, b) => (b.value < a.value ? b : a));
+      return {
+        venue: s.name,
+        by_weekday: vals.map(v => ({ day: v.label, value: v.value, trading_days: v.n ?? 0 })),
+        busiest: { day: best.label, value: best.value, trading_days: best.n ?? 0 },
+        quietest: { day: worst.label, value: worst.value, trading_days: worst.n ?? 0 },
+        quietest_vs_busiest_pct: best.value !== 0
+          ? Number((((worst.value - best.value) / best.value) * 100).toFixed(1))
+          : null,
+      };
+    }
 
     // Trend maths ignores partial buckets. A range ending today leaves a stub
     // period, and measuring two days of a month against full months reads as a
@@ -177,10 +197,18 @@ async function createChart(input: Record<string, any>): Promise<string> {
     periods: spec.series[0]?.points.length ?? 0,
     closed_days: spec.closed_days || undefined,
     closed_days_note: spec.closed_days > 0
-      ? 'Some days are absent from the plot because the venue was closed (zero sales, zero transactions). They appear as gaps, not zeros. Do not read a gap as a sales collapse.'
+      ? byWeekday
+        ? 'Some dates were closures (zero sales, zero transactions) and are excluded from the weekday averages entirely — each average covers only the days that venue actually traded, which is why trading_days varies between weekdays. A low trading_days count usually means the venue is regularly shut that day: say so, do not report it as weak trading.'
+        : 'Some days are absent from the plot because the venue was closed (zero sales, zero transactions). At daily granularity they appear as gaps, not zeros; at weekly or monthly they simply contribute nothing to their bucket. Do not read a gap as a sales collapse.'
       : undefined,
     summary,
     note: 'The chart is already displayed to the user. Interpret what it shows — do not list every value.',
+    weekday_note: byWeekday
+      ? 'Every value is an AVERAGE for that weekday across the range, not a total — describe it as "an average Tuesday", never as a sum. trading_days is how many days each average rests on. This chart says nothing about change over time; do not describe a trend from it.'
+      : undefined,
+    low_sample_note: spec.low_sample_days
+      ? `At least one weekday average rests on fewer than 4 trading days. Quote its trading_days count when you mention it and do not present it as a pattern.`
+      : undefined,
     partial_periods_note: (spec.partial_first || spec.partial_last)
       ? 'The first and/or last bucket covers only part of its period. change_pct already excludes them. Do NOT describe the final stub period as a decline — say the period is still in progress if you mention it at all.'
       : undefined,
