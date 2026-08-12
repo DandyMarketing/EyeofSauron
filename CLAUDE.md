@@ -108,3 +108,5 @@ StaffAny API grant method · Revel report frequency · Revel venue-key mapping (
 ## Reference
 
 Two companion documents exist (HTML): the visual **blueprint** (architecture, diagrams, security, roadmap) and the **Phase 0 checklist**. Ask Khai for them if useful.
+
+**`docs/BUILD_LOG.md`** — defects hit during this build, their root causes, and whether each one will recur at every new customer. Read it before adding an ingestion path, a query tool, or anything that reads a paginated source; several of the bugs recorded there lost data silently and returned a confident wrong answer. Add to it when something breaks and the cause was not obvious.

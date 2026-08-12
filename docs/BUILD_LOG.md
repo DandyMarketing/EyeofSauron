@@ -1,0 +1,276 @@
+# Build Log — defects, root causes, and what must not recur
+
+Sauron is being built for The Dandy Collection first and sold to other F&B
+operators after. This file exists so the second customer does not pay for the
+first customer's lessons.
+
+**How to use it.** Every entry ends with a *Recurs?* line. That is the only
+field that matters commercially:
+
+- **Every customer** — this will happen again on every deployment. It must
+  become a test, a guard in code, or a step in the onboarding checklist. A note
+  in this file is not sufficient.
+- **Per integration** — happens whenever that specific source is connected.
+  Belongs in that integration's setup notes.
+- **One-off** — genuinely specific to this build. Recorded for context only.
+
+Add to this file when something breaks and the cause was not obvious. Do not
+record routine work here.
+
+---
+
+## The pattern that matters most: silent data loss
+
+Four separate incidents (1.1–1.4) shared one signature, and it is the most
+dangerous failure mode this product has:
+
+> **The system returned a confident, plausible answer built on incomplete data,
+> and raised no error.**
+
+Nothing crashed. No alert fired. The numbers looked reasonable. In one case
+(1.1) it produced a report of "22 missing days" for Fat Prince that were not
+missing at all — the read had silently truncated, and the absence was then
+presented as a finding about the business.
+
+For an internal tool that is embarrassing. For a paid product it is existential:
+a customer makes a staffing or pricing decision on a number that was quietly
+wrong, and neither they nor we can tell.
+
+**The rule this produces:** any code that reads a bounded API or a paginated
+endpoint must assert that it read everything, not assume it. If a limit exists,
+the code must either page past it or fail loudly on hitting it. Never both
+silently truncate and return.
+
+---
+
+## 1. Silent data loss in ingestion
+
+### 1.1 Paginated read silently truncated at 1,000 rows
+**Symptom.** A covers report showed 22 missing days for Fat Prince. The days
+existed; 646 rows had been dropped.
+**Root cause.** PostgREST caps a response at 1,000 rows by default. The query
+returned successfully with exactly 1,000 rows and the code treated that as the
+complete set.
+**Fix.** Explicit paging loop, reading in 1,000-row pages until a short page
+returns. See `pagedSelect()` in `src/ai/charts.ts` and `getCovers()` in
+`src/lib/covers.ts`.
+**Recurs?** **Every customer.** This is a property of the database layer, not of
+any one venue. Every new read path is a fresh chance to reintroduce it.
+
+### 1.2 API result ceiling returned an error instead of a page
+**Symptom.** HTTP 400 fetching twelve months of SevenRooms reservations.
+**Root cause.** SevenRooms enforces a hard 4,000-result ceiling per query and
+rejects the request rather than truncating.
+**Fix.** Fetch in 28-day windows, halving the window and recursing when the cap
+is hit. See `fetchRangeSplitting()` in `src/ingest/sevenrooms.ts`.
+**Recurs?** **Per integration** for SevenRooms — but the *class* of problem
+(undocumented hard ceilings) applies to every API we connect. Assume one exists
+until proven otherwise.
+
+### 1.3 Offset pagination duplicated rows against live data
+**Symptom.** 31 duplicate reservation IDs at Neon Pigeon, 1 at Fat Prince.
+**Root cause.** Cursor is an integer offset. New bookings arriving mid-fetch
+shift rows across page boundaries, so the same record is read twice.
+**Fix.** Deduplicate by source ID into a Map before upsert, and count the
+duplicates rather than hiding them.
+**Recurs?** **Every customer**, for any offset-paginated source read against
+live data. Ingesting during service makes it certain rather than likely.
+
+### 1.4 Failed batches lost without an error
+**Symptom.** Two batches of 500 rows never landed. Nothing reported a failure.
+**Root cause.** Transient connection timeouts on upsert were not retried and
+not surfaced.
+**Fix.** Four attempts with 1s/2s/4s backoff, restricted to transient network
+errors so genuine data errors still fail fast.
+**Recurs?** **Every customer.** Network flakiness is universal.
+
+---
+
+## 2. Data that is valid but wrong
+
+### 2.1 Implausible year passed date validation
+**Symptom.** A row dated `2925-12-30`.
+**Root cause.** A Monday.com item was literally named "2925-12-30 Tuesday". The
+parser checked the date was *syntactically valid* — which `2925-12-30` is — and
+accepted it.
+**Fix.** Plausibility range on the year (2015 .. current year + 1); outside it,
+fall back to the item's `created_at`. See `validOrNull()` in
+`src/ingest/monday.ts`.
+**Recurs?** **Every customer** that hand-types dates anywhere in its stack.
+Syntactic validity is not correctness — the general rule is that any
+hand-entered field needs a plausibility bound, not just a format check.
+
+### 2.2 Venue-specific vocabulary assumed to be standard
+**Symptom.** Fat Prince meal-period splits were nonsense — roughly $20/head at
+lunch and $212/head at dinner.
+**Root cause.** The code assumed shifts are named `LUNCH` and `DINNER`. Fat
+Prince uses `DAY` and `LEGACY`.
+**Fix.** `normaliseShift()` maps known aliases and falls back to arrival hour.
+Verified against Revel's own hour-to-meal-period labels before trusting it,
+which returned a sane $44 lunch / $98 dinner.
+**Recurs?** **Every customer, differently.** This is the archetypal onboarding
+defect: every operator names things their own way. Never assume a label set —
+enumerate the distinct values from the customer's own data during setup, and
+have a human confirm the mapping.
+
+**Process note:** the fix was initially proposed on reasoning alone. Khai asked
+whether it had been reconciled against Revel — it had not. The cross-check is
+what made the mapping trustworthy. Cross-validate a mapping against an
+independent source before shipping it.
+
+### 2.3 Ratio built from mismatched date ranges
+**Symptom.** Spend per cover of ~$17 and average parties of 17 people.
+**Root cause.** Covers were counted across the whole requested range while
+revenue covered only the 4–5 days that had POS data. Numerator and denominator
+were measured over different periods.
+**Fix.** Count covers only over the dates that also have sales.
+**Recurs?** **Every customer.** Feeds arrive at different times and with
+different lags — Revel lands overnight, SevenRooms hourly — so any ratio
+crossing two sources is exposed to this. Every cross-source ratio must state
+which date basis it used.
+
+---
+
+## 3. Analysis that misleads
+
+### 3.1 Partial buckets read as a collapse
+**Symptom.** A trend reported −95.1% when the real movement was +22%.
+**Root cause.** A range ending today leaves a stub final month. Two days of
+August were compared against full months.
+**Fix.** Flag `partial_first` / `partial_last` and exclude those buckets from
+trend maths; tell the model explicitly not to describe the stub as a decline.
+**Recurs?** **Every customer.** Any time-bucketed chart with an open final
+period has this.
+
+### 3.2 A closed day plotted as a catastrophic trading day
+**Symptom.** Firangi Superstar's Sundays appeared as £0 trading days.
+**Root cause.** Revel delivers a report for closed days with every figure at
+zero. Nothing distinguished "shut" from "open and sold nothing".
+**Fix.** `isClosedDay()` — zero gross *and* zero transactions means closed.
+Plotted as a gap, excluded from averages, counted and reported separately.
+**Recurs?** **Every customer.** Opening hours differ per venue and change over
+time; this must never be hardcoded per site.
+
+### 3.3 An unanswerable question answered anyway
+**Symptom.** Asked which weekdays trade badly, the system produced a 180-point
+daily line chart — unreadable, and incapable of answering the question.
+**Root cause.** `create_chart` supported only day / week / month buckets. With
+no way to group by weekday, the model chose the nearest available shape, which
+*looked* like an answer.
+**Fix.** Added `day_of_week` granularity, averaging over trading days.
+**Recurs?** **Every customer**, and this is the important architectural one.
+
+The deeper cause was a design error: the anti-hallucination rule requires that
+*every number comes from the database*, and it was implemented as *the model may
+only choose from a fixed menu of questions*. Those are not the same constraint.
+Locking down the questions as well as the answers created a treadmill where each
+new shape of question needs new code and a deploy — and worse, when a question
+fell outside the menu the model's only remaining option was to estimate from raw
+rows, which is the exact behaviour the restriction existed to prevent.
+
+**Being too strict increased the hallucination risk rather than reducing it.**
+The permanent fix is the read-only SQL tool recorded in `CLAUDE.md` — Postgres
+still performs every calculation, so the model chooses the *question* and never
+produces the *answer*.
+
+---
+
+## 4. Security
+
+### 4.1 Venue isolation was not enforced anywhere
+**Symptom.** Found during review, not in use.
+**Root cause.** Row-Level Security protects the database, but the application
+connects with the service-role key, which **bypasses RLS entirely**. Four query
+tools treated an omitted venue parameter as "all venues".
+**Fix.** `enforceVenueScope()` and `scopeVenues()` in
+`src/ai/tool-handlers.ts` apply the user's permitted venue list in application
+code on every tool call.
+**Recurs?** **Every customer, and it gets worse with scale.** Today the blast
+radius is one venue seeing another's numbers inside one company. Under the
+multi-tenant plan it becomes one *company* seeing another's. This is the defect
+class that ends the business, and it is invisible until someone looks.
+
+**Standing rule:** RLS is not the isolation boundary while the service-role key
+is in use. Anything reaching the warehouse on behalf of a user must have venue
+(and later company) scope applied server-side, in code, and must never trust a
+scope supplied by the model or the client. Any future read-only SQL tool
+inherits this requirement in full.
+
+---
+
+## 5. Presentation and delivery
+
+Lower stakes, but each one made real data unusable or invisible.
+
+| # | Symptom | Root cause | Recurs? |
+|---|---|---|---|
+| 5.1 | Intermittent blank reply bubbles | `max_tokens` 2048 exhausted mid-answer; the loop exited on `max_tokens` holding only tool-use blocks, so no text existed | Every customer |
+| 5.2 | Markdown table columns shifted left | Empty interior cells filtered out, so remaining cells moved up a column | One-off |
+| 5.3 | Charts rendered too small to read | `.chart-card` was a shrink-to-fit flex item with no `flex: 1; min-width: 0` | One-off |
+| 5.4 | Unstyled white tooltip over the whole chart | SVG root `<title>` is rendered by browsers as a native tooltip; it also shadowed the per-point tooltips | Every customer |
+| 5.5 | Bars offset from their own axis labels | Bars positioned by group width, labels by line-chart spacing. Invisible across 26 weekly points, obvious across 7 weekday bars | Every customer |
+
+5.1 is the one to carry forward: an empty answer must never be possible. The
+recovery path re-asks with tools withheld, and a plain-language fallback runs if
+that also fails.
+
+---
+
+## 6. Process failures
+
+### 6.1 Documentation drifted from reality
+Revel ingestion was described as manual CLI-only when it had been running
+nightly via Gmail → n8n → `POST /ingest/revel` for some time. The claim was
+made confidently and was wrong.
+
+`CLAUDE.md` still opens with "planning complete, nothing built yet" while three
+feeds run in production.
+
+**Recurs?** **Every customer.** Stale project documentation is the first thing a
+new engineer — or a new AI session — reads and believes. Verify operational
+claims against the running system before repeating them.
+
+### 6.2 Deployment source diverged from the working branch
+The app deployed from a feature branch while `main` sat 53 commits behind and
+effectively empty. Work could be committed, pushed, and appear finished without
+reaching the running system.
+
+**Recurs?** **Every customer.** Whatever branch is deployed must be unambiguous
+and written down.
+
+---
+
+## What must exist before customer #2
+
+Ordered by how much damage the absence causes.
+
+1. **An automated test suite. There is currently none.** Every fix above can
+   silently regress and no one would know. The highest-value targets are the
+   pure functions where the subtle bugs lived and which need no database:
+   `isClosedDay`, `normaliseShift`, `coversVariance`, `autoGranularity`,
+   `bucketOf` / weekday derivation, `validOrNull`, weekday averaging, and the
+   partial-bucket flags. These are cheap to test and are exactly where being
+   wrong is hardest to notice.
+2. **Tenant isolation tests.** Section 4.1 must be provable, not asserted —
+   a test that a user scoped to one venue cannot retrieve another's figures,
+   through every tool, including any future SQL tool.
+3. **A customer onboarding checklist.** Every *per-customer* item above:
+   enumerate the actual shift names from their data, map venue keys, confirm
+   trading days per venue, verify credential length after paste (see below),
+   confirm which feeds are live.
+4. **Ingestion watchdogs per customer.** `src/scripts/ingestion-status.ts`
+   exists for one company. Silence — a cron that stopped firing — looks
+   identical to a quiet day, and is the failure mode most likely to go
+   unnoticed across many tenants.
+
+### Onboarding gotcha worth its own line
+
+A 401 from SevenRooms was caused by credentials containing **newlines in the
+middle** — 129 characters instead of 128, copied from a wrapped display in the
+Railway UI. It presented as an authentication failure, which sends you looking
+at permissions rather than at the string.
+
+`cleanCredential()` now strips all whitespace and reports the length against the
+expected one. **Any credential field in the customer-facing product should
+validate length and character set at entry and say so plainly.** This will
+happen at every single customer onboarding.
