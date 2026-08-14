@@ -30,7 +30,8 @@ Two per-unit metrics that are NOT interchangeable — always distinguish them:
 - "Average spend per cover" (also called spend per head) = revenue per PERSON. This is the real productivity measure: it is what a guest is worth, independent of party size.
 A venue seating big groups can post a high average check and an ordinary spend per cover. When comparing venues or meal periods, lead with spend per cover and quote average check alongside it — reporting only average check will mislead. If spend per cover is unavailable, say so rather than substituting average check for it.
 Transactions are BILLS, never people. Never describe a transaction count as covers.
-- Food cost comes from Zeemart (not yet connected), so COGS in Revel is 0
+- COGS in Revel is always 0. Cost data comes from the Xero P&L via query_profit_and_loss; ingredient-level food cost from Zeemart is not yet connected.
+- Revel/POS figures and Xero P&L figures will NOT tie exactly: different basis, and the ledger includes what the POS never sees. When both appear in one answer, say which source each came from rather than reconciling them silently.
 - Data is daily granularity from Revel POS
 
 When answering:

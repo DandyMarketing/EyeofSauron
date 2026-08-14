@@ -7,6 +7,7 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
+import { ingestProfitAndLoss } from './ingest/xero-pl.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -631,6 +632,30 @@ app.post('/admin/api/xero/connections/:id/venue', async (c) => {
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ connection: data });
+});
+
+/**
+ * Pull a P&L period for one connected organisation.
+ *
+ * Returns the reconciliation result whether or not it stored anything: a
+ * period that failed the check is the single most important thing to surface,
+ * because the alternative is a plausible wrong P&L nobody questions.
+ */
+app.post('/admin/api/xero/ingest', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { tenant_id, from_date, to_date } = await c.req.json();
+  if (!tenant_id || !from_date || !to_date) {
+    return c.json({ error: 'tenant_id, from_date and to_date are required' }, 400);
+  }
+
+  try {
+    const result = await ingestProfitAndLoss(tenant_id, from_date, to_date);
+    return c.json(result, result.stored ? 200 : 422);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
 });
 
 app.get('/watchdog', async (c) => {

@@ -2,6 +2,40 @@ import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
 
 export const queryTools: Tool[] = [
   {
+    name: 'query_profit_and_loss',
+    description:
+      'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +
+      'IMPORTANT: figures come from the accounting ledger, not the POS, so they will not match Revel sales exactly — the ledger is on a different basis and includes items the POS never sees. Say which source a figure came from when both are in play. ' +
+      'Costs are POSITIVE numbers under sections named "Less ..." — that is Xero\'s convention, not an error. Detail lines and section totals are both returned; use the is_summary flag rather than adding everything up, or every section is counted twice. ' +
+      'Only periods that have been ingested are available; if a period is missing, say so rather than estimating it from revenue.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of the period (inclusive) in YYYY-MM-DD format.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the period (inclusive) in YYYY-MM-DD format.',
+        },
+        section: {
+          type: 'string',
+          description: 'Optional filter on the Xero section heading, e.g. "Income" or "Less Cost of Sales". Omit for the whole P&L.',
+        },
+        summary_only: {
+          type: 'boolean',
+          description: 'True returns only section totals (Total Income, Total Cost of Sales). Use for headline profit questions; omit to see the account lines behind them.',
+        },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_product_mix',
     description: 'Query product-level sales data for a venue on a given date or date range. Returns item names, quantities sold, sales amounts, categories, and percentage of total sales. Use this to answer questions about what sold, top/bottom sellers, food vs beverage breakdown, category performance, and modifier usage. For date ranges, results are aggregated across all dates.',
     input_schema: {

@@ -47,6 +47,8 @@ export async function handleToolCall(
   }
 
   switch (name) {
+    case 'query_profit_and_loss':
+      return queryProfitAndLoss(input);
     case 'query_product_mix':
       return queryProductMix(input);
     case 'query_daily_operations':
@@ -68,6 +70,58 @@ export async function handleToolCall(
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
+}
+
+/**
+ * Profit & Loss for one venue over a period.
+ *
+ * Overlapping periods are not merged. If the warehouse holds both a monthly
+ * and a quarterly P&L covering the same weeks, adding them together would
+ * double-count, so only rows whose period falls entirely inside the requested
+ * window are returned and the periods present are named in the response --
+ * the model needs to see which periods it actually got.
+ */
+async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required' });
+  }
+
+  let query = supabase
+    .from('profit_and_loss')
+    .select('period_start, period_end, section, account_name, amount, is_summary, sort_order')
+    .eq('venue_id', venueId)
+    .gte('period_start', input.start_date)
+    .lte('period_end', input.end_date)
+    .order('sort_order', { ascending: true });
+
+  if (input.section) query = query.eq('section', input.section);
+  if (input.summary_only === true) query = query.eq('is_summary', true);
+
+  const { data, error } = await query;
+  if (error) return JSON.stringify({ error: error.message });
+
+  if (!data || data.length === 0) {
+    // Distinguished from a zero result on purpose: "no P&L ingested" and
+    // "this venue made no money" are wildly different answers.
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      rows: [],
+      note: 'No P&L data has been ingested for this venue and period. This does NOT mean zero — say the data is not available rather than inferring costs from revenue.',
+    });
+  }
+
+  const periods = [...new Set(data.map(r => `${r.period_start}..${r.period_end}`))];
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    periods_returned: periods,
+    convention: 'Costs are positive under sections named "Less ...". Rows with is_summary=true are section totals — do not add them to the detail lines beneath them.',
+    source: 'Xero accounting ledger (not the POS — figures will not tie exactly to Revel sales)',
+    rows: data,
+  });
 }
 
 /**
