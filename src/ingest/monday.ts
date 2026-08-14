@@ -279,21 +279,13 @@ export async function fetchBoardItems(
     };
     if (cursor) variables.cursor = cursor;
 
-    const res = await fetch(MONDAY_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': apiToken,
-        'API-Version': '2024-10',
-      },
-      body: JSON.stringify({ query: gqlQuery, variables }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Monday.com API error: ${res.status} ${await res.text()}`);
-    }
-
-    const json = await res.json() as {
+    // Monday returns intermittent 500s ("Internal Server Error") that lose the
+    // whole run. BUILD_LOG 1.4 added retry-with-backoff for upserts and this
+    // fetch never got it -- the same lesson as 4.2: a fix applied at one call
+    // site is not a fix. Retries are restricted to transient failures so a
+    // genuine query or auth error still fails fast.
+    const MAX_ATTEMPTS = 4;
+    let json!: {
       data?: { boards: Array<{ items_page: { cursor: string | null; items: Array<{
         id: string; name: string; created_at: string;
         column_values: Array<{ id: string; text: string | null }>;
@@ -301,8 +293,43 @@ export async function fetchBoardItems(
       errors?: Array<{ message: string }>;
     };
 
-    if (json.errors?.length) {
-      throw new Error(`Monday.com GraphQL error: ${json.errors[0].message}`);
+    for (let attempt = 1; ; attempt++) {
+      let transient = false;
+      let failure = '';
+
+      try {
+        const res = await fetch(MONDAY_API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': apiToken,
+            'API-Version': '2024-10',
+          },
+          body: JSON.stringify({ query: gqlQuery, variables }),
+        });
+
+        if (!res.ok) {
+          failure = `Monday.com API error: ${res.status} ${await res.text()}`;
+          transient = res.status >= 500 || res.status === 429;
+        } else {
+          json = await res.json() as typeof json;
+          if (json.errors?.length) {
+            failure = `Monday.com GraphQL error: ${json.errors[0].message}`;
+            // Monday reports upstream faults inside a 200 as a GraphQL error,
+            // so the status code alone does not identify them.
+            transient = /internal server error|timeout|temporarily/i.test(json.errors[0].message);
+          }
+        }
+      } catch (e: any) {
+        failure = `Monday.com request failed: ${e.message}`;
+        transient = true; // network-level: no response was seen at all
+      }
+
+      if (!failure) break;
+      if (!transient || attempt === MAX_ATTEMPTS) {
+        throw new Error(`${failure}${transient ? ` (after ${MAX_ATTEMPTS} attempts)` : ''}`);
+      }
+      await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
     }
 
     const page = json.data!.boards[0].items_page;

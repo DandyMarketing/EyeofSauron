@@ -15,6 +15,25 @@ export async function resolveVenueId(reportKey: string): Promise<string> {
   return data.venue_id;
 }
 
+/**
+ * Weekdays this venue is normally shut (0=Mon..6=Sun).
+ *
+ * Returns an empty array on any failure, which means "assume it trades every
+ * day" -- so an unreadable setting makes an empty report an error rather than
+ * silently filing it as a closure. Failing towards the alarm is the safe
+ * direction here.
+ */
+export async function getClosedWeekdays(venueId: string): Promise<number[]> {
+  const { data, error } = await supabase
+    .from('venues')
+    .select('closed_weekdays')
+    .eq('id', venueId)
+    .maybeSingle();
+
+  if (error || !data) return [];
+  return (data.closed_weekdays as number[] | null) ?? [];
+}
+
 export async function resolveVenueSlug(venueId: string): Promise<string> {
   const { data, error } = await supabase
     .from('venues')

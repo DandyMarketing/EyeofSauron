@@ -4,7 +4,8 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
-import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
+import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
+import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
@@ -91,6 +92,30 @@ app.get('/api/me', async (c) => {
 
 // --- Ingest (unchanged) ---
 
+/**
+ * Decide what an ingestion failure should be logged as.
+ *
+ * An empty report from a venue that is shut that weekday is a closure, not an
+ * error -- otherwise Firangi's Sundays turn the watchdog permanently red and
+ * nobody reads it any more. Anything that cannot be resolved falls back to the
+ * caller's original status, so a failure is never quietly downgraded.
+ */
+async function ingestFailureStatus<T extends string>(
+  filename: string,
+  message: string,
+  fallback: T,
+): Promise<T | 'closed'> {
+  if (!isEmptyReportError(message)) return fallback;
+  try {
+    const meta = parseFilename(filename);
+    const venueId = await resolveVenueId(meta.venueKey);
+    const closed = await getClosedWeekdays(venueId);
+    return classifyIngestFailure(message, closed, meta.businessDate, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 app.post('/ingest/revel', async (c) => {
   const body = await c.req.parseBody({ all: true });
 
@@ -134,8 +159,9 @@ app.post('/ingest/revel', async (c) => {
         parsed.push({ filename: file.name, venueKey: meta.venueKey, businessDate: meta.businessDate, operations: parseOperationsReport(content) });
       }
     } catch (e: any) {
-      results.push({ filename: file.name, status: 'parse_error', detail: e.message });
-      await logIngestion({ filename: file.name, report_type: 'product_mix', status: 'parse_error', error_message: e.message });
+      const status = await ingestFailureStatus(file.name, e.message, 'parse_error');
+      results.push({ filename: file.name, status, detail: e.message });
+      await logIngestion({ filename: file.name, report_type: 'product_mix', status, error_message: e.message });
     }
   }
 
@@ -184,8 +210,9 @@ app.post('/ingest/revel', async (c) => {
         results.push({ filename: pm.filename, status: 'ingested', detail: `${count} rows` });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'success', row_count: count });
       } catch (e: any) {
-        results.push({ filename: pm.filename, status: 'error', detail: e.message });
-        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'ingestion_error', error_message: e.message });
+        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error');
+        results.push({ filename: pm.filename, status: status === 'closed' ? 'closed' : 'error', detail: e.message });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status, error_message: e.message });
       }
     }
 
@@ -195,8 +222,9 @@ app.post('/ingest/revel', async (c) => {
         results.push({ filename: ops.filename, status: 'ingested', detail: `${opsRows} sales-by-class rows` });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success', row_count: opsRows });
       } catch (e: any) {
-        results.push({ filename: ops.filename, status: 'error', detail: e.message });
-        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'ingestion_error', error_message: e.message });
+        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error');
+        results.push({ filename: ops.filename, status: status === 'closed' ? 'closed' : 'error', detail: e.message });
+        await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status, error_message: e.message });
       }
     }
   }

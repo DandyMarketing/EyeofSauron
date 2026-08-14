@@ -1,6 +1,10 @@
 import { supabase } from '../lib/supabase.js';
+import { isExpectedClosure } from './closures.js';
 
-export type IngestionStatus = 'success' | 'parse_error' | 'validation_error' | 'reconciliation_failed' | 'ingestion_error' | 'unknown_venue';
+/** How far back a failure keeps showing in the watchdog before it is history. */
+const ERROR_WINDOW_DAYS = 7;
+
+export type IngestionStatus = 'success' | 'parse_error' | 'validation_error' | 'reconciliation_failed' | 'ingestion_error' | 'unknown_venue' | 'closed';
 
 interface LogEntry {
   venue_id?: string;
@@ -21,7 +25,7 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   missing: Array<{ venue: string; slug: string; date: string; missing: string[] }>;
   recent_errors: Array<{ filename: string; status: string; error: string; created_at: string }>;
 }> {
-  const { data: venues } = await supabase.from('venues').select('id, name, slug');
+  const { data: venues } = await supabase.from('venues').select('id, name, slug, closed_weekdays');
   if (!venues) return { missing: [], recent_errors: [] };
 
   const today = new Date();
@@ -36,6 +40,10 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
 
   for (const venue of venues) {
     for (const date of dates) {
+      // A venue that is shut has no data to be missing. Reporting it as a gap
+      // every week is the same noise as logging the empty file as an error.
+      if (isExpectedClosure(venue.closed_weekdays as number[] | null, date)) continue;
+
       const gaps: string[] = [];
 
       const { data: ops } = await supabase
@@ -66,10 +74,21 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
     }
   }
 
+  // Errors were previously "the last 10 failures, ever" -- no time bound at
+  // all, while `lookbackDays` applied only to `missing`. So problems fixed
+  // weeks ago kept the watchdog red, and a red watchdog is one nobody checks.
+  // Bound them to a window wide enough that a failure has to be genuinely
+  // stale to drop off, but not so wide it shows history.
+  const errorWindowDays = Math.max(lookbackDays, ERROR_WINDOW_DAYS);
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - errorWindowDays);
+
   const { data: errors } = await supabase
     .from('ingestion_log')
     .select('filename, status, error_message, created_at')
-    .neq('status', 'success')
+    // 'closed' is a normal outcome for a venue that does not trade that day.
+    .not('status', 'in', '(success,closed)')
+    .gte('created_at', cutoff.toISOString())
     .order('created_at', { ascending: false })
     .limit(10);
 
