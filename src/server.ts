@@ -6,6 +6,8 @@ import { cors } from 'hono/cors';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
+import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
+import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
@@ -526,6 +528,110 @@ app.get('/admin/api/system', async (c) => {
 });
 
 // --- Watchdog (public for monitoring) ---
+
+// --- Xero OAuth ---
+//
+// Owner-only to start, and the callback is protected by a signed state value
+// rather than a session, because Xero redirects the browser back with no
+// Authorization header. That is normal for OAuth; the state is what stops
+// someone handing an operator a crafted callback URL and attaching their own
+// Xero organisation to this installation.
+
+function xeroRedirectUri(): string {
+  return process.env.XERO_REDIRECT_URI
+    ?? 'https://eyeofsauron-production.up.railway.app/xero/callback';
+}
+
+/**
+ * Returns the URL to send the operator to, rather than redirecting.
+ *
+ * The admin page holds a bearer token and cannot attach it to a browser
+ * navigation, so it fetches this and sets window.location itself. Passing the
+ * session token in a query string instead would put it in every proxy and
+ * access log between here and Xero.
+ */
+app.get('/xero/connect', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const clientId = process.env.XERO_CLIENT_ID;
+  if (!clientId) return c.json({ error: 'XERO_CLIENT_ID is not set' }, 500);
+
+  try {
+    const state = newState(loadKey(process.env.XERO_TOKEN_KEY), Date.now());
+    return c.json({ url: buildAuthorizeUrl(clientId, xeroRedirectUri(), state) });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+app.get('/xero/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  const denied = c.req.query('error');
+
+  // The operator can decline on Xero's consent screen. That is a normal
+  // outcome, not a failure to debug.
+  if (denied) return c.html(`<p>Xero connection cancelled (${denied}). You can close this tab.</p>`, 400);
+  if (!code || !state) return c.html('<p>Missing code or state from Xero.</p>', 400);
+
+  try {
+    const key = loadKey(process.env.XERO_TOKEN_KEY);
+    if (!verifyState(key, state, Date.now())) {
+      return c.html('<p>This authorization link is invalid or has expired. Start again from the admin page.</p>', 400);
+    }
+
+    const tokens = await exchangeCode(code, xeroRedirectUri());
+    const tenants = await fetchTenants(tokens.access_token);
+    if (tenants.length === 0) {
+      return c.html('<p>Xero reported no organisations for this login. Check the account has access to at least one organisation.</p>', 400);
+    }
+
+    await storeConnection(tenants, tokens);
+
+    // Named, not counted: the operator has to recognise these to map them, and
+    // the names are legal entities that will not match venue names.
+    const list = tenants.map(t => `<li>${t.tenantName}</li>`).join('');
+    return c.html(
+      `<h3>Xero connected</h3><p>Organisations now available:</p><ul>${list}</ul>` +
+      `<p>Each still needs mapping to a venue before anything is ingested — nothing is assumed from the name.</p>`,
+    );
+  } catch (e: any) {
+    return c.html(`<h3>Xero connection failed</h3><pre>${e.message}</pre>`, 500);
+  }
+});
+
+/** Connected organisations and their venue mapping. Owner only. */
+app.get('/admin/api/xero/connections', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data } = await supabaseAdmin
+    .from('xero_connections')
+    .select('id, tenant_id, tenant_name, venue_id, status, last_error, connected_at, last_refreshed_at, venues(name, slug)')
+    .order('connected_at', { ascending: false });
+
+  return c.json({ connections: data ?? [] });
+});
+
+/** Map a Xero organisation to a venue. Confirmed by a human, never inferred. */
+app.post('/admin/api/xero/connections/:id/venue', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { venue_id } = await c.req.json();
+  if (!venue_id) return c.json({ error: 'venue_id required' }, 400);
+
+  const { data, error } = await supabaseAdmin
+    .from('xero_connections')
+    .update({ venue_id, status: 'active', updated_at: new Date().toISOString() })
+    .eq('id', c.req.param('id'))
+    .select('id, tenant_id, tenant_name, venue_id, status')
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ connection: data });
+});
 
 app.get('/watchdog', async (c) => {
   const days = Number(c.req.query('days') ?? 3);
