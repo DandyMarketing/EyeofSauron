@@ -461,18 +461,19 @@ function fmtTime(iso) {
 }
 
 async function loadAll() {
-  const [usersData, venuesData, systemData, notesData] = await Promise.all([
+  const [usersData, venuesData, systemData, notesData, xeroData] = await Promise.all([
     api('GET', '/admin/api/users'),
     api('GET', '/admin/api/venues'),
     api('GET', '/admin/api/system?days=3'),
     api('GET', '/admin/api/notes'),
+    api('GET', '/admin/api/xero/connections'),
   ]);
 
   venues = venuesData.venues || [];
-  render(usersData.users || [], systemData, notesData.notes || []);
+  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || []);
 }
 
-function render(users, system, notes) {
+function render(users, system, notes, xeroConnections) {
   const app = document.getElementById('app');
   app.innerHTML = '';
 
@@ -646,6 +647,49 @@ function render(users, system, notes) {
 
   notesSection.innerHTML = notesHtml;
   app.appendChild(notesSection);
+
+  // Xero section
+  const xeroSection = el('div', 'section');
+  const connRows = (xeroConnections || []).map(cn => {
+    const mapped = cn.venues ? cn.venues.name : null;
+    // A Xero organisation is a legal entity, so the name will not match the
+    // venue's. Nothing is ingested until a human says which is which.
+    const venueSelect = '<option value="">— not mapped —</option>' +
+      venues.map(v => `<option value="${v.id}"${cn.venue_id === v.id ? ' selected' : ''}>${v.name}</option>`).join('');
+    return `<tr>
+      <td><strong>${cn.tenant_name || '(unnamed)'}</strong><br><span style="color:var(--text-muted);font-size:11px">${cn.tenant_id}</span></td>
+      <td><select data-conn="${cn.id}" class="xero-venue" style="min-width:150px">${venueSelect}</select></td>
+      <td>${mapped ? 'active' : 'awaiting mapping'}${cn.last_error ? `<br><span style="color:#c00;font-size:11px">${cn.last_error}</span>` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  xeroSection.innerHTML = `<h2>Xero</h2>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">
+      Connect a Xero login to pull P&amp;L and cost data. One Xero organisation per venue.
+      Organisations are legal entities and their names will not match venue names, so each
+      one has to be mapped by hand — nothing is ingested against an unmapped organisation.
+    </p>
+    <button id="xero-connect-btn" class="btn">Connect Xero</button>
+    ${connRows ? `<table style="margin-top:16px"><thead><tr><th>Xero organisation</th><th>Venue</th><th>Status</th></tr></thead><tbody>${connRows}</tbody></table>` : '<p style="color:var(--text-muted);font-size:13px;margin-top:12px">No organisations connected yet.</p>'}`;
+  app.appendChild(xeroSection);
+
+  document.getElementById('xero-connect-btn').addEventListener('click', async () => {
+    // The session token cannot ride a browser navigation, so the URL is
+    // fetched with it and the redirect happens here.
+    const res = await api('GET', '/xero/connect');
+    if (res.error) { alert('Could not start Xero connection: ' + res.error); return; }
+    window.location = res.url;
+  });
+
+  for (const sel of document.querySelectorAll('.xero-venue')) {
+    sel.addEventListener('change', async (e) => {
+      const venueId = e.target.value;
+      if (!venueId) return;
+      const res = await api('POST', `/admin/api/xero/connections/${e.target.dataset.conn}/venue`, { venue_id: venueId });
+      if (res.error) { alert('Could not map: ' + res.error); return; }
+      await loadAll();
+    });
+  }
 
   document.getElementById('note-add-btn').addEventListener('click', async () => {
     const noteText = document.getElementById('note-text').value.trim();
