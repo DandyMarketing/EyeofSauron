@@ -157,6 +157,28 @@ How to use it:
 - A note marked "hypothesis" is someone's working theory, not an established rule. Treat it as a lead to test against the data, never as a finding.`;
 
 /**
+ * Is the knowledge layer readable, and how much does it hold?
+ *
+ * Exposed through /watchdog because a log line is only seen by whoever
+ * happens to look. This filters on `status`, which migration 010 introduced,
+ * so an unapplied migration fails the probe rather than hiding behind an
+ * empty result.
+ */
+export async function knowledgeHealth(): Promise<{
+  ok: boolean;
+  approved_notes: number;
+  error?: string;
+}> {
+  const { count, error } = await supabase
+    .from('venue_notes')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'approved');
+
+  if (error) return { ok: false, approved_notes: 0, error: error.message };
+  return { ok: true, approved_notes: count ?? 0 };
+}
+
+/**
  * Fetch approved notes visible to this caller.
  *
  * `allowedVenueSlugs === null` means an owner. Scoping is applied in code
@@ -173,7 +195,20 @@ export async function fetchNotes(allowedVenueSlugs: string[] | null): Promise<Kn
     .order('created_at', { ascending: false })
     .limit(NOTE_FETCH_LIMIT + 1);
 
-  if (error || !data) return [];
+  // A failed read must not look like an empty knowledge base. Returning []
+  // quietly on error is the exact shape of the defects in BUILD_LOG section 1:
+  // the answer still arrives, still reads well, and is built on nothing. The
+  // most likely cause is migration 010 not having been applied, which would
+  // otherwise be invisible until someone noticed Sauron had quietly stopped
+  // using anything the business taught it.
+  if (error) {
+    console.error(
+      `[knowledge] FAILED to read venue_notes -- Sauron is answering with NO team knowledge. ` +
+      `Check that migration 010_knowledge_layer.sql has been applied. Error: ${error.message}`,
+    );
+    return [];
+  }
+  if (!data) return [];
 
   if (data.length > NOTE_FETCH_LIMIT) {
     console.warn(

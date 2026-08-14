@@ -7,7 +7,7 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
-import { noteVenueAllowed } from './ai/knowledge.js';
+import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -502,8 +502,13 @@ app.get('/admin/api/system', async (c) => {
 app.get('/watchdog', async (c) => {
   const days = Number(c.req.query('days') ?? 3);
   const report = await checkDataGaps(days);
-  const healthy = report.missing.length === 0 && report.recent_errors.length === 0;
-  return c.json({ healthy, ...report });
+  // A knowledge layer that has silently stopped being readable looks exactly
+  // like one nobody has written to yet, so it is checked here rather than
+  // left to a log line.
+  const knowledge = await knowledgeHealth();
+  const healthy =
+    report.missing.length === 0 && report.recent_errors.length === 0 && knowledge.ok;
+  return c.json({ healthy, knowledge, ...report });
 });
 
 // --- Static frontend ---
