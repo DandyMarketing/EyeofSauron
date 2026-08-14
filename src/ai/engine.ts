@@ -71,8 +71,13 @@ export async function askSauron(
 
   const today = getSingaporeDate();
   let systemPrompt = `${SYSTEM_PROMPT_BASE}\n\nToday's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
+  // The tool layer is the actual control; this only keeps the model from
+  // promising data it will then be refused. An empty list means no venues at
+  // all, which must not read as "no restriction".
   if (venueFilter && venueFilter.length > 0) {
     systemPrompt += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
+  } else if (venueFilter) {
+    systemPrompt += `\n\nIMPORTANT: This user has not been assigned to any venue, so no venue data is available to them. Do not attempt to query venue data. Tell them their account has no venue access yet and to contact HQ.`;
   }
 
   const { data: notes } = await supabase

@@ -37,7 +37,11 @@ export async function handleToolCall(
   input: Record<string, any>,
   venueFilter?: string[],
 ): Promise<string> {
-  if (venueFilter && venueFilter.length > 0) {
+  // `undefined` means an owner, who may see everything. An empty array is the
+  // opposite -- a caller holding no venues at all -- and must resolve to
+  // nothing. Testing `length > 0` here treated the two as the same thing, so a
+  // user whose grants had been revoked was scoped to the whole group.
+  if (venueFilter) {
     const denied = enforceVenueScope(input, venueFilter);
     if (denied) return JSON.stringify({ error: denied });
   }
