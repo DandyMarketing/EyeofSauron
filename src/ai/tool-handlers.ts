@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
+import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -29,52 +30,6 @@ function applyDateFilter(query: any, dateFilter: ReturnType<typeof getDateFilter
 function dateLabel(dateFilter: ReturnType<typeof getDateFilter>): string {
   if ('single' in dateFilter) return dateFilter.single;
   return `${dateFilter.start} to ${dateFilter.end}`;
-}
-
-/**
- * Clamp a tool call to the venues the caller may see.
- *
- * These handlers query with the service-role key, which bypasses Row-Level
- * Security, so RLS is not protecting anything here. Until now the only thing
- * keeping a venue manager out of another venue's numbers was an instruction in
- * the system prompt -- a request, not a control. This enforces it in code.
- *
- * Omitting the venue is the dangerous case: several tools read "no venue" as
- * "all venues", so an unscoped call would return the whole group. A restricted
- * caller therefore has the filter applied rather than left blank.
- *
- * Returns an error string if the call must be refused, otherwise mutates the
- * input to stay in scope and returns null.
- */
-function enforceVenueScope(input: Record<string, any>, allowed: string[]): string | null {
-  input.__allowed_venues = [...allowed];
-
-  if (typeof input.venue_slug === 'string') {
-    if (!allowed.includes(input.venue_slug)) {
-      return `You do not have access to venue "${input.venue_slug}". You can see: ${allowed.join(', ')}.`;
-    }
-    return null;
-  }
-
-  if (Array.isArray(input.venue_slugs)) {
-    const permitted = input.venue_slugs.filter((s: string) => allowed.includes(s));
-    if (permitted.length === 0) {
-      return `You do not have access to those venues. You can see: ${allowed.join(', ')}.`;
-    }
-    input.venue_slugs = permitted;
-    return null;
-  }
-
-  // No venue given. Several tools read that as "all venues", so record the
-  // allow-list on the input for those handlers to filter by.
-  input.__allowed_venues = [...allowed];
-  return null;
-}
-
-/** Venue list a handler may return, honouring any caller restriction. */
-function scopeVenues<T extends { slug: string }>(venues: T[], input: Record<string, any>): T[] {
-  const allowed: string[] | undefined = input.__allowed_venues;
-  return allowed ? venues.filter(v => allowed.includes(v.slug)) : venues;
 }
 
 export async function handleToolCall(

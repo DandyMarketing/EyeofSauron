@@ -97,7 +97,7 @@ export function autoGranularity(from: string, to: string): Granularity {
   return 'day';
 }
 
-function bucketOf(date: string, g: Granularity): string {
+export function bucketOf(date: string, g: Granularity): string {
   if (g === 'month') return date.slice(0, 7);
   if (g === 'day') return date;
   // Parsed as UTC throughout: `new Date('2026-07-14')` alone is midnight UTC but
@@ -295,14 +295,14 @@ export function isClosedDay(row: { gross_sales?: any; total_transactions?: any }
 }
 
 /** Does the range start part-way into its first bucket? */
-function isPartialStart(start: string, g: Granularity): boolean {
+export function isPartialStart(start: string, g: Granularity): boolean {
   if (g === 'day' || g === 'day_of_week') return false;
   if (g === 'month') return start.slice(8, 10) !== '01';
   return (new Date(`${start}T00:00:00Z`).getUTCDay() + 6) % 7 !== 0; // not a Monday
 }
 
 /** Does the range stop part-way through its last bucket? */
-function isPartialEnd(end: string, g: Granularity): boolean {
+export function isPartialEnd(end: string, g: Granularity): boolean {
   if (g === 'day' || g === 'day_of_week') return false;
   const d = new Date(`${end}T00:00:00Z`);
   if (g === 'month') {

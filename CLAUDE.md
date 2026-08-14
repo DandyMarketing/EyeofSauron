@@ -99,6 +99,49 @@ The honest trade-off: a tool I wrote is wrong the same way every time, so it get
 
 StaffAny API grant method · Revel report frequency · Revel venue-key mapping (Khai to gather one filename per venue) · user scale (managers only vs all staff) · exact StaffAny fields to ingest · Telegram allowlist owner · Supabase hosted vs self-hosted.
 
+### Role model: access level and function are two different things
+
+**Khai is mapping the roles and ranks. Do not change the schema until he has.**
+
+`user_venue_roles.role` is currently `owner | finance | manager | staff`, and it
+answers exactly one question: *what are you allowed to see*. Owners see every
+venue, everyone else sees their own. Beyond that every user gets an identical
+experience — one system prompt, one tool list.
+
+The business has functions that this cannot express: kitchen, exec chef, ops,
+events, marketing. **Function is orthogonal to seniority.** The clearest proof
+is marketing, which needs sales for *all* venues but has no business in the P&L
+or in payroll. That is not a rung on the owner→staff ladder, and adding
+`marketing` to the enum would grant either too much or too little.
+
+So there are three independent axes, which line up with the WHO/WHAT/WHERE
+model already described above:
+
+- **Scope** (WHO) — which venues: one · some · all
+- **Function** (WHAT) — which data domains, and which questions matter
+- **Channel** (WHERE) — web vs Telegram (already decided)
+
+Function is also the better carrier for the sensitivity wall than seniority is.
+An exec chef needs product mix, COGS and item performance and has no need of the
+P&L; a manager is not *less trusted* than finance, they simply need different
+things.
+
+**The trap to avoid when this is built.** Implementing function as "which tools
+we offer the model" is right for *relevance* and useless for *permission*.
+Withholding a tool from the list is a hint, not a control — the model can name a
+tool from conversation history, and the deferred read-only SQL tool would ignore
+it entirely. It must be both: the tool list for relevance, and a server-side
+domain check next to `enforceVenueScope()` for permission. This is BUILD_LOG 4.1
+repeating itself if it is got wrong.
+
+**Still open:** whether a restaurant manager sees other venues' figures.
+Benchmarking across venues is stated above as the product edge ("your food cost
+32% vs sister venue 28%"), while the security model says each venue sees only
+its own. Both cannot be true as written. Likely resolution is a third thing —
+own figures plus *comparative* figures (rank, group average, anonymised sister
+venue) but never another venue's raw P&L. Not decided. There are no GMs today,
+only restaurant managers.
+
 ## Working style — hard rules
 
 - **Do not overcomplicate.** Try the simplest, most direct fix first. Exhaust the obvious before reaching for workarounds, CLI installs, or multi-step procedures.
