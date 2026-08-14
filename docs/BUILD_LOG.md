@@ -196,6 +196,39 @@ is in use. Anything reaching the warehouse on behalf of a user must have venue
 scope supplied by the model or the client. Any future read-only SQL tool
 inherits this requirement in full.
 
+### 4.2 Venue scope was enforced on tools but not on the system prompt
+**Symptom.** Found during review, not in use. Every venue's `venue_notes` were
+written into every user's system prompt.
+**Root cause.** 4.1 was fixed at the tool layer. The notes query was a second,
+separate path to the warehouse — unfiltered, on the service-role key — and it
+appended its results one line below the text telling the user which venues they
+were limited to. The fix for 4.1 did not generalise to it because nobody
+enumerated the other paths.
+**Fix.** `scopeNotes()` in `src/ai/knowledge.ts`, applied in code, with tests
+covering the empty-grant case.
+**Recurs?** **Every customer, and it is the lesson rather than the bug.** A
+security fix applied at one call site is not a security fix. When a boundary is
+established, enumerate every path that crosses it — tools, prompt assembly,
+admin endpoints, exports, and later the read-only SQL tool — and check each
+one. Notes made this worse than a tool leak in two ways: they are free text, so
+the leaked content is unbounded, and they were injected unconditionally rather
+than only when the model chose to query.
+
+### 4.3 An empty venue grant read as unrestricted access
+**Symptom.** Found during review. A user with no rows in `user_venue_roles`
+could see every venue.
+**Root cause.** `handleToolCall()` guarded on
+`venueFilter && venueFilter.length > 0`, so an empty array skipped
+`enforceVenueScope()` entirely and the allow-list was never stamped. `undefined`
+(an owner, who may see everything) and `[]` (a caller holding nothing) were
+treated identically while meaning opposite things.
+**Fix.** Guard on `venueFilter` alone; `enforceVenueScope()` already handled the
+empty case correctly.
+**Recurs?** **Every customer.** The reachable path is revocation — removing a
+user's roles emptied their grants, which widened their access instead of closing
+it. Any permission check that treats "no permissions" as a falsy value has this
+shape. Test the empty case explicitly; it is the one nobody tries by hand.
+
 ---
 
 ## 5. Presentation and delivery

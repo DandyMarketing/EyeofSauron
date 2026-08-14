@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
-import { supabase } from '../lib/supabase.js';
+import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
 
 const client = new Anthropic();
 
@@ -80,17 +80,14 @@ export async function askSauron(
     systemPrompt += `\n\nIMPORTANT: This user has not been assigned to any venue, so no venue data is available to them. Do not attempt to query venue data. Tell them their account has no venue access yet and to contact HQ.`;
   }
 
-  const { data: notes } = await supabase
-    .from('venue_notes')
-    .select('note, category, venues(name)')
-    .order('created_at', { ascending: false });
-
-  if (notes && notes.length > 0) {
-    const notesText = notes.map((n: any) => {
-      const venue = n.venues?.name ?? 'All venues';
-      return `- [${venue}/${n.category}] ${n.note}`;
-    }).join('\n');
-    systemPrompt += `\n\nVenue context notes (use these to inform your analysis and recommendations):\n${notesText}`;
+  // Notes are scoped to the caller's venues. They used to be selected
+  // unfiltered and appended here, one line below the text telling the user
+  // which venues they may see -- so a venue manager received every other
+  // venue's notes, which are free text and could say anything.
+  const notes = await fetchNotes(venueFilter ?? null);
+  const notesText = formatNotes(notes, today);
+  if (notesText) {
+    systemPrompt += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;
   }
 
   const messages: Anthropic.MessageParam[] = [

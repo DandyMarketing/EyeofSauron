@@ -7,6 +7,7 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales } from './ingest/revel.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
+import { noteVenueAllowed } from './ai/knowledge.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -328,29 +329,131 @@ app.post('/admin/api/users/:userId/reset-password', async (c) => {
 
 // --- Venue notes (AI context) ---
 
+// --- Knowledge layer ---
+//
+// Notes are accumulated operator judgment. Anyone may propose one; only an
+// owner may approve it into the knowledge base. That review step is the point:
+// the system must never write its own lessons, because a confident wrong
+// answer then becomes a permanent stored fact. BUILD_LOG 1.1 is the example --
+// a paging bug was reported as a finding about the business, and would have
+// been saved as one.
+
+const NOTE_FIELDS =
+  'id, venue_id, note, category, confidence, portability, status, source, review_by, author_id, created_at, venues(name)';
+
 app.get('/admin/api/notes', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { data } = await supabaseAdmin
-    .from('venue_notes')
-    .select('id, venue_id, note, category, created_at, venues(name)')
-    .order('created_at', { ascending: false });
+  const status = c.req.query('status');
+  let query = supabaseAdmin.from('venue_notes').select(NOTE_FIELDS);
+  if (status) query = query.eq('status', status);
 
-  return c.json({ notes: data ?? [] });
+  const { data } = await query.order('created_at', { ascending: false });
+
+  // Flag notes past their re-confirmation date so the admin screen can show a
+  // review list without duplicating the staleness rule in the front end.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+  const notes = (data ?? []).map((n: any) => ({
+    ...n,
+    needs_review: n.review_by !== null && n.review_by < today,
+  }));
+
+  return c.json({ notes });
 });
 
 app.post('/admin/api/notes', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { venue_id, note, category } = await c.req.json();
+  const { venue_id, note, category, confidence, portability, review_by } = await c.req.json();
   if (!note) return c.json({ error: 'Note text required' }, 400);
 
   const { data, error } = await supabaseAdmin
     .from('venue_notes')
-    .insert({ venue_id: venue_id || null, note, category: category || 'general' })
-    .select()
+    .insert({
+      venue_id: venue_id || null,
+      note,
+      category: category || 'general',
+      confidence: confidence || 'observed',
+      // Defaults to the safe direction: a note does not travel to another
+      // customer unless someone says it is general F&B truth.
+      portability: portability || 'dandy_specific',
+      review_by: review_by || null,
+      author_id: user.id,
+      source: 'manual',
+      status: 'approved', // entered by an owner, which is itself the approval
+    })
+    .select(NOTE_FIELDS)
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ note: data });
+});
+
+/**
+ * Teach Sauron — capture a lesson from anyone, for review.
+ *
+ * Deliberately open to any authenticated user: the expertise worth capturing
+ * is spoken by people who are not owners, and proposing costs nothing because
+ * nothing reaches a prompt before approval.
+ */
+app.post('/api/notes/capture', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const { venue_id, note, category, confidence } = await c.req.json();
+  if (!note || typeof note !== 'string' || !note.trim()) {
+    return c.json({ error: 'Note text required' }, 400);
+  }
+
+  const venueId = venue_id || null;
+  if (!noteVenueAllowed(user, venueId)) {
+    return c.json({ error: 'You do not have access to that venue.' }, 403);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('venue_notes')
+    .insert({
+      venue_id: venueId,
+      note: note.trim(),
+      category: category || 'general',
+      confidence: confidence || 'observed',
+      portability: 'dandy_specific',
+      author_id: user.id,
+      source: 'captured',
+      status: 'pending', // never reaches a prompt until an owner approves it
+    })
+    .select(NOTE_FIELDS)
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ note: data, message: 'Captured — an owner will review it before Sauron uses it.' });
+});
+
+/** Approve, reject, or retire a note. Owner only. */
+app.post('/admin/api/notes/:noteId/review', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { status, confidence, portability, review_by, note } = await c.req.json();
+  if (!['approved', 'rejected', 'retired'].includes(status)) {
+    return c.json({ error: 'status must be approved, rejected or retired' }, 400);
+  }
+
+  // A reviewer may correct the note as they approve it -- that edit is the
+  // senior's judgment being applied, which is the whole point of the queue.
+  const update: Record<string, unknown> = { status };
+  if (typeof note === 'string' && note.trim()) update.note = note.trim();
+  if (confidence) update.confidence = confidence;
+  if (portability) update.portability = portability;
+  if (review_by !== undefined) update.review_by = review_by || null;
+
+  const { data, error } = await supabaseAdmin
+    .from('venue_notes')
+    .update(update)
+    .eq('id', c.req.param('noteId'))
+    .select(NOTE_FIELDS)
     .single();
 
   if (error) return c.json({ error: error.message }, 400);
