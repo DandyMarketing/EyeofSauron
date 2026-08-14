@@ -77,14 +77,34 @@ describe('buildAuthorizeUrl', () => {
   test('requests offline_access, without which there is no refresh token', () => {
     const scopes = (parsed.searchParams.get('scope') ?? '').split(' ');
     assert.ok(scopes.includes('offline_access'), 'missing offline_access — the connection would die in 30 minutes');
-    assert.ok(scopes.includes('accounting.reports.read'));
-    assert.ok(scopes.includes('accounting.settings.read'));
+  });
+
+  test('uses the GRANULAR profit-and-loss report scope', () => {
+    // The broad `accounting.reports.read` is unavailable to any app created on
+    // or after 2 March 2026, and Xero rejects the whole authorization with
+    // `invalid_scope`. This test exists because older tutorials, and this
+    // repo's own history, both show the broad scope.
+    assert.ok(XERO_SCOPES.includes('accounting.reports.profitandloss.read'));
+    assert.ok(
+      !/accounting\.reports\.read/.test(XERO_SCOPES),
+      'broad reports scope is rejected outright for apps created after 2 Mar 2026',
+    );
+  });
+
+  test('spaces between scopes are encoded as %20, not +', () => {
+    // A scope list joined by '+' can be read as one long invalid scope name.
+    assert.ok(url.includes('%20'), 'scope separator should be %20');
+    assert.ok(!/scope=[^&]*\+/.test(url), "scope contains '+' as a separator");
   });
 
   test('requests no write scope', () => {
     // Sauron reports on the books; it must never be able to change them.
     assert.ok(!XERO_SCOPES.includes('.write'));
     assert.ok(!XERO_SCOPES.includes('payroll'));
+    // Granular read scopes all end in .read; offline_access is the exception.
+    for (const s of XERO_SCOPES.split(' ')) {
+      assert.ok(s === 'offline_access' || s.endsWith('.read'), `${s} is not a read-only scope`);
+    }
   });
 });
 

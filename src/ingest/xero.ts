@@ -19,15 +19,24 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
 
 /**
  * offline_access is mandatory -- without it Xero issues no refresh token at
- * all and the connection dies after thirty minutes. The other two are the
- * minimum for a P&L: the report itself, and the chart of accounts to read it
- * against. Deliberately no write scopes: Sauron reports on the books, it does
- * not touch them.
+ * all and the connection dies after thirty minutes.
+ *
+ * The report scope MUST be the granular one. Xero replaced the broad
+ * `accounting.reports.read` with per-report scopes, and an app created on or
+ * after 2 March 2026 has no access to the broad scopes at all -- the
+ * authorization request fails outright with `invalid_scope`. This app was
+ * created after that date. Do not "simplify" this back to the broad scope:
+ * older tutorials and older Sauron history both show it, and it will not work.
+ *
+ * Deliberately no write scopes: Sauron reports on the books, it never touches
+ * them. Deliberately no settings scope either -- the P&L report carries its
+ * own account names, so the chart of accounts is not needed to read it. If a
+ * later feature needs it, add the scope and re-authorise rather than asking
+ * for access now on the chance it becomes useful.
  */
 export const XERO_SCOPES = [
   'offline_access',
-  'accounting.reports.read',
-  'accounting.settings.read',
+  'accounting.reports.profitandloss.read',
 ].join(' ');
 
 /** How close to expiry an access token is treated as already expired. */
@@ -91,14 +100,19 @@ export function verifyState(key: Buffer, state: string, nowMs: number): boolean 
 
 /** Build the URL the operator is sent to in order to approve access. */
 export function buildAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    scope: XERO_SCOPES,
-    state,
-  });
-  return `${AUTHORIZE_URL}?${params.toString()}`;
+  // Built with encodeURIComponent rather than URLSearchParams, which encodes a
+  // space as '+'. That is correct for a form body and ambiguous in a query
+  // string -- a scope list joined by '+' can be read as one long invalid scope
+  // name. %20 is unambiguous, and this is not a place to leave a second
+  // possible cause of `invalid_scope` lying around.
+  const params = [
+    ['response_type', 'code'],
+    ['client_id', clientId],
+    ['redirect_uri', redirectUri],
+    ['scope', XERO_SCOPES],
+    ['state', state],
+  ].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  return `${AUTHORIZE_URL}?${params}`;
 }
 
 /** Is this access token expired, or close enough that it will be mid-request? */
