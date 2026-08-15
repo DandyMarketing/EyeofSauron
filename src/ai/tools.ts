@@ -2,6 +2,35 @@ import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
 
 export const queryTools: Tool[] = [
   {
+    name: 'query_social_performance',
+    description:
+      'Query social media metrics (Instagram/Facebook reach, profile views, website clicks) for a venue over a date range, returned ALONGSIDE that venue\'s daily revenue and covers for the same days. This is the tool for marketing questions: whether a campaign or a posting push moved the business, which days had both high reach and high trade, and how social activity tracks against covers. ' +
+      'CRITICAL: this returns two series side by side, it does NOT establish causation. A good social day and a good trading day co-occurring is not evidence one caused the other — weather, a public holiday, a walk-in surge or a private booking explain far more variance than a post does. Say what the numbers show and say plainly that attribution is not proven. Never tell someone a post drove revenue on this evidence. ' +
+      'A day missing from the social series means it was never ingested (Meta Stories data expires after ~24 hours and cannot be backfilled) — it does not mean zero reach.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of the range (inclusive) in YYYY-MM-DD format.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the range (inclusive) in YYYY-MM-DD format.',
+        },
+        metric: {
+          type: 'string',
+          description: 'Optional single metric to return, e.g. "reach" or "profile_views". Omit for all metrics held.',
+        },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_profit_and_loss',
     description:
       'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +

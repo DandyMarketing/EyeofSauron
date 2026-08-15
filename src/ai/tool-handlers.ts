@@ -47,6 +47,8 @@ export async function handleToolCall(
   }
 
   switch (name) {
+    case 'query_social_performance':
+      return querySocialPerformance(input);
     case 'query_profit_and_loss':
       return queryProfitAndLoss(input);
     case 'query_product_mix':
@@ -70,6 +72,84 @@ export async function handleToolCall(
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
+}
+
+/**
+ * Social metrics beside trading figures, day by day.
+ *
+ * The join is the whole point -- social data on its own is a vanity number,
+ * and the question marketing actually has is whether any of it reaches the
+ * till. Returning both series aligned by date is what lets that be discussed;
+ * it is emphatically NOT evidence of causation, and the tool description says
+ * so because the model will otherwise be asked to draw exactly that
+ * conclusion.
+ */
+async function querySocialPerformance(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required' });
+  }
+
+  let socialQuery = supabase
+    .from('social_daily')
+    .select('business_date, platform, metric, value')
+    .eq('venue_id', venueId)
+    .gte('business_date', input.start_date)
+    .lte('business_date', input.end_date)
+    .order('business_date', { ascending: true });
+
+  if (input.metric) socialQuery = socialQuery.eq('metric', input.metric);
+
+  const [{ data: social, error: socialError }, { data: trading, error: tradingError }] = await Promise.all([
+    socialQuery,
+    supabase
+      .from('daily_operations')
+      .select('business_date, gross_sales, total_guests, total_transactions')
+      .eq('venue_id', venueId)
+      .gte('business_date', input.start_date)
+      .lte('business_date', input.end_date)
+      .order('business_date', { ascending: true }),
+  ]);
+
+  if (socialError) return JSON.stringify({ error: socialError.message });
+  if (tradingError) return JSON.stringify({ error: tradingError.message });
+
+  if (!social || social.length === 0) {
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      social: [],
+      note: 'No social data has been ingested for this venue and period. This does NOT mean zero reach — say the data is unavailable rather than treating it as a quiet period.',
+    });
+  }
+
+  // Aligned by date so the model does not have to join two lists itself, and
+  // closed days are marked rather than appearing as a collapse in trade.
+  const byDate = new Map<string, any>();
+  for (const row of social) {
+    const day = byDate.get(row.business_date) ?? { date: row.business_date, social: {}, trading: null };
+    day.social[row.metric] = row.value;
+    byDate.set(row.business_date, day);
+  }
+  for (const t of trading ?? []) {
+    const day = byDate.get(t.business_date) ?? { date: t.business_date, social: {}, trading: null };
+    day.trading = isClosedDay(t)
+      ? { closed: true }
+      : { gross_sales: t.gross_sales, covers: t.total_guests, transactions: t.total_transactions };
+    byDate.set(t.business_date, day);
+  }
+
+  const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const socialDays = new Set(social.map(r => r.business_date));
+  const gaps = days.filter(d => !socialDays.has(d.date)).map(d => d.date);
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    caution: 'These are two series measured over the same days. Co-movement is NOT evidence that social activity caused trade — weather, holidays, events and bookings explain far more variance. Report what is visible; do not attribute revenue to a post.',
+    days_without_social_data: gaps,
+    days,
+  });
 }
 
 /**
