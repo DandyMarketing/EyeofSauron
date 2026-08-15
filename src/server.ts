@@ -433,7 +433,7 @@ app.post('/api/notes/capture', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
-  const { venue_id, note, category, confidence } = await c.req.json();
+  const { venue_id, note, category, confidence, source_question } = await c.req.json();
   if (!note || typeof note !== 'string' || !note.trim()) {
     return c.json({ error: 'Note text required' }, 400);
   }
@@ -453,6 +453,9 @@ app.post('/api/notes/capture', async (c) => {
       portability: 'dandy_specific',
       author_id: user.id,
       source: 'captured',
+      // Kept because a note is much harder to judge later without the
+      // question that produced it.
+      source_question: typeof source_question === 'string' ? source_question.slice(0, 2000) : null,
       status: 'pending', // never reaches a prompt until an owner approves it
     })
     .select(NOTE_FIELDS)

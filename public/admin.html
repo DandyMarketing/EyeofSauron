@@ -461,19 +461,20 @@ function fmtTime(iso) {
 }
 
 async function loadAll() {
-  const [usersData, venuesData, systemData, notesData, xeroData] = await Promise.all([
+  const [usersData, venuesData, systemData, notesData, xeroData, pendingData] = await Promise.all([
     api('GET', '/admin/api/users'),
     api('GET', '/admin/api/venues'),
     api('GET', '/admin/api/system?days=3'),
     api('GET', '/admin/api/notes'),
     api('GET', '/admin/api/xero/connections'),
+    api('GET', '/admin/api/notes?status=pending'),
   ]);
 
   venues = venuesData.venues || [];
-  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || []);
+  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || [], pendingData.notes || []);
 }
 
-function render(users, system, notes, xeroConnections) {
+function render(users, system, notes, xeroConnections, pendingNotes) {
   const app = document.getElementById('app');
   app.innerHTML = '';
 
@@ -608,6 +609,42 @@ function render(users, system, notes, xeroConnections) {
   sysSection.appendChild(ingCard);
 
   app.appendChild(sysSection);
+
+  // Review queue — notes captured from conversations, awaiting approval.
+  // Nothing here has reached a prompt yet: the system must never write its own
+  // lessons, because a confident wrong answer would become a stored fact.
+  if (pendingNotes && pendingNotes.length > 0) {
+    const q = el('div', 'section');
+    q.innerHTML = '<h2>Awaiting review (' + pendingNotes.length + ')</h2>' +
+      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Captured from conversations. Nothing here is used by Sauron until you approve it. Edit as you approve — correcting it is the point of the queue.</p>' +
+      pendingNotes.map(function (n) {
+        return '<div class="pending-note" data-id="' + n.id + '" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">' +
+          (n.source_question ? '<div style="color:var(--text-muted);font-size:12px;margin-bottom:6px">Asked: ' + escapeHtml(n.source_question) + '</div>' : '') +
+          '<textarea class="pn-text" rows="3" style="width:100%">' + escapeHtml(n.note) + '</textarea>' +
+          '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">' +
+            '<span style="color:var(--text-muted);font-size:12px">' + (n.venues ? escapeHtml(n.venues.name) : 'All venues') + ' &middot; ' + escapeHtml(n.confidence) + '</span>' +
+            '<select class="pn-port"><option value="dandy_specific">Specific to us</option><option value="universal">General F&amp;B truth</option></select>' +
+            '<button class="pn-approve">Approve</button>' +
+            '<button class="pn-reject">Reject</button>' +
+          '</div></div>';
+      }).join('');
+    app.appendChild(q);
+
+    q.querySelectorAll('.pending-note').forEach(function (card) {
+      const id = card.dataset.id;
+      const send = async function (status) {
+        const res = await api('POST', '/admin/api/notes/' + id + '/review', {
+          status: status,
+          note: card.querySelector('.pn-text').value,
+          portability: card.querySelector('.pn-port').value,
+        });
+        if (res.error) { alert(res.error); return; }
+        await loadAll();
+      };
+      card.querySelector('.pn-approve').addEventListener('click', function () { send('approved'); });
+      card.querySelector('.pn-reject').addEventListener('click', function () { send('rejected'); });
+    });
+  }
 
   // Venue Notes section (AI context)
   const notesSection = el('div', 'section');
@@ -893,6 +930,23 @@ async function deleteNote(noteId) {
     toast('success', 'Note deleted');
     await loadAll();
   }
+}
+
+/**
+ * Escape text before it goes into innerHTML.
+ *
+ * Not cosmetic. Note text is submitted by any authenticated user through the
+ * capture endpoint and rendered here, in the OWNER's admin page -- the most
+ * privileged session in the product. Unescaped, a note is a stored script
+ * injection aimed squarely at it.
+ */
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function el(tag, cls) {

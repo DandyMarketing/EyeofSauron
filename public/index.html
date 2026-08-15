@@ -127,6 +127,23 @@
     border-top-right-radius: 4px;
   }
 
+  .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
+  .teach-btn, .teach-save, .teach-cancel {
+    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
+    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  }
+  .teach-btn:hover, .teach-save:hover, .teach-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
+  .teach-save { border-color: rgba(120,180,255,0.5); color: #9cc6ff; }
+  .teach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .teach-text {
+    width: 100%; background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 13px;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;
+  }
+  .teach-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+  .teach-row select {
+    background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 12px;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 6px;
+  }
   .message.assistant .bubble {
     background: var(--assistant-bg);
     border: 1px solid var(--border);
@@ -485,6 +502,8 @@ let history = [];
 let busy = false;
 let authToken = null;
 let supabaseClient = null;
+// Venues this user may see, for the note-capture venue picker.
+let myVenues = [];
 
 (async function initAuth() {
   const cfg = await fetch('/api/config').then(r => r.json());
@@ -509,6 +528,7 @@ let supabaseClient = null;
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } });
   if (meRes.ok) {
     const me = await meRes.json();
+    myVenues = me.venues || [];
     if (me.isOwner) document.getElementById('admin-link').style.display = '';
   }
 
@@ -639,6 +659,84 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeChart();
 });
 
+/**
+ * "Teach Sauron this" — capture a lesson where it is actually created.
+ *
+ * Knowledge is produced in the conversation, not in an admin form, which is
+ * why the admin form sat unused. The question is stored alongside the note:
+ * "food cost runs high in July" is nearly useless six months later, while
+ * "asked why July margin dropped -> durian season" is actionable.
+ *
+ * Nothing captured here reaches a prompt until an owner approves it. The
+ * system must never write its own lessons — a confident wrong answer would
+ * otherwise become a permanent stored fact.
+ */
+function addTeachButton(bubble, question, answerText) {
+  const bar = document.createElement('div');
+  bar.className = 'teach-bar';
+
+  const btn = document.createElement('button');
+  btn.className = 'teach-btn';
+  btn.textContent = '+ Teach Sauron this';
+  bar.appendChild(btn);
+  bubble.appendChild(bar);
+
+  btn.addEventListener('click', () => {
+    btn.remove();
+
+    const box = document.createElement('div');
+    box.className = 'teach-box';
+    const venueOpts = '<option value="">All venues</option>' +
+      (myVenues || []).map(v => '<option value="' + v.venue_id + '">' + escapeHtml(v.slug) + '</option>').join('');
+    box.innerHTML =
+      '<div class="teach-hint">What should Sauron remember? Write the lesson, not the whole answer.</div>' +
+      '<textarea class="teach-text" rows="3"></textarea>' +
+      '<div class="teach-row"><select class="teach-venue">' + venueOpts + '</select>' +
+      '<select class="teach-conf">' +
+        '<option value="observed">Observed</option>' +
+        '<option value="rule">Rule</option>' +
+        '<option value="hypothesis">Hypothesis</option>' +
+      '</select>' +
+      '<button class="teach-save">Save for review</button>' +
+      '<button class="teach-cancel">Cancel</button></div>';
+    bar.appendChild(box);
+
+    const text = box.querySelector('.teach-text');
+    // Seeded with the answer so there is something to cut down rather than a
+    // blank box, which is what stops people writing anything at all.
+    text.value = (answerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    text.focus();
+
+    box.querySelector('.teach-cancel').addEventListener('click', () => bar.remove());
+
+    box.querySelector('.teach-save').addEventListener('click', async () => {
+      const note = text.value.trim();
+      if (!note) return;
+      const saveBtn = box.querySelector('.teach-save');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      try {
+        const res = await fetch('/api/notes/capture', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + authToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            note: note,
+            venue_id: box.querySelector('.teach-venue').value || null,
+            confidence: box.querySelector('.teach-conf').value,
+            source_question: question,
+          }),
+        });
+        const data = await res.json();
+        bar.innerHTML = data.error
+          ? '<div class="teach-hint">Could not save: ' + escapeHtml(data.error) + '</div>'
+          : '<div class="teach-hint">Saved. An owner will review it before Sauron uses it.</div>';
+      } catch (e) {
+        bar.innerHTML = '<div class="teach-hint">Could not save \u2014 check your connection.</div>';
+      }
+    });
+  });
+}
+
 function addMessage(role, content, isHtml) {
   if (welcome) welcome.remove();
 
@@ -756,7 +854,8 @@ async function send() {
     const answerText = (data.answer && data.answer.trim())
       ? data.answer
       : '_No response was returned. Please try asking again._';
-    addMessage('assistant', answerText);
+    const answerBubble = addMessage('assistant', answerText);
+    addTeachButton(answerBubble, question, answerText);
 
     history.push({ role: 'user', content: question });
     history.push({ role: 'assistant', content: answerText });
