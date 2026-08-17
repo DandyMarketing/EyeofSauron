@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers } from '../lib/covers.js';
-import { netSalesOf, foodAndBevSalesOf } from '../lib/sales.js';
+import { netSalesOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 
 /**
  * Chart data assembly.
@@ -13,6 +13,7 @@ import { netSalesOf, foodAndBevSalesOf } from '../lib/sales.js';
 
 export type Metric =
   | 'gross_sales'
+  | 'food_bev_sales'
   | 'net_sales'
   | 'covers'
   | 'avg_spend_per_head'
@@ -34,7 +35,7 @@ const DOW_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat
  * already computed as summed-numerator over summed-denominator, which is the
  * correct weighted average over any number of days -- they need no adjustment.
  */
-const ADDITIVE_METRICS = new Set<Metric>(['gross_sales', 'net_sales', 'covers']);
+const ADDITIVE_METRICS = new Set<Metric>(['gross_sales', 'food_bev_sales', 'net_sales', 'covers']);
 
 /** Below this many trading days a weekday average is noise, not a pattern. */
 const LOW_SAMPLE_DAYS = 4;
@@ -73,6 +74,7 @@ export interface ChartSpec {
 
 const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; source: string }> = {
   gross_sales:        { label: 'Gross sales',        unit: 'currency', source: 'Revel (POS)' },
+  food_bev_sales:     { label: 'Food & beverage sales', unit: 'currency', source: 'Revel (POS)' },
   net_sales:          { label: 'Net sales',          unit: 'currency', source: 'Revel (POS)' },
   avg_check:          { label: 'Average check',      unit: 'currency', source: 'Revel (POS)' },
   covers:             { label: 'Covers',             unit: 'count',    source: 'SevenRooms' },
@@ -192,11 +194,22 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         continue;
       }
       const a = touch(bucketOf(o.business_date, granularity));
-      // Both go through src/lib/sales.ts, where the definitions are written
-      // down. `gross_sales` is food + beverage and carries no service charge;
-      // `net_sales` is gross less discounts and does. They are not the same
-      // basis, which is exactly why neither is read as a bare column here.
-      a.revenue += input.metric === 'net_sales' ? netSalesOf(o) : foodAndBevSalesOf(o);
+      // Which revenue basis this metric uses, stated for each rather than
+      // defaulted -- avg_spend_per_head divides by `a.revenue` too, so a change
+      // to the fall-through would silently move a number nobody was editing.
+      // Definitions live in src/lib/sales.ts.
+      if (input.metric === 'net_sales') {
+        a.revenue += netSalesOf(o);
+      } else if (input.metric === 'gross_sales') {
+        // Food + beverage + service charge. Null only when a row carries no
+        // Revel figure to imply the service charge from, which would make the
+        // bucket a gap and read as a closure; the cost basis is the closest
+        // honest stand-in, and it understates rather than inventing.
+        a.revenue += grossSalesOf(o) ?? foodAndBevSalesOf(o);
+      } else {
+        // food_bev_sales, and the spend-per-head denominator.
+        a.revenue += foodAndBevSalesOf(o);
+      }
       a.checks += Number(o.net_to_account_for ?? 0);
       a.txns += Number(o.total_transactions ?? 0);
       a.days.add(o.business_date);
@@ -231,6 +244,7 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         let value: number | null;
         switch (input.metric) {
           case 'gross_sales':
+          case 'food_bev_sales':
           case 'net_sales':        value = a.revenue; break;
           case 'covers':           value = a.covers; break;
           case 'avg_check':        value = a.txns > 0 ? a.checks / a.txns : null; break;
