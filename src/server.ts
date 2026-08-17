@@ -661,6 +661,50 @@ app.post('/admin/api/xero/ingest', async (c) => {
   }
 });
 
+/** Unresolved reconciliation alerts, newest first. Owner only. */
+app.get('/admin/api/alerts', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data } = await supabaseAdmin
+    .from('reconciliation_alerts')
+    .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, created_at, venues(name)')
+    .eq('resolved', false)
+    .order('business_date', { ascending: false });
+
+  return c.json({ alerts: data ?? [] });
+});
+
+/**
+ * Mark an alert dealt with.
+ *
+ * Resolution is what makes the alert list mean something. Without it every
+ * finding accumulates forever, the watchdog is permanently red, and a red that
+ * is always on is one nobody reads -- which is how the Monday cron went four
+ * days without anyone noticing.
+ */
+app.post('/admin/api/alerts/:id/resolve', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const body = await c.req.json().catch(() => ({}));
+
+  const { data, error } = await supabaseAdmin
+    .from('reconciliation_alerts')
+    .update({
+      resolved: true,
+      resolved_by: user.id,
+      resolved_at: new Date().toISOString(),
+      notes: typeof body.notes === 'string' ? body.notes : null,
+    })
+    .eq('id', c.req.param('id'))
+    .select('id, business_date, alert_type, resolved')
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ alert: data });
+});
+
 app.get('/watchdog', async (c) => {
   const days = Number(c.req.query('days') ?? 3);
   const report = await checkDataGaps(days);
@@ -668,8 +712,14 @@ app.get('/watchdog', async (c) => {
   // like one nobody has written to yet, so it is checked here rather than
   // left to a log line.
   const knowledge = await knowledgeHealth();
+  // Open reconciliation alerts count against health -- they are real problems
+  // with the numbers. They are resolvable by a human, which is what keeps this
+  // from becoming a permanently-red signal nobody reads.
   const healthy =
-    report.missing.length === 0 && report.recent_errors.length === 0 && knowledge.ok;
+    report.missing.length === 0 &&
+    report.recent_errors.length === 0 &&
+    report.open_alerts.length === 0 &&
+    knowledge.ok;
   return c.json({ healthy, knowledge, ...report });
 });
 

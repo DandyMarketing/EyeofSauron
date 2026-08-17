@@ -24,9 +24,10 @@ export async function logIngestion(entry: LogEntry): Promise<void> {
 export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   missing: Array<{ venue: string; slug: string; date: string; missing: string[] }>;
   recent_errors: Array<{ filename: string; status: string; error: string; created_at: string }>;
+  open_alerts: Array<{ venue: string; date: string; type: string; detail: string; since: string }>;
 }> {
   const { data: venues } = await supabase.from('venues').select('id, name, slug, closed_weekdays');
-  if (!venues) return { missing: [], recent_errors: [] };
+  if (!venues) return { missing: [], recent_errors: [], open_alerts: [] };
 
   const today = new Date();
   const dates: string[] = [];
@@ -92,8 +93,32 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
     .order('created_at', { ascending: false })
     .limit(10);
 
+  // Unresolved reconciliation alerts -- data problems, as distinct from the
+  // job failures above. These have no time bound on purpose: an unreconciled
+  // day does not stop being wrong because it is old, and unlike an ingestion
+  // error there is a way to clear it. A human resolves it when it is dealt
+  // with, which is what stops this becoming another permanently-red signal.
+  const venueName = new Map(venues.map(v => [v.id, v.name]));
+  const { data: alerts } = await supabase
+    .from('reconciliation_alerts')
+    .select('venue_id, business_date, alert_type, difference, monday_gross, revel_gross, created_at')
+    .eq('resolved', false)
+    .order('business_date', { ascending: false })
+    .limit(50);
+
+  const open_alerts = (alerts ?? []).map(a => ({
+    venue: venueName.get(a.venue_id) ?? a.venue_id,
+    date: a.business_date,
+    type: a.alert_type,
+    detail: a.alert_type === 'post_lock_change'
+      ? 'Data changed on Monday.com after this day was reconciled and locked. The change was rejected, so Monday and the warehouse now disagree.'
+      : `Monday $${a.monday_gross ?? '?'} vs Revel $${a.revel_gross ?? '?'} (out by $${a.difference ?? '?'})`,
+    since: a.created_at,
+  }));
+
   return {
     missing,
+    open_alerts,
     recent_errors: (errors ?? []).map(e => ({
       filename: e.filename,
       status: e.status,

@@ -119,4 +119,15 @@ if (reconciliationFailures.length === 0 && postLockChanges.length === 0) {
   console.log('\nAll clear — no reconciliation issues.');
 }
 
-process.exit(totalSkipped > 0 || postLockChanges.length > 0 ? 1 : 0);
+// Exit non-zero ONLY for an execution error.
+//
+// This used to exit 1 on post-lock changes too, which made Railway show the
+// service as failed on every run while the job was working perfectly -- it had
+// fetched every board, rejected the changes correctly, and logged the alerts.
+// A data-quality finding is not a job failure: the cron's status answers "did
+// this run", not "is the data clean". Conflating them means the service is red
+// forever, and the day it genuinely breaks the red looks identical.
+//
+// Data health is reported where it belongs: reconciliation_alerts, surfaced
+// through /watchdog and resolvable by a human.
+process.exit(totalSkipped > 0 ? 1 : 0);

@@ -238,6 +238,24 @@ async function raiseAlert(alert: {
   old_meal_periods?: Record<string, MealPeriodData>;
   new_meal_periods?: Record<string, MealPeriodData>;
 }): Promise<void> {
+  // Do not raise a second alert for something already open.
+  //
+  // The Monday board still holds the changed value, so every hourly run
+  // re-detects the same rows and would insert an identical alert -- three
+  // unresolved days become dozens of rows a day, and the table stops being
+  // something a human can read. One open alert per (venue, date, type) until
+  // somebody resolves it.
+  const { data: open } = await supabase
+    .from('reconciliation_alerts')
+    .select('id')
+    .eq('venue_id', alert.venue_id)
+    .eq('business_date', alert.business_date)
+    .eq('alert_type', alert.alert_type)
+    .eq('resolved', false)
+    .limit(1);
+
+  if (open && open.length > 0) return;
+
   const { error } = await supabase
     .from('reconciliation_alerts')
     .insert(alert);
