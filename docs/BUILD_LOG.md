@@ -344,6 +344,26 @@ feeds run in production.
 new engineer — or a new AI session — reads and believes. Verify operational
 claims against the running system before repeating them.
 
+### 6.3 A deploy that only half-arrived
+**Symptom.** "Where is this button?" — twice. A new control was in the repo, on
+`main`, and served correctly by Railway, and still absent from the browser.
+**Root cause.** No `Cache-Control` header on the static HTML. Browsers fall back
+to heuristic caching off `Last-Modified` and can hold a page for hours.
+**Why it wasted time.** The failure is *partial*, which makes it look like
+anything but a cache. The server updates instantly while the page does not, so
+the user sees new server-side messages appearing in response to buttons that do
+not exist yet — last week's page talking to this week's API. Every explanation
+except the right one fits.
+**Fix.** The HTML shell now sends `no-cache, must-revalidate`; assets keep
+default caching. Note the header must be set by rebuilding the Response — its
+headers are immutable once constructed, so assigning to them silently does
+nothing, which is its own small trap.
+**Recurs?** **Every customer, and every deploy until fixed.** Two rules: *serve
+the app shell with revalidation from the first deploy*, and when a change is
+"definitely deployed" but invisible, **check what the browser actually holds
+before debugging the code** — `curl` the deployed asset and diff it against the
+repo. That is thirty seconds and rules out the whole class.
+
 ### 6.2 Deployment source diverged from the working branch
 The app deployed from a feature branch while `main` sat 53 commits behind and
 effectively empty. Work could be committed, pushed, and appear finished without
