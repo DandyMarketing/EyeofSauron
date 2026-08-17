@@ -84,8 +84,44 @@ export const TOTAL_VALUE_METRICS: Record<string, string[]> = {
  */
 export const TOTAL_VALUE_SINCE_OFFSET_DAYS = 1;
 
+/**
+ * Fields read from the account itself, not from insights.
+ *
+ * `followers_count` is the audience size RIGHT NOW. Meta keeps no history of
+ * it, so unlike everything else here it cannot be backfilled -- every day we do
+ * not capture it is a day that is gone for good. That is the argument for the
+ * nightly job, not just for tidiness.
+ *
+ * Note the plural. `follower_count`, singular, is an insights metric meaning
+ * new followers gained that day. One is a level, the other a change, and they
+ * differ by a single letter.
+ */
+export const ACCOUNT_FIELDS: Record<string, string[]> = {
+  instagram: ['followers_count'],
+  facebook: [],
+};
+
 const DAY_MS = 86_400_000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** Read plain fields off the account node. Not an insights call. */
+export async function fetchAccountFields(
+  accountId: string,
+  fields: string[],
+): Promise<Record<string, number>> {
+  const params = new URLSearchParams({ fields: fields.join(','), access_token: token() });
+  const res = await fetch(`${GRAPH}/${accountId}?${params}`);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Meta account fields request failed: ${res.status} ${redactTokens(text)}`);
+  }
+  const json = JSON.parse(text);
+  const out: Record<string, number> = {};
+  for (const f of fields) {
+    if (typeof json[f] === 'number') out[f] = json[f];
+  }
+  return out;
+}
 
 /** One day's figure for a metric Meta only aggregates. Null if it gave none. */
 export async function fetchTotalValueForDay(
@@ -508,7 +544,11 @@ export async function ingestMetaInsights(
   metrics: string[] = PLATFORM_METRICS[platform] ?? [],
   maxTotalValueDays = 7,
 ): Promise<MetaIngestResult> {
-  if (metrics.length === 0 && (TOTAL_VALUE_METRICS[platform] ?? []).length === 0) {
+  if (
+    metrics.length === 0 &&
+    (TOTAL_VALUE_METRICS[platform] ?? []).length === 0 &&
+    (ACCOUNT_FIELDS[platform] ?? []).length === 0
+  ) {
     // Facebook Pages, today. Saying "nothing configured" is honest; running
     // Instagram metric names against a Page and reporting Graph's rejection
     // would blame Meta for our own mistake.
@@ -588,6 +628,26 @@ export async function ingestMetaInsights(
           failedMetrics[metric] = String(e?.message ?? e).slice(0, 300);
         }
       }
+    }
+  }
+
+  // The audience size, as it stands now.
+  //
+  // Stamped with TODAY regardless of the range asked for, because that is the
+  // only day it describes. Meta serves no history for it, so writing it against
+  // an older date would invent a past reading -- a follower curve made of the
+  // same number repeated, which looks like a flat audience rather than missing
+  // data. One row per run; a second run the same day simply overwrites it.
+  const accountFields = ACCOUNT_FIELDS[platform] ?? [];
+  if (accountFields.length > 0) {
+    try {
+      const snapshot = await fetchAccountFields(accountId, accountFields);
+      const today = isoDay(Date.now());
+      for (const [metric, value] of Object.entries(snapshot)) {
+        rows.push({ business_date: today, metric, value });
+      }
+    } catch (e: any) {
+      failedMetrics[accountFields.join(',')] = String(e?.message ?? e).slice(0, 300);
     }
   }
 
