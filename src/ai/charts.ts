@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers } from '../lib/covers.js';
-import { netSalesOf } from '../lib/sales.js';
+import { netSalesOf, foodAndBevSalesOf } from '../lib/sales.js';
 
 /**
  * Chart data assembly.
@@ -73,7 +73,7 @@ export interface ChartSpec {
 
 const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; source: string }> = {
   gross_sales:        { label: 'Gross sales',        unit: 'currency', source: 'Revel (POS)' },
-  net_sales:          { label: 'Net sales (excl. service charge)', unit: 'currency', source: 'Revel (POS)' },
+  net_sales:          { label: 'Net sales',          unit: 'currency', source: 'Revel (POS)' },
   avg_check:          { label: 'Average check',      unit: 'currency', source: 'Revel (POS)' },
   covers:             { label: 'Covers',             unit: 'count',    source: 'SevenRooms' },
   avg_spend_per_head: { label: 'Spend per head',     unit: 'currency', source: 'Revel revenue / SevenRooms covers' },
@@ -192,9 +192,11 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         continue;
       }
       const a = touch(bucketOf(o.business_date, granularity));
-      // Never `o.net_sales` -- that column carries Revel's "Total Sales", which
-      // includes the 10% service charge. See src/lib/sales.ts.
-      a.revenue += input.metric === 'net_sales' ? netSalesOf(o) : Number(o.gross_sales ?? 0);
+      // Both go through src/lib/sales.ts, where the definitions are written
+      // down. `gross_sales` is food + beverage and carries no service charge;
+      // `net_sales` is gross less discounts and does. They are not the same
+      // basis, which is exactly why neither is read as a bare column here.
+      a.revenue += input.metric === 'net_sales' ? netSalesOf(o) : foodAndBevSalesOf(o);
       a.checks += Number(o.net_to_account_for ?? 0);
       a.txns += Number(o.total_transactions ?? 0);
       a.days.add(o.business_date);
