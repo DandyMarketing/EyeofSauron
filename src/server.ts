@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -705,9 +705,11 @@ app.get('/admin/api/meta/sample', async (c) => {
       account.account_id, [metric], since, until,
       form === 'total_value' ? 'total_value' : undefined,
     );
-    return c.json({ account: account.account_name, metric, form, since, until, raw });
+    // Graph echoes the access token back inside paging.next / paging.previous.
+    // Never return a Graph response unfiltered.
+    return c.json({ account: account.account_name, metric, form, since, until, raw: redactTokens(raw) });
   } catch (e: any) {
-    return c.json({ account: account.account_name, metric, form, since, until, error: String(e?.message ?? e) });
+    return c.json({ account: account.account_name, metric, form, since, until, error: redactTokens(String(e?.message ?? e)) });
   }
 });
 

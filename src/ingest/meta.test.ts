@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapDiscovered } from './meta.js';
+import { mapDiscovered, redactTokens } from './meta.js';
 
 /**
  * These cover the shapes Graph returns, which is the part that surprises you.
@@ -93,5 +93,45 @@ describe('mapDiscovered — reading what Graph hands back', () => {
     );
     assert.equal(accounts[0].insights_readable, null);
     assert.equal(accounts[1].insights_readable, null);
+  });
+});
+
+/**
+ * Graph echoes the access token back inside paging.next and paging.previous on
+ * every successful insights call. A diagnostic endpoint returned that verbatim,
+ * which put a permanent System User token on screen and then into a chat
+ * window. The token does not expire, so exposure means rotation.
+ */
+describe('redactTokens', () => {
+  test('strips the token Graph hides in paging URLs', () => {
+    const raw = {
+      data: [{ name: 'views', total_value: { value: 4519 } }],
+      paging: {
+        next: 'https://graph.facebook.com/v26.0/178414/insights?access_token=EAAVu5fGyOY8BSOfRT&since=1786924801&metric=views',
+        previous: 'https://graph.facebook.com/v26.0/178414/insights?access_token=EAAVu5fGyOY8BSOfRT&since=1786406399',
+      },
+    };
+    const out: any = redactTokens(raw);
+    const json = JSON.stringify(out);
+    assert.ok(!json.includes('EAAVu5fGyOY8BSOfRT'), 'token still present');
+    assert.match(out.paging.next, /access_token=REDACTED/);
+    // Everything else must survive -- the whole point is to read the response.
+    assert.equal(out.data[0].total_value.value, 4519);
+    assert.match(out.paging.next, /metric=views/);
+  });
+
+  test('strips it from a JSON field as well as a query string', () => {
+    const out: any = redactTokens({ error: { message: 'bad', access_token: 'EAAsecret' } });
+    assert.equal(out.error.access_token, 'REDACTED');
+  });
+
+  test('handles a bare string, which is what error messages are', () => {
+    const out = redactTokens('failed: https://x/y?access_token=EAAsecret&metric=reach');
+    assert.equal(out, 'failed: https://x/y?access_token=REDACTED&metric=reach');
+  });
+
+  test('leaves a response with no token untouched', () => {
+    const raw = { data: [{ name: 'reach', values: [{ value: 12, end_time: '2026-08-15T07:00:00+0000' }] }] };
+    assert.deepEqual(redactTokens(raw), raw);
   });
 });
