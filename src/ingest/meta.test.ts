@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapDiscovered, redactTokens, PLATFORM_METRICS, TOTAL_VALUE_METRICS, TOTAL_VALUE_SINCE_OFFSET_DAYS } from './meta.js';
+import { mapDiscovered, redactTokens, PLATFORM_METRICS, TOTAL_VALUE_METRICS, TOTAL_VALUE_SINCE_OFFSET_DAYS, ACCOUNT_FIELDS } from './meta.js';
 
 /**
  * These cover the shapes Graph returns, which is the part that surprises you.
@@ -203,5 +203,36 @@ describe('metric routing', () => {
   test('facebook pulls nothing until a working metric name is found', () => {
     assert.deepEqual(PLATFORM_METRICS.facebook, []);
     assert.deepEqual(TOTAL_VALUE_METRICS.facebook, []);
+  });
+});
+
+/**
+ * followers_count (plural, the audience size) versus follower_count (singular,
+ * the daily change). One letter apart, one a level and one a change. They must
+ * never be pulled by the same path or reported as each other.
+ */
+describe('account fields versus insights metrics', () => {
+  test('the audience size is an account field, not an insights metric', () => {
+    assert.deepEqual(ACCOUNT_FIELDS.instagram, ['followers_count']);
+    assert.ok(!PLATFORM_METRICS.instagram.includes('followers_count'));
+    assert.ok(!TOTAL_VALUE_METRICS.instagram.includes('followers_count'));
+  });
+
+  test('the daily change stays an insights metric', () => {
+    assert.ok(PLATFORM_METRICS.instagram.includes('follower_count'));
+    assert.ok(!ACCOUNT_FIELDS.instagram.includes('follower_count'));
+  });
+
+  test('no name appears in two lists on any platform', () => {
+    // A metric fetched by two paths would be written twice under two different
+    // meanings, and whichever ran last would win silently.
+    for (const platform of Object.keys(PLATFORM_METRICS)) {
+      const all = [
+        ...(PLATFORM_METRICS[platform] ?? []),
+        ...(TOTAL_VALUE_METRICS[platform] ?? []),
+        ...(ACCOUNT_FIELDS[platform] ?? []),
+      ];
+      assert.equal(new Set(all).size, all.length, `${platform} has a duplicate metric name`);
+    }
   });
 });
