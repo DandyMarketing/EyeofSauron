@@ -786,7 +786,8 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   metaSection.innerHTML = '<h2>Meta (Instagram &amp; Facebook)</h2>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
     '<button id="meta-discover-btn" class="btn">Discover accounts</button> ' +
-    '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button>' +
+    '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button> ' +
+    '<button id="meta-probe-btn" class="btn">Probe metric names</button>' +
     '<div id="meta-result" style="margin-top:16px"></div>';
   app.appendChild(metaSection);
 
@@ -875,6 +876,34 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
     out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') + '</p>' +
       '<table><thead><tr><th>Account</th><th>Stored</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  });
+
+  document.getElementById('meta-probe-btn').addEventListener('click', async () => {
+    const out = document.getElementById('meta-result');
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Trying every candidate metric name against the API. This takes a minute&hellip;</p>';
+
+    const res = await api('POST', '/admin/api/meta/probe-metrics');
+    if (res.error && !(res.results || []).length) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      return;
+    }
+
+    out.innerHTML = (res.results || []).map(function (r) {
+      const ok = (r.probes || []).filter(function (p) { return p.ok; });
+      const bad = (r.probes || []).filter(function (p) { return !p.ok; });
+      return '<div style="margin-bottom:20px">' +
+        '<div style="font-weight:600;margin-bottom:6px">' + escapeHtml(r.platform) + ' &middot; ' + escapeHtml(r.account_name || '') + '</div>' +
+        (ok.length
+          ? '<div style="font-size:13px;margin-bottom:6px"><span style="color:var(--success)">Accepted:</span> ' +
+            ok.map(function (p) { return escapeHtml(p.metric) + ' <span style="color:var(--text-muted);font-size:11px">(' + escapeHtml(p.form) + ')</span>'; }).join(', ') +
+            '</div>'
+          : '<div style="font-size:13px;color:var(--error);margin-bottom:6px">Nothing accepted.</div>') +
+        (bad.length
+          ? '<div style="font-size:12px;color:var(--text-muted)">Rejected: ' + bad.map(function (p) { return escapeHtml(p.metric); }).join(', ') + '</div>'
+          : '') +
+        (r.error ? '<div style="font-size:12px;color:var(--error)">' + escapeHtml(r.error) + '</div>' : '') +
+        '</div>';
+    }).join('');
   });
 
   document.getElementById('note-add-btn').addEventListener('click', async () => {

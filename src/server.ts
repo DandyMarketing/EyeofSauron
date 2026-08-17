@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts, ingestMetaInsights } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights, probeMetrics } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -627,6 +627,44 @@ app.get('/admin/api/meta/discover', async (c) => {
     // message says what to do about it -- surface it as-is.
     return c.json({ accounts: [], errors: [String(e?.message ?? e)] });
   }
+});
+
+/**
+ * Ask Meta which metric names it will accept, per mapped account.
+ *
+ * One call per candidate per form, so it is slow and deliberately manual. It is
+ * run when setting up or when a metric starts failing, not on a schedule.
+ */
+app.post('/admin/api/meta/probe-metrics', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data: accounts } = await supabaseAdmin
+    .from('social_accounts')
+    .select('platform, account_id, account_name')
+    .not('venue_id', 'is', null)
+    .eq('is_active', true);
+
+  if (!accounts || accounts.length === 0) {
+    return c.json({ results: [], error: 'No Meta accounts are mapped to a venue yet.' });
+  }
+
+  // One account per platform is enough: the vocabulary is a property of the
+  // platform, not of the account. Probing all six would be six times the calls
+  // for the same answer.
+  const seen = new Set<string>();
+  const results = [];
+  for (const a of accounts) {
+    if (seen.has(a.platform)) continue;
+    seen.add(a.platform);
+    try {
+      results.push({ platform: a.platform, account_name: a.account_name, probes: await probeMetrics(a.platform, a.account_id) });
+    } catch (e: any) {
+      results.push({ platform: a.platform, account_name: a.account_name, probes: [], error: String(e?.message ?? e) });
+    }
+  }
+
+  return c.json({ results });
 });
 
 /**

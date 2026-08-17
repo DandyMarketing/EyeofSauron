@@ -22,7 +22,45 @@ const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
  * the whole call -- Graph rejects the entire request if one metric name is
  * invalid, rather than returning the ones it understood.
  */
-export const IG_DAILY_METRICS = ['reach', 'profile_views', 'website_clicks'];
+export const IG_DAILY_METRICS = ['reach'];
+
+/**
+ * What to pull, per platform. Only metrics PROVEN to work go in here.
+ *
+ * `reach` is confirmed: it returned 30 days for all three Instagram accounts on
+ * 17 Aug 2026. `profile_views` and `website_clicks` were refused by Graph with
+ * "(#100) The value must be a valid insights metric" -- a name it no longer
+ * accepts on this endpoint, not a permission problem. They are candidates now,
+ * not defaults, and go back in the moment `probeMetrics` proves a working form.
+ *
+ * Facebook is deliberately EMPTY. Page insights use a completely different
+ * metric vocabulary (`page_impressions`, not `reach`), and sending Instagram
+ * names to a Page is what produced three red rows of "every metric failed" --
+ * our error, dressed up as Meta's. An empty list means the account is skipped
+ * cleanly and says so, rather than failing loudly about the wrong thing.
+ */
+export const PLATFORM_METRICS: Record<string, string[]> = {
+  instagram: ['reach'],
+  facebook: [],
+};
+
+/**
+ * Names worth trying. Meta retires and renames account metrics on its own
+ * schedule, so which of these is live is a question for the API, not for
+ * memory -- `probeMetrics` asks it and reports back.
+ */
+export const METRIC_CANDIDATES: Record<string, string[]> = {
+  instagram: [
+    'reach', 'impressions', 'views', 'profile_views', 'website_clicks',
+    'accounts_engaged', 'total_interactions', 'likes', 'comments', 'shares',
+    'saves', 'replies', 'follows_and_unfollows', 'profile_links_taps',
+  ],
+  facebook: [
+    'page_impressions', 'page_impressions_unique', 'page_post_engagements',
+    'page_views_total', 'page_fans', 'page_daily_follows',
+    'page_actions_post_reactions_total',
+  ],
+};
 
 export interface MetaIngestResult {
   venue_id: string;
@@ -197,6 +235,7 @@ export async function fetchInsights(
   metrics: string[],
   since: string,
   until: string,
+  metricType?: string,
 ): Promise<any> {
   const params = new URLSearchParams({
     metric: metrics.join(','),
@@ -205,6 +244,9 @@ export async function fetchInsights(
     until,
     access_token: token(),
   });
+  // Several Instagram metrics moved to a total_value form and stopped being
+  // accepted as a plain daily series. Which ones is a question for the API.
+  if (metricType) params.set('metric_type', metricType);
 
   const res = await fetch(`${GRAPH}/${accountId}/insights?${params}`);
   const text = await res.text();
@@ -216,6 +258,59 @@ export async function fetchInsights(
     throw new Error(`Meta insights request failed: ${res.status} ${text}`);
   }
   return JSON.parse(text);
+}
+
+export interface MetricProbe {
+  metric: string;
+  /** 'day' = plain daily series, 'total_value' = the newer aggregate form. */
+  form: 'day' | 'total_value' | null;
+  ok: boolean;
+  error: string | null;
+}
+
+/**
+ * Ask the API which metric names it will actually accept for this account.
+ *
+ * Written after guessing cost us: `profile_views` and `website_clicks` were in
+ * the default pull because they used to work, and Graph now answers "(#100) The
+ * value must be a valid insights metric". No list in any document is as
+ * reliable as asking the account in front of you, and Meta's vocabulary differs
+ * between Instagram and Facebook Pages anyway.
+ *
+ * Each candidate is tried as a plain daily series, then as total_value, because
+ * several metrics moved to that form rather than disappearing.
+ */
+export async function probeMetrics(
+  platform: string,
+  accountId: string,
+  candidates: string[] = METRIC_CANDIDATES[platform] ?? [],
+): Promise<MetricProbe[]> {
+  const today = new Date();
+  const until = today.toISOString().slice(0, 10);
+  const since = new Date(today.getTime() - 2 * 86_400_000).toISOString().slice(0, 10);
+  const out: MetricProbe[] = [];
+
+  for (const metric of candidates) {
+    let lastError = '';
+    let settled = false;
+
+    for (const form of ['day', 'total_value'] as const) {
+      try {
+        await fetchInsights(accountId, [metric], since, until, form === 'total_value' ? 'total_value' : undefined);
+        out.push({ metric, form, ok: true, error: null });
+        settled = true;
+        break;
+      } catch (e: any) {
+        lastError = String(e?.message ?? e);
+      }
+    }
+
+    if (!settled) {
+      out.push({ metric, form: null, ok: false, error: lastError.slice(0, 220) });
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -230,8 +325,18 @@ export async function ingestMetaInsights(
   accountId: string,
   since: string,
   until: string,
-  metrics: string[] = IG_DAILY_METRICS,
+  metrics: string[] = PLATFORM_METRICS[platform] ?? [],
 ): Promise<MetaIngestResult> {
+  if (metrics.length === 0) {
+    // Facebook Pages, today. Saying "nothing configured" is honest; running
+    // Instagram metric names against a Page and reporting Graph's rejection
+    // would blame Meta for our own mistake.
+    return {
+      venue_id: '', platform, account_id: accountId, from_date: since, to_date: until,
+      rows: 0, missing_days: [], stored: false,
+      error: `No metrics are configured for ${platform}. Run the metric probe to find names this platform accepts.`,
+    };
+  }
   const { data: account } = await supabase
     .from('social_accounts')
     .select('account_id, venue_id, is_active')
