@@ -97,18 +97,19 @@ describe('isSettled — has Finance had time to look at it?', () => {
     assert.equal(isSettled(friday, at('2026-08-09')), false, 'Sunday');
   });
 
-  test('one working day is not enough on its own', () => {
+  test('one or two working days is not enough on its own', () => {
     assert.equal(isSettled(friday, at('2026-08-10')), false, 'Monday');
+    assert.equal(isSettled(friday, at('2026-08-11')), false, 'Tuesday');
   });
 
-  test('Friday settles on Tuesday', () => {
-    assert.equal(isSettled(friday, at('2026-08-11')), true);
+  test('Friday settles on Wednesday', () => {
+    assert.equal(isSettled(friday, at('2026-08-12')), true);
   });
 
-  test('a Monday settles on Wednesday', () => {
-    // 2026-08-03 is a Monday: Tue 4 and Wed 5 are the two working days.
-    assert.equal(isSettled('2026-08-03', at('2026-08-04')), false);
-    assert.equal(isSettled('2026-08-03', at('2026-08-05')), true);
+  test('a Monday settles on Thursday', () => {
+    // 2026-08-03 is a Monday: Tue 4, Wed 5 and Thu 6 are the three working days.
+    assert.equal(isSettled('2026-08-03', at('2026-08-05')), false);
+    assert.equal(isSettled('2026-08-03', at('2026-08-06')), true);
   });
 
   test('today is never settled', () => {
@@ -120,7 +121,7 @@ describe('isSettled — has Finance had time to look at it?', () => {
   });
 
   test('the window is one constant to change', () => {
-    assert.equal(SETTLING_WORKING_DAYS, 2);
+    assert.equal(SETTLING_WORKING_DAYS, 3);
   });
 
   test('refuses a date it cannot read', () => {

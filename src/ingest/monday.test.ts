@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDate, summarisePostLockChange } from './monday.js';
+import { parseDate, summarisePostLockChange, cleanFinanceNote } from './monday.js';
 
 /**
  * BUILD_LOG 2.1. A Monday.com item was literally named "2925-12-30 Tuesday".
@@ -67,6 +67,44 @@ describe('parseDate — plausibility, not just syntax', () => {
     assert.equal(parseDate('bluesheets_21feb_lunch'), null);
     assert.equal(parseDate('new item'), null);
     assert.equal(parseDate(''), null);
+  });
+});
+
+/**
+ * "Notes for Finance" is where the venues explain a day. We were not reading
+ * it, and it cost us: Neon Pigeon wrote "Extra Items $84.00 For beverage" on
+ * 1 Aug 2026, which was exactly the $84 we had written up as unexplained and
+ * put in front of the finance department.
+ *
+ * Most days say "NA". Storing that makes every row look like it carries an
+ * explanation and buries the few that do.
+ */
+describe('cleanFinanceNote', () => {
+  test('keeps what the venue actually wrote', () => {
+    assert.equal(cleanFinanceNote('Extra Items $84.00 For beverage'), 'Extra Items $84.00 For beverage');
+    assert.equal(cleanFinanceNote('$699 Wrongly closed under cash'), '$699 Wrongly closed under cash');
+    assert.equal(
+      cleanFinanceNote('  François (LANDLORD) - $168.00 (ORDER #364787 - F&B CREDIT)  '),
+      'François (LANDLORD) - $168.00 (ORDER #364787 - F&B CREDIT)',
+    );
+  });
+
+  test('drops the placeholders staff type when there is nothing to say', () => {
+    for (const empty of ['NA', 'na', 'N/A', 'n/a', 'N.A.', 'nil', 'None', 'no', '-', '--', '.', '   ', '']) {
+      assert.equal(cleanFinanceNote(empty), null, JSON.stringify(empty));
+    }
+  });
+
+  test('missing is null, not the string "null"', () => {
+    assert.equal(cleanFinanceNote(null), null);
+    assert.equal(cleanFinanceNote(undefined), null);
+  });
+
+  test('a note that merely starts with "no" is kept', () => {
+    // "No show for the 8pm booking" is a note. Matching a prefix rather than
+    // the whole string would have thrown it away.
+    assert.equal(cleanFinanceNote('No show for the 8pm booking'), 'No show for the 8pm booking');
+    assert.equal(cleanFinanceNote('Nil stock of the special'), 'Nil stock of the special');
   });
 });
 
