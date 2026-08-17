@@ -906,6 +906,31 @@ app.get('/watchdog', async (c) => {
 
 // --- Static frontend ---
 
+/**
+ * Make the browser re-check the HTML on every load.
+ *
+ * We were sending no Cache-Control at all, so browsers fell back to heuristic
+ * caching off Last-Modified and held the admin page for hours. The effect is
+ * nasty because it is partial: the SERVER updates immediately, so someone runs
+ * last week's page against this week's API and sees new error messages from
+ * buttons that are missing. It cost two rounds of "where is this button?"
+ * before anyone suspected the cache.
+ *
+ * Only the HTML shell revalidates. Everything else keeps default caching --
+ * the shell is the app, not an asset.
+ */
+app.use('/*', async (c, next) => {
+  await next();
+  const last = c.req.path.split('/').pop() ?? '';
+  const isShell = last === '' || last.endsWith('.html') || !last.includes('.');
+  if (!isShell) return;
+
+  // Rebuilt rather than mutated: a Response's headers are immutable once it
+  // has been constructed, so setting on c.res directly silently does nothing.
+  c.res = new Response(c.res.body, c.res);
+  c.res.headers.set('Cache-Control', 'no-cache, must-revalidate');
+});
+
 app.use('/*', serveStatic({ root: './public' }));
 
 const port = Number(process.env.PORT) || 3000;
