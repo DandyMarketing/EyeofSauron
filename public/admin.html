@@ -779,6 +779,52 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     });
   }
 
+  // Meta. Not loaded with the page -- it is several Graph calls plus a probe
+  // per Instagram account, and the answer only changes while someone is
+  // actually setting this up.
+  const metaSection = el('div', 'section');
+  metaSection.innerHTML = '<h2>Meta (Instagram &amp; Facebook)</h2>' +
+    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
+    '<button id="meta-discover-btn" class="btn">Discover accounts</button>' +
+    '<div id="meta-result" style="margin-top:16px"></div>';
+  app.appendChild(metaSection);
+
+  document.getElementById('meta-discover-btn').addEventListener('click', async () => {
+    const out = document.getElementById('meta-result');
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking Meta&hellip;</p>';
+
+    const res = await api('GET', '/admin/api/meta/discover');
+    const accounts = res.accounts || [];
+    const errors = res.errors || [];
+
+    const rows = accounts.map(function (a) {
+      const readable = a.insights_readable === true
+        ? '<span style="color:var(--success)">readable</span>'
+        : a.insights_readable === false
+          ? '<span style="color:var(--error)">no data</span>'
+          : '<span style="color:var(--text-muted)">not probed</span>';
+      return '<tr>' +
+        '<td>' + escapeHtml(a.platform) + '</td>' +
+        '<td>' + escapeHtml(a.account_name || '(unnamed)') + '</td>' +
+        '<td style="font-family:monospace;font-size:12px">' + escapeHtml(a.account_id) + '</td>' +
+        '<td>' + (a.mapped_venue ? escapeHtml(a.mapped_venue) : '<span style="color:var(--text-muted)">unmapped</span>') + '</td>' +
+        '<td>' + readable + '</td>' +
+        '<td style="font-size:12px;color:var(--text-muted);max-width:340px;white-space:normal">' + escapeHtml(a.error || '') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    out.innerHTML =
+      (accounts.length
+        ? '<table><thead><tr><th>Platform</th><th>Name</th><th>Account id</th><th>Venue</th><th>Insights</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<p style="color:var(--text-muted);font-size:13px">No accounts returned.</p>') +
+      (errors.length
+        ? '<div style="margin-top:14px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">Notes</div>' +
+          errors.map(function (e) {
+            return '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;white-space:normal">' + escapeHtml(e) + '</div>';
+          }).join('') + '</div>'
+        : '');
+  });
+
   document.getElementById('note-add-btn').addEventListener('click', async () => {
     const noteText = document.getElementById('note-text').value.trim();
     if (!noteText) return;
