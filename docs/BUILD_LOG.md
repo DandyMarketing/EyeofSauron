@@ -191,13 +191,24 @@ Before close a correction flows straight through; after close it is genuinely an
 event and still alerts. A closed month with *no* row is still ingested — filling
 a gap is not the same as changing a settled figure. `src/lib/accounting-period.ts`
 holds the rule and its one tunable constant.
-**Recurs?** **Every customer.** Two rules worth carrying:
+**The other half: alerting before the answer could exist.** Finance does not
+reconcile daily and does not work weekends, so Friday's sales are untouched
+until Monday. Comparing Friday against Revel on Saturday disagrees with work
+nobody has started — and every one of those days raised an alert. True, and
+meaningless. A mismatch now only becomes a finding once **two working days**
+have passed (`isSettled`), which covers a weekend with room to spare: Friday
+settles on Tuesday, Monday on Wednesday.
+**Recurs?** **Every customer.** Three rules worth carrying:
 *A lock needs a reason to end.* One that only ever closes will eventually hold
 something wrong, and the longer it holds the more confident the wrong number
 looks. Tie it to a business event — a close, an approval, a period end — never
 to "the data agreed once".
 *Ask which side is authoritative before building the alert.* We spent real
 effort analysing discrepancies that existed only because we refused the answer.
+*Never check faster than the process being checked.* An alert that can fire
+before the work is done is noise by construction, and noise is not neutral —
+it buries the real findings among days that will resolve themselves. Ask what
+the human turnaround is, in working days, before writing the comparison.
 
 ---
 

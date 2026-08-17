@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
-import { isPeriodClosed, closeDateFor } from '../lib/accounting-period.js';
+import { isPeriodClosed, closeDateFor, isSettled } from '../lib/accounting-period.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
 
@@ -522,7 +522,9 @@ export async function ingestMondayItems(
           continue;
         }
 
-        if (reconciliation && !reconciliation.passed) {
+        // Only once Finance has had working days to reconcile it. A Friday
+        // compared on Saturday disagrees because nobody has looked at it yet.
+        if (reconciliation && !reconciliation.passed && isSettled(date)) {
           await raiseAlert({
             venue_id: venueId,
             business_date: date,
@@ -558,7 +560,9 @@ export async function ingestMondayItems(
           reconciliation = reconcileMondayVsRevel(totals.grossSales, existing.gross_sales);
           if (reconciliation.passed) {
             updateData.locked_at = new Date().toISOString();
-          } else {
+          } else if (isSettled(date)) {
+            // Only once Finance has had working days to reconcile it. Before
+            // that a difference is expected, not a finding -- see isSettled.
             await raiseAlert({
               venue_id: venueId,
               business_date: date,

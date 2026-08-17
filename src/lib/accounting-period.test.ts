@@ -1,6 +1,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeDateFor, isPeriodClosed, CLOSE_DAY_OF_FOLLOWING_MONTH } from './accounting-period.js';
+import {
+  closeDateFor, isPeriodClosed, isSettled,
+  CLOSE_DAY_OF_FOLLOWING_MONTH, SETTLING_WORKING_DAYS,
+} from './accounting-period.js';
 
 /**
  * BUILD_LOG 2.5. The lock used to fire the moment the Monday board first
@@ -77,5 +80,50 @@ describe('isPeriodClosed — open until the close date arrives', () => {
   test('December closes in the new year, not the old one', () => {
     assert.equal(isPeriodClosed('2026-12-20', at('2027-01-14')), false);
     assert.equal(isPeriodClosed('2026-12-20', at('2027-01-15')), true);
+  });
+});
+
+/**
+ * Finance does not reconcile daily and does not work weekends. Friday's sales
+ * are not touched until Monday, so anything comparing Friday against Revel on
+ * Saturday disagrees with work nobody has started. Those days must not alert.
+ */
+describe('isSettled — has Finance had time to look at it?', () => {
+  // 2026-08-07 is a Friday. 8th Sat, 9th Sun, 10th Mon, 11th Tue.
+  const friday = '2026-08-07';
+
+  test('the weekend does not count', () => {
+    assert.equal(isSettled(friday, at('2026-08-08')), false, 'Saturday');
+    assert.equal(isSettled(friday, at('2026-08-09')), false, 'Sunday');
+  });
+
+  test('one working day is not enough on its own', () => {
+    assert.equal(isSettled(friday, at('2026-08-10')), false, 'Monday');
+  });
+
+  test('Friday settles on Tuesday', () => {
+    assert.equal(isSettled(friday, at('2026-08-11')), true);
+  });
+
+  test('a Monday settles on Wednesday', () => {
+    // 2026-08-03 is a Monday: Tue 4 and Wed 5 are the two working days.
+    assert.equal(isSettled('2026-08-03', at('2026-08-04')), false);
+    assert.equal(isSettled('2026-08-03', at('2026-08-05')), true);
+  });
+
+  test('today is never settled', () => {
+    assert.equal(isSettled('2026-08-17', at('2026-08-17')), false);
+  });
+
+  test('a long-past date is settled without spinning', () => {
+    assert.equal(isSettled('2022-06-07', at('2026-08-17')), true);
+  });
+
+  test('the window is one constant to change', () => {
+    assert.equal(SETTLING_WORKING_DAYS, 2);
+  });
+
+  test('refuses a date it cannot read', () => {
+    assert.throws(() => isSettled('7 Aug 2026', at('2026-08-17')), /expected YYYY-MM-DD/);
   });
 });
