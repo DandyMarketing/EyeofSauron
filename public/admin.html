@@ -616,23 +616,37 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   // days because a non-zero exit was conflating the two.
   if (alerts && alerts.length > 0) {
     const a = el('div', 'section');
+    // Collapsed by default. Expanded, five alerts filled the screen and the one
+    // that mattered looked identical to four repeats of another.
     a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree. A post-lock change means someone edited Monday.com after that day was reconciled against Revel and locked &mdash; the edit was rejected, so the two systems now hold different figures. Resolve once you have decided which is right.</p>' +
+      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means someone edited Monday.com after that day was reconciled against Revel and locked, so the two systems now hold different figures. Resolving clears every duplicate of the same finding.</p>' +
       alerts.map(function (al) {
         const changeRows = (al.changes || []).map(function (c) {
           return '<div style="font-size:12px;color:var(--text-muted)">' +
             escapeHtml(c.period) + ' &middot; ' + escapeHtml(c.field) + ': ' +
-            '<span style="color:var(--error)">' + c.from + '</span> &rarr; ' +
-            '<span style="color:var(--success)">' + c.to + '</span></div>';
+            '<span style="color:var(--error)">' + escapeHtml(String(c.from)) + '</span> &rarr; ' +
+            '<span style="color:var(--success)">' + escapeHtml(String(c.to)) + '</span></div>';
         }).join('');
-        return '<div class="alert-card" data-id="' + al.id + '" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">' +
-          '<div style="font-weight:600">' + escapeHtml(al.venues ? al.venues.name : 'Unknown venue') + ' &middot; ' + escapeHtml(al.business_date) + '</div>' +
-          '<div style="color:var(--text-muted);font-size:12px;margin-bottom:6px">' + escapeHtml(al.alert_type.replace(/_/g, ' ')) + '</div>' +
-          (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>') +
-          '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">' +
-            '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
-            '<button class="al-resolve btn btn-small">Resolve</button>' +
-          '</div></div>';
+        const dupes = al.duplicates > 1
+          ? '<span title="' + al.duplicates + ' identical alerts for this day" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:8px">&times;' + al.duplicates + '</span>'
+          : '';
+        const diff = (al.difference !== null && al.difference !== undefined)
+          ? '<span style="font-size:12px;color:var(--text-muted);margin-left:8px">$' + escapeHtml(String(al.difference)) + '</span>'
+          : '';
+        return '<details class="alert-card" data-id="' + al.id + '" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
+          '<summary style="cursor:pointer;font-size:13px">' +
+            '<span style="font-weight:600">' + escapeHtml(al.venue || 'Unknown venue') + '</span>' +
+            '<span style="color:var(--text-muted)"> &middot; ' + escapeHtml(al.business_date) +
+            ' &middot; ' + escapeHtml(al.alert_type.replace(/_/g, ' ')) + '</span>' +
+            dupes + diff +
+          '</summary>' +
+          '<div style="margin-top:10px">' +
+            (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>') +
+            '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">' +
+              '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
+              '<button class="al-resolve btn btn-small">Resolve</button>' +
+            '</div>' +
+          '</div></details>';
       }).join('');
     app.appendChild(a);
 

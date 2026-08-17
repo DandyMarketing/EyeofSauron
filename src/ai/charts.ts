@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers } from '../lib/covers.js';
+import { netSalesOf } from '../lib/sales.js';
 
 /**
  * Chart data assembly.
@@ -72,7 +73,7 @@ export interface ChartSpec {
 
 const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; source: string }> = {
   gross_sales:        { label: 'Gross sales',        unit: 'currency', source: 'Revel (POS)' },
-  net_sales:          { label: 'Net sales',          unit: 'currency', source: 'Revel (POS)' },
+  net_sales:          { label: 'Net sales (excl. service charge)', unit: 'currency', source: 'Revel (POS)' },
   avg_check:          { label: 'Average check',      unit: 'currency', source: 'Revel (POS)' },
   covers:             { label: 'Covers',             unit: 'count',    source: 'SevenRooms' },
   avg_spend_per_head: { label: 'Spend per head',     unit: 'currency', source: 'Revel revenue / SevenRooms covers' },
@@ -182,7 +183,7 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
 
     // Always read the POS rows, even for covers-only metrics: they are how a
     // closed day is identified, and a closed day must not be plotted as a zero.
-    const ops = await pagedSelect('daily_operations', 'business_date, gross_sales, net_sales, net_to_account_for, total_transactions', venue.id, input.start_date, input.end_date);
+    const ops = await pagedSelect('daily_operations', 'business_date, gross_sales, net_sales, item_discounts, order_discounts, net_to_account_for, total_transactions', venue.id, input.start_date, input.end_date);
     for (const o of ops) {
       if (isClosedDay(o)) {
         closedDates.add(o.business_date);
@@ -191,7 +192,9 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         continue;
       }
       const a = touch(bucketOf(o.business_date, granularity));
-      a.revenue += Number((input.metric === 'net_sales' ? o.net_sales : o.gross_sales) ?? 0);
+      // Never `o.net_sales` -- that column carries Revel's "Total Sales", which
+      // includes the 10% service charge. See src/lib/sales.ts.
+      a.revenue += input.metric === 'net_sales' ? netSalesOf(o) : Number(o.gross_sales ?? 0);
       a.checks += Number(o.net_to_account_for ?? 0);
       a.txns += Number(o.total_transactions ?? 0);
       a.days.add(o.business_date);

@@ -131,6 +131,36 @@ which date basis it used.
 
 ---
 
+### 2.4 A source system's field name taken as the business's meaning
+**Symptom.** None. That is the point — every "net sales" figure Sauron charted
+or quoted was about 10% too high, and nothing looked wrong.
+**Root cause.** Revel's operations report has a NET SALES section whose
+"Total Sales" line is net of discounts but **inclusive of the 10% service
+charge**. It was stored as `daily_operations.net_sales` and surfaced to the
+model and the charts under the label "Net sales". The relationship is exact —
+`Total Sales = (gross − discounts) × 1.10`, confirmed to the cent on days
+across three venues and three years.
+**Why it survived.** A number 10% high is plausible. A manager comparing it
+against their own recollection assumes they misremembered, and service charge
+is roughly the size of a good week's variance. It was found only because a
+query written to test an unrelated hypothesis — that delivery sales were
+inflating the column — returned an excess that was suspiciously *exactly* 10%
+on every single row. The hypothesis was wrong; the query still found the bug.
+**Fix.** `src/lib/sales.ts` derives net sales as gross less item and order
+discounts, exposes the service charge separately, and says in a comment why the
+column of that name must never be read directly. All four call sites go through
+it. Tests pin the definition to the three real days.
+**Recurs?** **Every customer, and every new source.** The general rule: *a
+field name in a source system is the vendor's meaning, not the business's.*
+Revel's "Total Sales", Revel's "Gross Sales" and the Monday board's "Sales" are
+three different quantities with overlapping names. Before any figure is given a
+label in the product, reconcile it to a known number by hand — one day, on a
+calculator — and write the identity down. Xero will make this worse, not
+better: it has its own "Revenue", and service charge and tips sit in their own
+accounts.
+
+---
+
 ## 3. Analysis that misleads
 
 ### 3.1 Partial buckets read as a collapse

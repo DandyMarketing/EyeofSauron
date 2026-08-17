@@ -673,19 +673,38 @@ app.get('/admin/api/alerts', async (c) => {
     .eq('resolved', false)
     .order('business_date', { ascending: false });
 
-  // Say what actually moved. "Something changed on 30 July" leaves someone
+  // One card per finding, not per row.
+  //
+  // De-duplication at write time only stops NEW duplicates. Alerts raised
+  // before it existed sit in the table several deep for a single issue -- Neon
+  // Pigeon, 30 July was four identical cards -- which buries the real findings
+  // under repeats of one of them and makes the list something nobody reads.
+  //
+  // Say what actually moved, too. "Something changed on 30 July" leaves someone
   // diffing two boards by eye; the gap between a $2 service-charge correction
   // and a $4,000 revenue edit is what decides whether to investigate.
-  const alerts = (data ?? []).map((a: any) => ({
-    ...a,
-    changes: a.alert_type === 'post_lock_change'
-      ? summarisePostLockChange(a.old_meal_periods, a.new_meal_periods)
-      : [],
-    old_meal_periods: undefined,
-    new_meal_periods: undefined,
-  }));
+  const grouped = new Map<string, any>();
+  for (const a of (data ?? []) as any[]) {
+    const key = `${a.venue_id}|${a.business_date}|${a.alert_type}`;
+    const seen = grouped.get(key);
+    if (seen) { seen.duplicates++; continue; }
+    grouped.set(key, {
+      id: a.id,
+      duplicates: 1,
+      venue: a.venues?.name ?? 'Unknown venue',
+      business_date: a.business_date,
+      alert_type: a.alert_type,
+      monday_gross: a.monday_gross,
+      revel_gross: a.revel_gross,
+      difference: a.difference,
+      created_at: a.created_at,
+      changes: a.alert_type === 'post_lock_change'
+        ? summarisePostLockChange(a.old_meal_periods, a.new_meal_periods)
+        : [],
+    });
+  }
 
-  return c.json({ alerts });
+  return c.json({ alerts: [...grouped.values()], total_rows: (data ?? []).length });
 });
 
 /**
@@ -702,6 +721,17 @@ app.post('/admin/api/alerts/:id/resolve', async (c) => {
 
   const body = await c.req.json().catch(() => ({}));
 
+  // Resolve the finding, not the row. The list groups duplicates into one card,
+  // so resolving that card has to clear every row behind it -- otherwise three
+  // of the four reappear on reload and the alert looks unresolvable.
+  const { data: target, error: findError } = await supabaseAdmin
+    .from('reconciliation_alerts')
+    .select('venue_id, business_date, alert_type')
+    .eq('id', c.req.param('id'))
+    .single();
+
+  if (findError || !target) return c.json({ error: 'Alert not found' }, 404);
+
   const { data, error } = await supabaseAdmin
     .from('reconciliation_alerts')
     .update({
@@ -710,12 +740,14 @@ app.post('/admin/api/alerts/:id/resolve', async (c) => {
       resolved_at: new Date().toISOString(),
       notes: typeof body.notes === 'string' ? body.notes : null,
     })
-    .eq('id', c.req.param('id'))
-    .select('id, business_date, alert_type, resolved')
-    .single();
+    .eq('venue_id', target.venue_id)
+    .eq('business_date', target.business_date)
+    .eq('alert_type', target.alert_type)
+    .eq('resolved', false)
+    .select('id');
 
   if (error) return c.json({ error: error.message }, 400);
-  return c.json({ alert: data });
+  return c.json({ resolved: data?.length ?? 0, ...target });
 });
 
 app.get('/watchdog', async (c) => {
