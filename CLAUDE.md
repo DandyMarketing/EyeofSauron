@@ -49,17 +49,31 @@ every source that arrives keyed by a legal entity — Xero organisations above
 all — maps to a venue through a lookup table confirmed by a person, never by
 name matching. See BUILD_LOG 2.2 for what name-guessing costs.
 
-**The consequence for P&L work, which is not obvious:** each venue's Pte Ltd
-holds that venue's books, so venue-level profit is clean. But group costs —
-head office, marketing salaries, shared services — may sit in the umbrella
-entity, and inter-company management fees may be charged down into each venue.
-So a venue P&L pulled from Xero may be profit *before* group overhead, or after
-an allocation whose basis is a management decision rather than a fact.
+**The umbrella has no P&L.** Confirmed by Khai. Every cost lands in a venue's
+own Pte Ltd, with genuinely shared costs split across venues where necessary.
+Nothing is stranded at group level.
 
-Sauron must not present either as "the venue's profit" without saying which it
-is. Confirm with Khai how group costs are treated before any margin or
-profitability answer is trusted. Entity and venue are currently 1:1; do not
-assume that holds if a single Pte Ltd ever operates two outlets.
+This is the good case, and it matters more than it sounds:
+
+- **A venue's Xero P&L is its real, fully-loaded profitability** — not profit
+  before an overhead layer that gets added elsewhere. It can be stated plainly
+  without a qualifier.
+- **Cross-venue margin comparison is valid.** Benchmarking is described above as
+  the product's edge, and it only holds if each venue's costs are on the same
+  basis. Here they are. Had group costs sat above the venues, every comparison
+  would have needed an allocation caveat attached.
+
+There are **three Xero organisations**, one per venue. The umbrella is not one
+of them.
+
+The one residual judgment: a shared cost that is split still has a split basis,
+so a line item allocated across venues is less comparable than a direct one.
+Worth knowing which lines those are before leaning hard on a small margin
+difference — but this is a refinement, not the structural problem it would have
+been.
+
+Entity and venue are 1:1 today; do not assume that holds if a single Pte Ltd
+ever operates two outlets.
 
 ## Tech stack & key decisions
 
