@@ -61,8 +61,15 @@ export function totalDiscountsOf(row: SalesRow): number {
 
 /**
  * Food and beverage sales, before discounts and excluding service charge.
- * This is the basis costs are measured against -- food cost % and beverage
- * cost % both divide by this, never by a figure carrying service charge.
+ *
+ * The denominator for everything measured per-something: food cost %, beverage
+ * cost %, the food/beverage split, discount rate, and spend per head. None of
+ * them may divide by a figure carrying service charge -- a cost measured
+ * against gross comes out about 10% low and reads as an improvement.
+ *
+ * Spend per head on this basis will not equal Revel's "Average Sale Per Guest",
+ * which uses net sales over Revel's own guest count. Both are correct; they are
+ * different questions. Firangi 6 Aug 2026: 4,968.50 here, 5,286.05 there.
  */
 export function foodAndBevSalesOf(row: SalesRow): number {
   return round2(n(row.gross_sales));

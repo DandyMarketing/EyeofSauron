@@ -689,7 +689,16 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     totals.total_transactions += Number(d.total_transactions ?? 0);
     totals.total_guests += Number(d.total_guests ?? 0);
 
-    const dayGross = Number(d.gross_sales ?? 0);
+    // Spend per head is measured on FOOD + BEVERAGE -- gross without the
+    // service charge, before discounts. Confirmed by Khai. Named through the
+    // helper rather than reading the column, so the basis is stated and not
+    // inferred from which column happened to be to hand.
+    //
+    // This will NOT match Revel's own "Average Sale Per Guest", which divides
+    // net sales by Revel's paid-guest count. Ours is a different numerator and
+    // a different denominator (SevenRooms covers) on purpose. Do not reconcile
+    // the two -- Firangi 6 Aug 2026 is 4,968.50 here against Revel's 5,286.05.
+    const dayGross = foodAndBevSalesOf(d);
     const c = coversMap.get(d.business_date);
     const dayCovers = c?.covers ?? null;
     const dayClosed = isClosedDay(d);

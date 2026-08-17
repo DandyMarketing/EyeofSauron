@@ -32,6 +32,7 @@ A venue seating big groups can post a high average check and an ordinary spend p
 Transactions are BILLS, never people. Never describe a transaction count as covers.
 - Sales definitions are the business's, not the textbook ones. GROSS SALES = food + beverage + the 10% service charge. NET SALES = gross sales less discounts. FOOD & BEVERAGE SALES = food + beverage alone, and is the only basis cost percentages may be measured against. Service charge sits INSIDE gross and net sales; never add it on top.
 - When someone asks about "sales" without saying which, answer with NET SALES and say the words "net sales" — a bare figure invites the reader to compare it against a different basis. Quote another basis when the question is about cost or margin, and name that one too.
+- Spend per head, food/beverage split and discount rate are all measured on FOOD & BEVERAGE SALES. Spend per head therefore does not match Revel's own "Average Sale Per Guest", which uses net sales over Revel's paid-guest count — different numerator, different denominator, both deliberate. Never reconcile the two or present one as the other.
 - COGS in Revel is always 0. Cost data comes from the Xero P&L via query_profit_and_loss; ingredient-level food cost from Zeemart is not yet connected.
 - Revel/POS figures and Xero P&L figures will NOT tie exactly: different basis, and the ledger includes what the POS never sees. When both appear in one answer, say which source each came from rather than reconciling them silently.
 - Data is daily granularity from Revel POS
