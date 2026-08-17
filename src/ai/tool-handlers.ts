@@ -3,6 +3,7 @@ import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
+import { netSalesOf, serviceChargeOf } from '../lib/sales.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -659,6 +660,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     days: data.length,
     gross_sales: 0,
     net_sales: 0,
+    service_charge: 0,
     item_discounts: 0,
     order_discounts: 0,
     tax_total: 0,
@@ -675,7 +677,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
 
   const daily = data.map(d => {
     totals.gross_sales += Number(d.gross_sales);
-    totals.net_sales += Number(d.net_sales);
+    totals.net_sales += netSalesOf(d);
+    totals.service_charge += serviceChargeOf(d) ?? 0;
     totals.item_discounts += Number(d.item_discounts);
     totals.order_discounts += Number(d.order_discounts);
     totals.tax_total += Number(d.tax_total ?? 0);
@@ -711,7 +714,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       date: d.business_date,
       closed: dayClosed || undefined,
       gross_sales: d.gross_sales,
-      net_sales: d.net_sales,
+      net_sales: netSalesOf(d),
+      service_charge: serviceChargeOf(d),
       total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
       covers: dayCovers,
       covers_by_meal_period: c?.by_shift ?? null,
@@ -782,12 +786,13 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     const { data: rows } = await query;
     if (!rows || rows.length === 0) continue;
 
-    let grossSales = 0, netSales = 0, itemDisc = 0, orderDisc = 0, taxTotal = 0, tips = 0, netToAccount = 0, transactions = 0, guests = 0;
+    let grossSales = 0, netSales = 0, serviceCharge = 0, itemDisc = 0, orderDisc = 0, taxTotal = 0, tips = 0, netToAccount = 0, transactions = 0, guests = 0;
     let foodSales = 0, bevSales = 0;
 
     for (const ops of rows) {
       grossSales += Number(ops.gross_sales);
-      netSales += Number(ops.net_sales);
+      netSales += netSalesOf(ops);
+      serviceCharge += serviceChargeOf(ops) ?? 0;
       itemDisc += Number(ops.item_discounts);
       orderDisc += Number(ops.order_discounts);
       taxTotal += Number(ops.tax_total ?? 0);
@@ -830,6 +835,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       days: rows.length,
       gross_sales: grossSales,
       net_sales: netSales,
+      service_charge: serviceCharge,
       total_discounts: totalDisc,
       discount_rate_pct: Number(discRate.toFixed(1)),
       food_sales: foodSales,
