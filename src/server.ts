@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts, ingestMetaInsights, probeMetrics } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -665,6 +665,50 @@ app.post('/admin/api/meta/probe-metrics', async (c) => {
   }
 
   return c.json({ results });
+});
+
+/**
+ * Return Graph's raw response for one metric, unparsed.
+ *
+ * The probe answers "will Meta accept this name". It does not answer "what
+ * shape comes back", and total_value metrics return an aggregate for the whole
+ * window rather than a daily series. Storing one of those against a single
+ * business_date would file a month's total as a day's figure -- a wrong number
+ * that looks entirely reasonable.
+ *
+ * So: look at the actual JSON before writing the parser for it.
+ */
+app.get('/admin/api/meta/sample', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const platform = c.req.query('platform') ?? 'instagram';
+  const metric = c.req.query('metric') ?? 'views';
+  const form = c.req.query('form') ?? 'total_value';
+  const days = Math.min(Math.max(Number(c.req.query('days')) || 3, 1), 10);
+
+  const { data: account } = await supabaseAdmin
+    .from('social_accounts')
+    .select('account_id, account_name')
+    .eq('platform', platform)
+    .not('venue_id', 'is', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (!account) return c.json({ error: `No mapped ${platform} account to sample.` });
+
+  const until = new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+
+  try {
+    const raw = await fetchInsights(
+      account.account_id, [metric], since, until,
+      form === 'total_value' ? 'total_value' : undefined,
+    );
+    return c.json({ account: account.account_name, metric, form, since, until, raw });
+  } catch (e: any) {
+    return c.json({ account: account.account_name, metric, form, since, until, error: String(e?.message ?? e) });
+  }
 });
 
 /**
