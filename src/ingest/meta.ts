@@ -41,6 +41,12 @@ export const IG_DAILY_METRICS = ['reach'];
  */
 export const PLATFORM_METRICS: Record<string, string[]> = {
   // Both confirmed as true daily series: Graph returns a dated value per day.
+  //
+  // `follower_count` is NEW followers gained that day, not the size of the
+  // audience -- singular is a delta, plural (`followers_count`, a field on the
+  // account rather than an insights metric) is the total. Reporting one as the
+  // other turns "23 new followers" into "23 followers", so the tool description
+  // spells it out for the model.
   instagram: ['reach', 'follower_count'],
   facebook: [],
 };
