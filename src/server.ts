@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -627,6 +627,82 @@ app.get('/admin/api/meta/discover', async (c) => {
     // message says what to do about it -- surface it as-is.
     return c.json({ accounts: [], errors: [String(e?.message ?? e)] });
   }
+});
+
+/**
+ * Attach a Meta account to a venue. Confirmed by a human, never inferred.
+ *
+ * "superfirangi" is Firangi Superstar and "fatprincesg" is Fat Prince, which
+ * looks obvious enough to automate -- and that is exactly the reasoning that
+ * produced BUILD_LOG 2.2. A handle is not a venue name, and the one time it is
+ * not obvious is the time the figures land against the wrong business.
+ */
+app.post('/admin/api/meta/map', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const body = await c.req.json().catch(() => ({}));
+  const { platform, account_id, account_name, venue_id } = body ?? {};
+
+  if (typeof platform !== 'string' || typeof account_id !== 'string' || !account_id) {
+    return c.json({ error: 'platform and account_id are required' }, 400);
+  }
+  if (typeof venue_id !== 'string' || !venue_id) {
+    return c.json({ error: 'venue_id is required' }, 400);
+  }
+
+  const { error } = await supabaseAdmin
+    .from('social_accounts')
+    .upsert(
+      { platform, account_id, account_name: account_name ?? null, venue_id, is_active: true },
+      { onConflict: 'platform,account_id' },
+    );
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ mapped: { platform, account_id, venue_id } });
+});
+
+/**
+ * Pull social metrics for every mapped account over a date range.
+ *
+ * One account failing does not stop the others, and each result carries its own
+ * error, because "the run failed" tells nobody which venue lost a week.
+ */
+app.post('/admin/api/meta/ingest', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const body = await c.req.json().catch(() => ({}));
+  const days = Math.min(Math.max(Number(body?.days) || 30, 1), 90);
+  const until = new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+
+  const { data: accounts } = await supabaseAdmin
+    .from('social_accounts')
+    .select('platform, account_id, account_name, venue_id')
+    .not('venue_id', 'is', null)
+    .eq('is_active', true);
+
+  if (!accounts || accounts.length === 0) {
+    return c.json({ results: [], error: 'No Meta accounts are mapped to a venue yet.' });
+  }
+
+  const results = [];
+  for (const a of accounts) {
+    try {
+      results.push({ account_name: a.account_name, ...(await ingestMetaInsights(a.platform, a.account_id, since, until)) });
+    } catch (e: any) {
+      results.push({
+        account_name: a.account_name,
+        platform: a.platform,
+        account_id: a.account_id,
+        stored: false,
+        error: String(e?.message ?? e),
+      });
+    }
+  }
+
+  return c.json({ since, until, results });
 });
 
 app.get('/admin/api/xero/connections', async (c) => {

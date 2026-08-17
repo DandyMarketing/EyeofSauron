@@ -33,6 +33,12 @@ export interface MetaIngestResult {
   rows: number;
   missing_days: string[];
   stored: boolean;
+  /**
+   * Metrics Graph refused, by name, with its reason. Present when SOME metrics
+   * came back and others did not -- a partial pull that reports nothing would
+   * look complete.
+   */
+  failed_metrics?: Record<string, string>;
   error?: string;
 }
 
@@ -249,11 +255,36 @@ export async function ingestMetaInsights(
     to_date: until,
   };
 
-  let rows: InsightRow[];
-  try {
-    rows = normaliseInsights(await fetchInsights(accountId, metrics, since, until));
-  } catch (e: any) {
-    return { ...base, rows: 0, missing_days: [], stored: false, error: e.message };
+  // One call per metric, not one call for all of them.
+  //
+  // Graph rejects the ENTIRE request if a single metric name is invalid, and it
+  // retires and renames account metrics on its own schedule. Asking for three
+  // together means the day a metric is retired we silently lose the other two
+  // as well -- a whole feed going dark because of a name change somewhere else.
+  // Three accounts times three metrics is nine cheap calls; robustness is worth
+  // more than the round trips here.
+  const rows: InsightRow[] = [];
+  const failedMetrics: Record<string, string> = {};
+
+  for (const metric of metrics) {
+    try {
+      rows.push(...normaliseInsights(await fetchInsights(accountId, [metric], since, until)));
+    } catch (e: any) {
+      failedMetrics[metric] = String(e?.message ?? e).slice(0, 300);
+    }
+  }
+
+  if (rows.length === 0) {
+    return {
+      ...base,
+      rows: 0,
+      missing_days: [],
+      stored: false,
+      failed_metrics: failedMetrics,
+      error: Object.keys(failedMetrics).length
+        ? `Every metric failed: ${Object.entries(failedMetrics).map(([m, e]) => `${m} — ${e}`).join(' | ')}`
+        : 'Meta returned no rows for this range.',
+    };
   }
 
   const gaps = missingDays(rows, since, until);
@@ -274,5 +305,14 @@ export async function ingestMetaInsights(
 
   if (error) throw new Error(`Social metrics upsert failed: ${error.message}`);
 
-  return { ...base, rows: records.length, missing_days: gaps, stored: true };
+  return {
+    ...base,
+    rows: records.length,
+    missing_days: gaps,
+    stored: true,
+    // Carried even on success. A pull that stored two metrics out of three is
+    // not a failure, but calling it a clean success is how a feed goes quietly
+    // half-dark.
+    ...(Object.keys(failedMetrics).length ? { failed_metrics: failedMetrics } : {}),
+  };
 }
