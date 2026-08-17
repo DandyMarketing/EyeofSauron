@@ -255,9 +255,31 @@ export async function fetchInsights(
     // Graph puts the useful part in the body: an invalid metric name, a
     // missing permission, and an unlinked account all return 400 and are
     // indistinguishable from the status alone.
-    throw new Error(`Meta insights request failed: ${res.status} ${text}`);
+    // Redacted too: an error body can echo the request, and these messages are
+    // stored in results and shown on screen.
+    throw new Error(`Meta insights request failed: ${res.status} ${redactTokens(text)}`);
   }
   return JSON.parse(text);
+}
+
+/**
+ * Strip access tokens out of anything before it leaves the server.
+ *
+ * Graph echoes the token back inside `paging.previous` and `paging.next` on
+ * every successful insights call. A diagnostic endpoint that returned the
+ * response verbatim therefore handed a permanent System User token to the
+ * browser, and from there into a screenshot and a chat window. It happened.
+ *
+ * The token does not expire, so exposure means rotation, not waiting.
+ * Anything derived from a Graph response goes through here first.
+ */
+export function redactTokens<T>(value: T): T {
+  const json = JSON.stringify(value);
+  if (json === undefined) return value;
+  return JSON.parse(
+    json.replace(/(access_token=)[^&"\\\s]+/gi, '$1REDACTED')
+        .replace(/("access_token"\s*:\s*")[^"]+/gi, '$1REDACTED'),
+  );
 }
 
 export interface MetricProbe {
