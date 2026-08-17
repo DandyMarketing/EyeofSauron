@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapDiscovered, redactTokens } from './meta.js';
+import { mapDiscovered, redactTokens, PLATFORM_METRICS, TOTAL_VALUE_METRICS, TOTAL_VALUE_SINCE_OFFSET_DAYS } from './meta.js';
 
 /**
  * These cover the shapes Graph returns, which is the part that surprises you.
@@ -133,5 +133,75 @@ describe('redactTokens', () => {
   test('leaves a response with no token untouched', () => {
     const raw = { data: [{ name: 'reach', values: [{ value: 12, end_time: '2026-08-15T07:00:00+0000' }] }] };
     assert.deepEqual(redactTokens(raw), raw);
+  });
+});
+
+/**
+ * The day a total_value figure belongs to.
+ *
+ * Calibrated 17 Aug 2026 against reach, the one metric Meta serves in both
+ * forms. A window opened at `since` returns the day BEFORE it: asking for
+ * 2026-08-11 gave 2,467, which the dated series puts on 2026-08-10. Seven days
+ * compared, seven agreements one day back, zero same-day.
+ *
+ * These are the observed pairs. If Meta changes this, the arithmetic below
+ * fails here rather than silently filing every day against its neighbour --
+ * which reconciles perfectly and is wrong everywhere.
+ */
+describe('total_value day offset', () => {
+  const OBSERVED: Array<[string, string]> = [
+    ['2026-08-11', '2026-08-10'],
+    ['2026-08-12', '2026-08-11'],
+    ['2026-08-13', '2026-08-12'],
+    ['2026-08-14', '2026-08-13'],
+    ['2026-08-15', '2026-08-14'],
+    ['2026-08-16', '2026-08-15'],
+  ];
+
+  const windowOpensAt = (businessDate: string) =>
+    new Date(new Date(`${businessDate}T00:00:00Z`).getTime() + TOTAL_VALUE_SINCE_OFFSET_DAYS * 86_400_000)
+      .toISOString().slice(0, 10);
+
+  test('to read a day, the window opens the day after it', () => {
+    for (const [askedFor, belongsTo] of OBSERVED) {
+      assert.equal(windowOpensAt(belongsTo), askedFor, `${belongsTo} should be read by asking ${askedFor}`);
+    }
+  });
+
+  test('the offset survives a month boundary', () => {
+    assert.equal(windowOpensAt('2026-08-31'), '2026-09-01');
+  });
+
+  test('and a year boundary', () => {
+    assert.equal(windowOpensAt('2026-12-31'), '2027-01-01');
+  });
+});
+
+/**
+ * Which metrics go down which path. Sending an aggregate-only metric through
+ * the daily-series call is what produced a month's total filed as one day.
+ */
+describe('metric routing', () => {
+  test('the two Instagram daily series are the ones proven dated', () => {
+    assert.deepEqual(PLATFORM_METRICS.instagram, ['reach', 'follower_count']);
+  });
+
+  test('no metric is in both lists', () => {
+    // A metric pulled twice would be stored twice, by two different rules,
+    // and the second write would silently win.
+    for (const platform of Object.keys(PLATFORM_METRICS)) {
+      const both = (PLATFORM_METRICS[platform] ?? []).filter(m => (TOTAL_VALUE_METRICS[platform] ?? []).includes(m));
+      assert.deepEqual(both, [], `${platform}: ${both.join(', ')}`);
+    }
+  });
+
+  test('online_followers is in neither -- Meta serves it in no form we can use', () => {
+    assert.ok(!PLATFORM_METRICS.instagram.includes('online_followers'));
+    assert.ok(!TOTAL_VALUE_METRICS.instagram.includes('online_followers'));
+  });
+
+  test('facebook pulls nothing until a working metric name is found', () => {
+    assert.deepEqual(PLATFORM_METRICS.facebook, []);
+    assert.deepEqual(TOTAL_VALUE_METRICS.facebook, []);
   });
 });
