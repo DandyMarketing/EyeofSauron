@@ -9,6 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
+import { discoverAccounts } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -607,6 +608,27 @@ app.get('/xero/callback', async (c) => {
 });
 
 /** Connected organisations and their venue mapping. Owner only. */
+/**
+ * What Meta accounts can this token actually reach?
+ *
+ * Not run on page load: it is several Graph calls and a probe per Instagram
+ * account. Triggered from the admin page when someone is actually setting this
+ * up, which is the only time the answer changes.
+ */
+app.get('/admin/api/meta/discover', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  try {
+    const result = await discoverAccounts({ probe: c.req.query('probe') !== '0' });
+    return c.json(result);
+  } catch (e: any) {
+    // A missing token throws rather than returning an empty list, and the
+    // message says what to do about it -- surface it as-is.
+    return c.json({ accounts: [], errors: [String(e?.message ?? e)] });
+  }
+});
+
 app.get('/admin/api/xero/connections', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
