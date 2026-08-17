@@ -69,10 +69,11 @@ export function isPeriodClosed(businessDate: string, asOf: Date = new Date()): b
  * findings sit among them unread. That is how the Monday cron went four days
  * looking broken while it worked (BUILD_LOG 6.1), and it is the same shape.
  *
- * Two working days covers the weekend with room to spare: Friday settles on
- * Tuesday, Monday settles on Wednesday.
+ * Three working days, confirmed by Finance. Friday settles on Wednesday,
+ * Monday settles on Thursday. Generous on purpose -- a late alert costs a day
+ * of someone's memory, an early one costs the credibility of the whole list.
  */
-export const SETTLING_WORKING_DAYS = 2;
+export const SETTLING_WORKING_DAYS = 3;
 
 /**
  * Whether Finance has had time to reconcile this date.

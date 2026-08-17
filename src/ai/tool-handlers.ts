@@ -733,6 +733,9 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       covers_by_meal_period: c?.by_shift ?? null,
       walk_in_covers: c?.walk_in_covers ?? null,
       no_show_covers: c?.no_show_covers ?? null,
+      // Only present when the venue actually wrote something. A key reading
+      // "NA" on every day trains the reader to skip the field.
+      finance_notes: d.finance_notes || undefined,
       avg_check: d.avg_check,
       avg_spend_per_head: dayCovers ? Number((dayGross / dayCovers).toFixed(2)) : null,
       transactions: d.total_transactions,

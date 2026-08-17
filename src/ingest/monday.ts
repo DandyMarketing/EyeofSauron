@@ -78,6 +78,14 @@ const COLUMN_IDS = {
     walk_ins: 'numbers83',
   },
   total_sc_manual: 'numbers768',
+  /**
+   * "Notes for Finance" -- free text, one per day, where the venues explain
+   * anything odd. This is where they have been answering our reconciliation
+   * questions all along: Neon Pigeon wrote "Extra Items $84.00 For beverage"
+   * on 1 Aug 2026, which was exactly the eighty-four dollars we could not
+   * account for. Read it, do not make people ask.
+   */
+  finance_notes: 'text7',
 } as const;
 
 const VENUE_BOARDS: Record<string, { venueId: string; boards: number[] }> = {
@@ -174,6 +182,25 @@ function parseNum(v: string | number | null | undefined): number {
 
 function getCol(item: MondayItem, colId: string): number {
   return parseNum(item.column_values[colId]);
+}
+
+/**
+ * A free-text note from the board, or null if it says nothing.
+ *
+ * Most days read "NA". Storing that makes every row look like it carries an
+ * explanation and buries the handful that do -- the same failure as an alert
+ * that is always on. Placeholders become null so a note means a note.
+ */
+export function cleanFinanceNote(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const text = raw.trim();
+  if (!text) return null;
+  if (/^(n\.?\/?a\.?|nil|none|no|-+|\.+)$/i.test(text)) return null;
+  return text;
+}
+
+function getText(item: MondayItem, colId: string): string | null {
+  return cleanFinanceNote(item.column_values[colId]);
 }
 
 function extractPeriod(item: MondayItem, period: 'brunch' | 'lunch' | 'dinner'): MealPeriodData {
@@ -449,12 +476,15 @@ export async function ingestMondayItems(
     if (Object.keys(mealPeriods).length === 0) continue;
 
     const totalScManual = getCol(item, COLUMN_IDS.total_sc_manual);
+    const financeNotes = getText(item, COLUMN_IDS.finance_notes);
     const totals = deriveTotals(mealPeriods, totalScManual);
+    // Deliberately excludes the note: adding an explanation is not a change to
+    // the figures and must never read as one.
     const newHash = hashMealPeriods(mealPeriods);
 
     const { data: existing } = await supabase
       .from('daily_operations')
-      .select('id, data_source, gross_sales, locked_at, meal_periods_hash, meal_periods')
+      .select('id, data_source, gross_sales, locked_at, meal_periods_hash, meal_periods, finance_notes')
       .eq('venue_id', venueId)
       .eq('business_date', date)
       .maybeSingle();
@@ -504,6 +534,7 @@ export async function ingestMondayItems(
         const updateData: Record<string, unknown> = {
           meal_periods: mealPeriods,
           meal_periods_hash: newHash,
+          finance_notes: financeNotes,
           data_source: 'both',
         };
 
@@ -539,12 +570,24 @@ export async function ingestMondayItems(
 
     } else if (existing && (existing.data_source === 'monday' || existing.data_source === 'both')) {
       // ── UPDATE: Monday/both row exists — overwrite meal periods ──
-      if (existing.meal_periods_hash === newHash) continue; // no change
+      if (existing.meal_periods_hash === newHash) {
+        // The figures have not moved, but the note may have. Someone writing an
+        // explanation days later is exactly when we most want it, so it is
+        // stored on its own rather than waiting for a figure to change.
+        if (!options.dryRun && (existing.finance_notes ?? null) !== financeNotes) {
+          await supabase
+            .from('daily_operations')
+            .update({ finance_notes: financeNotes })
+            .eq('id', existing.id);
+        }
+        continue;
+      }
 
       if (!options.dryRun) {
         const updateData: Record<string, unknown> = {
           meal_periods: mealPeriods,
           meal_periods_hash: newHash,
+          finance_notes: financeNotes,
         };
 
         if (existing.data_source === 'monday') {
@@ -601,6 +644,7 @@ export async function ingestMondayItems(
             total_guests: totals.totalCovers || null,
             meal_periods: mealPeriods,
             meal_periods_hash: newHash,
+            finance_notes: financeNotes,
             data_source: 'monday',
           });
 
