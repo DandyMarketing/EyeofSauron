@@ -168,6 +168,39 @@ sit in their own accounts again.
 
 ---
 
+### 2.5 A lock that protected the wrong number
+**Symptom.** Five Fat Prince days in August 2026 disagreed with Revel. One was
+reported to the finance department as **$1,271 of missing trade**. The venue had
+in fact corrected the Monday board days earlier, and every one of the five
+reconciled to the cent on the live board.
+**Root cause.** A day was locked the moment the board first matched Revel
+exactly. After that, `src/ingest/monday.ts` rejected any incoming change, raised
+a `post_lock_change` alert and moved on — so the corrected figures were never
+written. The lock was built to stop a settled day being tampered with; what it
+actually did was freeze whatever we held at one arbitrary instant and make the
+venue's own corrections unreachable. Permanently: nothing in the system could
+ever update that row again.
+**Why it read as the venue's fault.** The alert says the two systems now hold
+different figures, which is true and says nothing about which one is right. We
+had it backwards for weeks — the board was correct and we were refusing it. The
+admin page even described the change as "rejected", framing a correction as an
+intrusion.
+**Fix.** The gate is now the accounting close, not a match: figures are final
+from the **15th of the month following the trading month** (Khai's rule).
+Before close a correction flows straight through; after close it is genuinely an
+event and still alerts. A closed month with *no* row is still ingested — filling
+a gap is not the same as changing a settled figure. `src/lib/accounting-period.ts`
+holds the rule and its one tunable constant.
+**Recurs?** **Every customer.** Two rules worth carrying:
+*A lock needs a reason to end.* One that only ever closes will eventually hold
+something wrong, and the longer it holds the more confident the wrong number
+looks. Tie it to a business event — a close, an approval, a period end — never
+to "the data agreed once".
+*Ask which side is authoritative before building the alert.* We spent real
+effort analysing discrepancies that existed only because we refused the answer.
+
+---
+
 ## 3. Analysis that misleads
 
 ### 3.1 Partial buckets read as a collapse

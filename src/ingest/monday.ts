@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
+import { isPeriodClosed, closeDateFor } from '../lib/accounting-period.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
 
@@ -458,8 +459,17 @@ export async function ingestMondayItems(
       .eq('business_date', date)
       .maybeSingle();
 
-    // ── LOCKED ROW: reject changes, raise alert if data differs ──
-    if (existing?.locked_at) {
+    // ── CLOSED PERIOD: reject changes, raise alert if data differs ──
+    //
+    // The gate is the accounting close, not `locked_at`. Locking on the first
+    // exact match against Revel froze whatever we held at that instant and made
+    // the venue's own later corrections unreachable -- the board got fixed, we
+    // kept the wrong figure forever, and the alert said only that the two now
+    // disagreed. BUILD_LOG 2.5.
+    //
+    // Only an EXISTING row is frozen. A closed month with no row at all is a
+    // gap, and filling a gap is not the same as changing a settled figure.
+    if (existing && isPeriodClosed(date)) {
       if (existing.meal_periods_hash !== newHash) {
         if (!options.dryRun) {
           await raiseAlert({
@@ -474,7 +484,7 @@ export async function ingestMondayItems(
         }
         results.push({
           venue: venueSlug, date, action: 'blocked',
-          error: `Row locked at ${existing.locked_at} — incoming data differs (alert raised)`,
+          error: `${date} is in a closed period (final from ${closeDateFor(date)}) — incoming data differs (alert raised)`,
         });
       }
       // Same hash = no change, nothing to do
