@@ -33,6 +33,12 @@ export interface MetaIngestResult {
   rows: number;
   missing_days: string[];
   stored: boolean;
+  /**
+   * Metrics Graph refused, by name, with its reason. Present when SOME metrics
+   * came back and others did not -- a partial pull that reports nothing would
+   * look complete.
+   */
+  failed_metrics?: Record<string, string>;
   error?: string;
 }
 
@@ -63,6 +69,54 @@ export interface DiscoveredAccount {
    */
   insights_readable: boolean | null;
   error: string | null;
+}
+
+/**
+ * Turn Graph's `/me/accounts` payload into the list, given what is already
+ * mapped. Split out from the call so it can be tested without a live token --
+ * the shapes Graph returns are the part that surprises you, not the fetch.
+ */
+export function mapDiscovered(
+  pages: any[],
+  mappedBy: Map<string, string | null>,
+): { accounts: DiscoveredAccount[]; errors: string[] } {
+  const accounts: DiscoveredAccount[] = [];
+  const errors: string[] = [];
+
+  for (const page of pages ?? []) {
+    if (!page?.id) continue;
+
+    accounts.push({
+      platform: 'facebook',
+      account_id: page.id,
+      account_name: page.name ?? null,
+      page_id: null,
+      mapped_venue: mappedBy.get(`facebook|${page.id}`) ?? null,
+      insights_readable: null,
+      error: null,
+    });
+
+    const ig = page.instagram_business_account;
+    if (!ig?.id) {
+      // Worth saying out loud. A Page with no linked Instagram account is the
+      // single most common cause of "the handle exists but we cannot read it",
+      // and it is indistinguishable from a permissions problem in the error.
+      errors.push(`Page "${page.name ?? page.id}" (${page.id}) has no linked Instagram business account.`);
+      continue;
+    }
+
+    accounts.push({
+      platform: 'instagram',
+      account_id: ig.id,
+      account_name: ig.username ?? ig.name ?? null,
+      page_id: page.id,
+      mapped_venue: mappedBy.get(`instagram|${ig.id}`) ?? null,
+      insights_readable: null,
+      error: null,
+    });
+  }
+
+  return { accounts, errors };
 }
 
 /**
@@ -112,35 +166,9 @@ export async function discoverAccounts(
     (mapped ?? []).map((m: any) => [`${m.platform}|${m.account_id}`, m.venues?.name ?? null]),
   );
 
-  for (const page of payload.data ?? []) {
-    accounts.push({
-      platform: 'facebook',
-      account_id: page.id,
-      account_name: page.name ?? null,
-      page_id: null,
-      mapped_venue: mappedBy.get(`facebook|${page.id}`) ?? null,
-      insights_readable: null,
-      error: null,
-    });
-
-    const ig = page.instagram_business_account;
-    if (!ig) {
-      // Worth saying out loud. A Page with no linked Instagram account is the
-      // single most common cause of "the handle exists but we cannot read it".
-      errors.push(`Page "${page.name ?? page.id}" (${page.id}) has no linked Instagram business account.`);
-      continue;
-    }
-
-    accounts.push({
-      platform: 'instagram',
-      account_id: ig.id,
-      account_name: ig.username ?? ig.name ?? null,
-      page_id: page.id,
-      mapped_venue: mappedBy.get(`instagram|${ig.id}`) ?? null,
-      insights_readable: null,
-      error: null,
-    });
-  }
+  const mappedResult = mapDiscovered(payload.data ?? [], mappedBy);
+  accounts.push(...mappedResult.accounts);
+  errors.push(...mappedResult.errors);
 
   if (opts.probe) {
     // Yesterday to today: the smallest window that returns anything, and small
@@ -227,11 +255,36 @@ export async function ingestMetaInsights(
     to_date: until,
   };
 
-  let rows: InsightRow[];
-  try {
-    rows = normaliseInsights(await fetchInsights(accountId, metrics, since, until));
-  } catch (e: any) {
-    return { ...base, rows: 0, missing_days: [], stored: false, error: e.message };
+  // One call per metric, not one call for all of them.
+  //
+  // Graph rejects the ENTIRE request if a single metric name is invalid, and it
+  // retires and renames account metrics on its own schedule. Asking for three
+  // together means the day a metric is retired we silently lose the other two
+  // as well -- a whole feed going dark because of a name change somewhere else.
+  // Three accounts times three metrics is nine cheap calls; robustness is worth
+  // more than the round trips here.
+  const rows: InsightRow[] = [];
+  const failedMetrics: Record<string, string> = {};
+
+  for (const metric of metrics) {
+    try {
+      rows.push(...normaliseInsights(await fetchInsights(accountId, [metric], since, until)));
+    } catch (e: any) {
+      failedMetrics[metric] = String(e?.message ?? e).slice(0, 300);
+    }
+  }
+
+  if (rows.length === 0) {
+    return {
+      ...base,
+      rows: 0,
+      missing_days: [],
+      stored: false,
+      failed_metrics: failedMetrics,
+      error: Object.keys(failedMetrics).length
+        ? `Every metric failed: ${Object.entries(failedMetrics).map(([m, e]) => `${m} — ${e}`).join(' | ')}`
+        : 'Meta returned no rows for this range.',
+    };
   }
 
   const gaps = missingDays(rows, since, until);
@@ -252,5 +305,14 @@ export async function ingestMetaInsights(
 
   if (error) throw new Error(`Social metrics upsert failed: ${error.message}`);
 
-  return { ...base, rows: records.length, missing_days: gaps, stored: true };
+  return {
+    ...base,
+    rows: records.length,
+    missing_days: gaps,
+    stored: true,
+    // Carried even on success. A pull that stored two metrics out of three is
+    // not a failure, but calling it a clean success is how a feed goes quietly
+    // half-dark.
+    ...(Object.keys(failedMetrics).length ? { failed_metrics: failedMetrics } : {}),
+  };
 }

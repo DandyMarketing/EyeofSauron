@@ -785,7 +785,8 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const metaSection = el('div', 'section');
   metaSection.innerHTML = '<h2>Meta (Instagram &amp; Facebook)</h2>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
-    '<button id="meta-discover-btn" class="btn">Discover accounts</button>' +
+    '<button id="meta-discover-btn" class="btn">Discover accounts</button> ' +
+    '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button>' +
     '<div id="meta-result" style="margin-top:16px"></div>';
   app.appendChild(metaSection);
 
@@ -807,7 +808,12 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
         '<td>' + escapeHtml(a.platform) + '</td>' +
         '<td>' + escapeHtml(a.account_name || '(unnamed)') + '</td>' +
         '<td style="font-family:monospace;font-size:12px">' + escapeHtml(a.account_id) + '</td>' +
-        '<td>' + (a.mapped_venue ? escapeHtml(a.mapped_venue) : '<span style="color:var(--text-muted)">unmapped</span>') + '</td>' +
+        '<td><select class="meta-venue" data-platform="' + escapeHtml(a.platform) + '" data-account="' + escapeHtml(a.account_id) + '" data-name="' + escapeHtml(a.account_name || '') + '" style="min-width:150px">' +
+          '<option value="">&mdash; not mapped &mdash;</option>' +
+          venues.map(function (v) {
+            return '<option value="' + v.id + '"' + (a.mapped_venue === v.name ? ' selected' : '') + '>' + escapeHtml(v.name) + '</option>';
+          }).join('') +
+        '</select></td>' +
         '<td>' + readable + '</td>' +
         '<td style="font-size:12px;color:var(--text-muted);max-width:340px;white-space:normal">' + escapeHtml(a.error || '') + '</td>' +
         '</tr>';
@@ -823,6 +829,52 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
             return '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;white-space:normal">' + escapeHtml(e) + '</div>';
           }).join('') + '</div>'
         : '');
+
+    // Attached here, not at render time: these selects only exist once the
+    // discovery call has come back.
+    for (const sel of out.querySelectorAll('.meta-venue')) {
+      sel.addEventListener('change', async function (e) {
+        const t = e.target;
+        if (!t.value) return;
+        const res = await api('POST', '/admin/api/meta/map', {
+          platform: t.dataset.platform,
+          account_id: t.dataset.account,
+          account_name: t.dataset.name || null,
+          venue_id: t.value,
+        });
+        if (res.error) { alert('Could not map: ' + res.error); return; }
+        t.style.outline = '2px solid var(--success)';
+      });
+    }
+  });
+
+  document.getElementById('meta-ingest-btn').addEventListener('click', async () => {
+    const out = document.getElementById('meta-result');
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Pulling&hellip; this takes a few seconds per account.</p>';
+
+    const res = await api('POST', '/admin/api/meta/ingest', { days: 30 });
+    if (res.error && !(res.results || []).length) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      return;
+    }
+
+    const rows = (res.results || []).map(function (r) {
+      // A metric Graph refused is reported even when the pull succeeded --
+      // storing two metrics out of three and calling it clean is how a feed
+      // goes quietly half-dark.
+      const failed = r.failed_metrics ? Object.keys(r.failed_metrics) : [];
+      return '<tr>' +
+        '<td>' + escapeHtml(r.account_name || r.account_id || '') + '</td>' +
+        '<td>' + (r.stored ? '<span style="color:var(--success)">' + r.rows + ' rows</span>' : '<span style="color:var(--error)">not stored</span>') + '</td>' +
+        '<td style="font-size:12px;color:var(--text-muted);white-space:normal;max-width:420px">' +
+          escapeHtml(r.error || '') +
+          (failed.length ? '<br>Metrics refused: ' + escapeHtml(failed.join(', ')) : '') +
+          ((r.missing_days || []).length ? '<br>No data on ' + r.missing_days.length + ' day(s)' : '') +
+        '</td></tr>';
+    }).join('');
+
+    out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') + '</p>' +
+      '<table><thead><tr><th>Account</th><th>Stored</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
   });
 
   document.getElementById('note-add-btn').addEventListener('click', async () => {
