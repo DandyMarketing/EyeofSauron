@@ -3,7 +3,7 @@ import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
-import { netSalesOf, serviceChargeOf } from '../lib/sales.js';
+import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -659,6 +659,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const totals = {
     days: data.length,
     gross_sales: 0,
+    food_bev_sales: 0,
     net_sales: 0,
     service_charge: 0,
     item_discounts: 0,
@@ -676,7 +677,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const sopBreaches: Array<{ date: string; sevenrooms_covers: number | null; revel_guests: number | null; variance: number | null }> = [];
 
   const daily = data.map(d => {
-    totals.gross_sales += Number(d.gross_sales);
+    totals.gross_sales += grossSalesOf(d) ?? foodAndBevSalesOf(d);
+    totals.food_bev_sales += foodAndBevSalesOf(d);
     totals.net_sales += netSalesOf(d);
     totals.service_charge += serviceChargeOf(d) ?? 0;
     totals.item_discounts += Number(d.item_discounts);
@@ -713,7 +715,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     return {
       date: d.business_date,
       closed: dayClosed || undefined,
-      gross_sales: d.gross_sales,
+      gross_sales: grossSalesOf(d) ?? foodAndBevSalesOf(d),
+      food_bev_sales: foodAndBevSalesOf(d),
       net_sales: netSalesOf(d),
       service_charge: serviceChargeOf(d),
       total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
@@ -786,11 +789,17 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     const { data: rows } = await query;
     if (!rows || rows.length === 0) continue;
 
-    let grossSales = 0, netSales = 0, serviceCharge = 0, itemDisc = 0, orderDisc = 0, taxTotal = 0, tips = 0, netToAccount = 0, transactions = 0, guests = 0;
+    // `grossSales` here is the FOOD + BEVERAGE basis -- it is what the discount
+    // rate, food split and spend per head divide by, and none of those may
+    // carry service charge. `businessGross` is gross sales as the business
+    // defines it, food + beverage + service charge, and is reported but never
+    // used as a denominator.
+    let grossSales = 0, businessGross = 0, netSales = 0, serviceCharge = 0, itemDisc = 0, orderDisc = 0, taxTotal = 0, tips = 0, netToAccount = 0, transactions = 0, guests = 0;
     let foodSales = 0, bevSales = 0;
 
     for (const ops of rows) {
-      grossSales += Number(ops.gross_sales);
+      grossSales += foodAndBevSalesOf(ops);
+      businessGross += grossSalesOf(ops) ?? foodAndBevSalesOf(ops);
       netSales += netSalesOf(ops);
       serviceCharge += serviceChargeOf(ops) ?? 0;
       itemDisc += Number(ops.item_discounts);
@@ -833,7 +842,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       venue: venue.name,
       slug: venue.slug,
       days: rows.length,
-      gross_sales: grossSales,
+      gross_sales: businessGross,
+      food_bev_sales: grossSales,
       net_sales: netSales,
       service_charge: serviceCharge,
       total_discounts: totalDisc,

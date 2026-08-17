@@ -22,6 +22,7 @@ interface MealPeriodData {
   discounts: number;
   reservations: number;
   cancellations: number;
+  /** Covers removed from a booking, NOT a discount amount. Confirmed by Khai. */
   reductions: number;
   walk_ins: number;
 }

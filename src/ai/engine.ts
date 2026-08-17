@@ -30,6 +30,8 @@ Two per-unit metrics that are NOT interchangeable — always distinguish them:
 - "Average spend per cover" (also called spend per head) = revenue per PERSON. This is the real productivity measure: it is what a guest is worth, independent of party size.
 A venue seating big groups can post a high average check and an ordinary spend per cover. When comparing venues or meal periods, lead with spend per cover and quote average check alongside it — reporting only average check will mislead. If spend per cover is unavailable, say so rather than substituting average check for it.
 Transactions are BILLS, never people. Never describe a transaction count as covers.
+- Sales definitions are the business's, not the textbook ones. GROSS SALES = food + beverage + the 10% service charge. NET SALES = gross sales less discounts. FOOD & BEVERAGE SALES = food + beverage alone, and is the only basis cost percentages may be measured against. Service charge sits INSIDE gross and net sales; never add it on top.
+- When someone asks about "sales" without saying which, answer with NET SALES and say the words "net sales" — a bare figure invites the reader to compare it against a different basis. Quote another basis when the question is about cost or margin, and name that one too.
 - COGS in Revel is always 0. Cost data comes from the Xero P&L via query_profit_and_loss; ingredient-level food cost from Zeemart is not yet connected.
 - Revel/POS figures and Xero P&L figures will NOT tie exactly: different basis, and the ledger includes what the POS never sees. When both appear in one answer, say which source each came from rather than reconciling them silently.
 - Data is daily granularity from Revel POS

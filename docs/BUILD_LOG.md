@@ -131,33 +131,40 @@ which date basis it used.
 
 ---
 
-### 2.4 A source system's field name taken as the business's meaning
-**Symptom.** None. That is the point — every "net sales" figure Sauron charted
-or quoted was about 10% too high, and nothing looked wrong.
-**Root cause.** Revel's operations report has a NET SALES section whose
-"Total Sales" line is net of discounts but **inclusive of the 10% service
-charge**. It was stored as `daily_operations.net_sales` and surfaced to the
-model and the charts under the label "Net sales". The relationship is exact —
-`Total Sales = (gross − discounts) × 1.10`, confirmed to the cent on days
-across three venues and three years.
-**Why it survived.** A number 10% high is plausible. A manager comparing it
-against their own recollection assumes they misremembered, and service charge
-is roughly the size of a good week's variance. It was found only because a
-query written to test an unrelated hypothesis — that delivery sales were
-inflating the column — returned an excess that was suspiciously *exactly* 10%
-on every single row. The hypothesis was wrong; the query still found the bug.
-**Fix.** `src/lib/sales.ts` derives net sales as gross less item and order
-discounts, exposes the service charge separately, and says in a comment why the
-column of that name must never be read directly. All four call sites go through
-it. Tests pin the definition to the three real days.
-**Recurs?** **Every customer, and every new source.** The general rule: *a
-field name in a source system is the vendor's meaning, not the business's.*
-Revel's "Total Sales", Revel's "Gross Sales" and the Monday board's "Sales" are
-three different quantities with overlapping names. Before any figure is given a
-label in the product, reconcile it to a known number by hand — one day, on a
-calculator — and write the identity down. Xero will make this worse, not
-better: it has its own "Revenue", and service charge and tips sit in their own
-accounts.
+### 2.4 An accounting convention assumed instead of asked
+**Symptom.** A figure that was already correct was "fixed" into a wrong one,
+and the wrong finding reached a report shared with the finance department.
+**Root cause.** `daily_operations.net_sales` holds Revel's "Total Sales" —
+net of discounts, **inclusive** of the 10% service charge. Having established
+that (correctly, and to the cent: `Total Sales = (gross − discounts) × 1.10`),
+I applied the usual F&B convention, in which net sales *excludes* service
+charge, concluded the figure was ~10% overstated, and rewrote it as gross less
+discounts.
+
+The business uses the opposite convention:
+
+    Gross Sales = food + beverage + service charge
+    Net Sales   = gross sales − discounts
+    Cost basis  = food + beverage only
+
+Under that definition the stored column was exactly right and needed nothing.
+The change made every net sales figure Sauron reported ~10% too low.
+**How it was caught.** Khai stated the three definitions in one sentence.
+Tested against five real days spanning three venues and three years, they
+matched the stored column to the cent on all five.
+**Fix.** Reverted. `src/lib/sales.ts` now writes down all three definitions
+with the identity that proves them, and the tests carry the five days, so
+changing this means disproving real data first.
+**The distinction that matters.** The *observation* — that `net_sales` carries
+service charge — was right. The *inference* — that it was therefore mislabelled
+— was not, and it was never checked against anyone who knew. The arithmetic
+supported both readings equally well; that is exactly why it felt safe.
+**Recurs?** **Every customer.** *An accounting term is a house convention, not
+a standard.* "Gross sales", "net sales", "covers" and "average check" all vary
+by operator, and the data will not tell you which is meant — both readings fit.
+Ask, write the answer next to the code, and pin it with real days. Xero makes
+this sharper, not safer: it has its own "Revenue", and service charge and tips
+sit in their own accounts again.
 
 ---
 
