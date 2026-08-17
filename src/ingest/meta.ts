@@ -51,9 +51,14 @@ export const PLATFORM_METRICS: Record<string, string[]> = {
  */
 export const METRIC_CANDIDATES: Record<string, string[]> = {
   instagram: [
-    'reach', 'impressions', 'views', 'profile_views', 'website_clicks',
+    'reach', 'views', 'profile_views', 'website_clicks',
     'accounts_engaged', 'total_interactions', 'likes', 'comments', 'shares',
     'saves', 'replies', 'follows_and_unfollows', 'profile_links_taps',
+    // Named by Meta itself in the rejection message for `impressions`, which
+    // helpfully enumerates what it will accept. Its error is a better source
+    // than any documentation, so it is worth reading in full -- which is why
+    // the recorded reason is no longer truncated to 220 characters.
+    'follower_count', 'online_followers',
   ],
   facebook: [
     'page_impressions', 'page_impressions_unique', 'page_post_engagements',
@@ -328,11 +333,98 @@ export async function probeMetrics(
     }
 
     if (!settled) {
-      out.push({ metric, form: null, ok: false, error: lastError.slice(0, 220) });
+      // Not truncated hard: Meta's rejection for an unknown Instagram metric
+      // lists every name it WILL accept, which is the most authoritative source
+      // we have. Cutting it at 220 characters threw that list away.
+      out.push({ metric, form: null, ok: false, error: lastError.slice(0, 900) });
     }
   }
 
   return out;
+}
+
+/**
+ * Work out which day a total_value figure belongs to, by measuring rather than
+ * assuming.
+ *
+ * total_value returns one aggregate for the requested window and no dates at
+ * all, so a per-day pull has to label each value from the `since` we asked for.
+ * Whether that is right depends on whether Meta treats the window as
+ * [since, until) or (since, until] -- and a sum check CANNOT tell them apart,
+ * because both conventions make the days add up to the window. They differ only
+ * in which day each figure is.
+ *
+ * An off-by-one here is the worst kind of wrong: every number is real, the
+ * totals reconcile, and every day's activity is filed against its neighbour.
+ * Marketing would be reading Saturday's engagement as Sunday's.
+ *
+ * `reach` settles it. It is the one metric available in BOTH forms, so we can
+ * pull it as a dated daily series -- where `end_time` tells us the day outright
+ * -- and again one day at a time as total_value, then see whether the two agree
+ * on the same dates or sit one apart.
+ */
+export interface DayAlignment {
+  daily_series: Record<string, number>;
+  per_day_total_value: Record<string, number>;
+  matches: number;
+  matches_shifted_back: number;
+  verdict: 'aligned' | 'off_by_one' | 'inconclusive';
+  note: string;
+}
+
+export async function calibrateDayAlignment(accountId: string, days = 7): Promise<DayAlignment> {
+  const until = new Date();
+  const since = new Date(until.getTime() - days * 86_400_000);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+  // The dated series. normaliseInsights already applies the end_time
+  // correction, so these dates are the trustworthy side of the comparison.
+  const series: Record<string, number> = {};
+  for (const r of normaliseInsights(await fetchInsights(accountId, ['reach'], iso(since), iso(until)))) {
+    if (r.metric === 'reach') series[r.business_date] = r.value;
+  }
+
+  // The same metric, one day at a time, laid out the way a total_value pull
+  // would have to label it.
+  const perDay: Record<string, number> = {};
+  for (let i = 0; i < days; i++) {
+    const d = new Date(since.getTime() + i * 86_400_000);
+    const next = new Date(d.getTime() + 86_400_000);
+    try {
+      const raw = await fetchInsights(accountId, ['reach'], iso(d), iso(next), 'total_value');
+      const value = raw?.data?.[0]?.total_value?.value;
+      if (typeof value === 'number') perDay[iso(d)] = value;
+    } catch {
+      // A day Meta will not answer for is simply absent; the verdict below
+      // needs agreement, not completeness.
+    }
+  }
+
+  let matches = 0;
+  let shifted = 0;
+  for (const [date, value] of Object.entries(perDay)) {
+    if (series[date] === value) matches++;
+    const prev = new Date(new Date(`${date}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+    if (series[prev] === value) shifted++;
+  }
+
+  const verdict: DayAlignment['verdict'] =
+    matches >= 3 && matches > shifted ? 'aligned'
+      : shifted >= 3 && shifted > matches ? 'off_by_one'
+        : 'inconclusive';
+
+  return {
+    daily_series: series,
+    per_day_total_value: perDay,
+    matches,
+    matches_shifted_back: shifted,
+    verdict,
+    note: verdict === 'aligned'
+      ? 'A per-day total_value pull can be labelled with the `since` date. Safe to ingest the other metrics this way.'
+      : verdict === 'off_by_one'
+        ? 'Values belong to the day BEFORE the `since` used. The ingest must subtract a day, exactly as the daily series does with end_time.'
+        : 'Not enough agreement either way. Do not ingest total_value metrics on a guess -- widen the window and run again.',
+  };
 }
 
 /**
