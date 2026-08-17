@@ -619,7 +619,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     // Collapsed by default. Expanded, five alerts filled the screen and the one
     // that mattered looked identical to four repeats of another.
     a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means someone edited Monday.com after that day was reconciled against Revel and locked, so the two systems now hold different figures. Resolving clears every duplicate of the same finding.</p>' +
+      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. Resolving clears every duplicate of the same finding.</p>' +
       alerts.map(function (al) {
         const changeRows = (al.changes || []).map(function (c) {
           return '<div style="font-size:12px;color:var(--text-muted)">' +
