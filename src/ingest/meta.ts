@@ -40,9 +40,64 @@ export const IG_DAILY_METRICS = ['reach'];
  * cleanly and says so, rather than failing loudly about the wrong thing.
  */
 export const PLATFORM_METRICS: Record<string, string[]> = {
-  instagram: ['reach'],
+  // Both confirmed as true daily series: Graph returns a dated value per day.
+  instagram: ['reach', 'follower_count'],
   facebook: [],
 };
+
+/**
+ * Metrics Meta only serves as an aggregate, one window at a time.
+ *
+ * Each needs its own call per day, so this list costs 12 calls per account per
+ * day. Nightly that is 36 across three venues -- nothing. A 30-day backfill is
+ * 1,080, which is why `maxTotalValueDays` exists.
+ *
+ * `online_followers` is absent on purpose: Meta answers "incompatible with the
+ * metric type (total_value)" and it does not work as a daily series either.
+ */
+export const TOTAL_VALUE_METRICS: Record<string, string[]> = {
+  instagram: [
+    'views', 'profile_views', 'website_clicks', 'accounts_engaged',
+    'total_interactions', 'likes', 'comments', 'shares', 'saves', 'replies',
+    'follows_and_unfollows', 'profile_links_taps',
+  ],
+  facebook: [],
+};
+
+/**
+ * A total_value window opened at `since` returns the figure for the day BEFORE
+ * it. So to read business date B, the window opens at B + 1.
+ *
+ * Measured, not assumed -- calibrated on 17 Aug 2026 against `reach`, the one
+ * metric Meta serves in both forms. Seven days compared: seven agreements one
+ * day back, zero same-day. `calibrateDayAlignment` is the check, and it should
+ * be re-run if Meta changes API version or an account changes timezone.
+ *
+ * Getting this wrong would have been invisible. Every figure real, every total
+ * reconciling, every day's activity filed against its neighbour.
+ */
+export const TOTAL_VALUE_SINCE_OFFSET_DAYS = 1;
+
+const DAY_MS = 86_400_000;
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** One day's figure for a metric Meta only aggregates. Null if it gave none. */
+export async function fetchTotalValueForDay(
+  accountId: string,
+  metric: string,
+  businessDate: string,
+): Promise<number | null> {
+  const base = new Date(`${businessDate}T00:00:00Z`).getTime();
+  const raw = await fetchInsights(
+    accountId,
+    [metric],
+    isoDay(base + TOTAL_VALUE_SINCE_OFFSET_DAYS * DAY_MS),
+    isoDay(base + (TOTAL_VALUE_SINCE_OFFSET_DAYS + 1) * DAY_MS),
+    'total_value',
+  );
+  const value = raw?.data?.[0]?.total_value?.value;
+  return typeof value === 'number' ? value : null;
+}
 
 /**
  * Names worth trying. Meta retires and renames account metrics on its own
@@ -82,6 +137,11 @@ export interface MetaIngestResult {
    * look complete.
    */
   failed_metrics?: Record<string, string>;
+  /**
+   * Set when the aggregate-only metrics covered fewer days than asked for. A
+   * shortened range that says nothing about it reads as a complete one.
+   */
+  total_value_days_capped?: number;
   error?: string;
 }
 
@@ -440,8 +500,9 @@ export async function ingestMetaInsights(
   since: string,
   until: string,
   metrics: string[] = PLATFORM_METRICS[platform] ?? [],
+  maxTotalValueDays = 7,
 ): Promise<MetaIngestResult> {
-  if (metrics.length === 0) {
+  if (metrics.length === 0 && (TOTAL_VALUE_METRICS[platform] ?? []).length === 0) {
     // Facebook Pages, today. Saying "nothing configured" is honest; running
     // Instagram metric names against a Page and reporting Graph's rejection
     // would blame Meta for our own mistake.
@@ -493,6 +554,37 @@ export async function ingestMetaInsights(
     }
   }
 
+  // Aggregate-only metrics, one call per metric per day.
+  //
+  // Capped rather than unbounded: a 30-day pull of twelve metrics is 360 calls
+  // per account, and a rate limit hit halfway through would leave a partial day
+  // stored with no sign of it. The cap is REPORTED, never silent -- a truncated
+  // range that says nothing reads as a complete one.
+  const totalValueMetrics = TOTAL_VALUE_METRICS[platform] ?? [];
+  let daysCapped: number | undefined;
+
+  if (totalValueMetrics.length > 0) {
+    const startMs = new Date(`${since}T00:00:00Z`).getTime();
+    const endMs = new Date(`${until}T00:00:00Z`).getTime();
+    const requested = Math.floor((endMs - startMs) / DAY_MS) + 1;
+    const span = Math.min(requested, maxTotalValueDays);
+    if (span < requested) daysCapped = span;
+
+    // Most recent days first: if a rate limit does bite, the days that matter
+    // most are already in.
+    for (let i = 0; i < span; i++) {
+      const day = isoDay(endMs - i * DAY_MS);
+      for (const metric of totalValueMetrics) {
+        try {
+          const value = await fetchTotalValueForDay(accountId, metric, day);
+          if (value !== null) rows.push({ business_date: day, metric, value });
+        } catch (e: any) {
+          failedMetrics[metric] = String(e?.message ?? e).slice(0, 300);
+        }
+      }
+    }
+  }
+
   if (rows.length === 0) {
     return {
       ...base,
@@ -529,6 +621,7 @@ export async function ingestMetaInsights(
     rows: records.length,
     missing_days: gaps,
     stored: true,
+    ...(daysCapped !== undefined ? { total_value_days_capped: daysCapped } : {}),
     // Carried even on success. A pull that stored two metrics out of three is
     // not a failure, but calling it a clean success is how a feed goes quietly
     // half-dark.
