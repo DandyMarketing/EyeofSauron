@@ -66,6 +66,54 @@ export interface DiscoveredAccount {
 }
 
 /**
+ * Turn Graph's `/me/accounts` payload into the list, given what is already
+ * mapped. Split out from the call so it can be tested without a live token --
+ * the shapes Graph returns are the part that surprises you, not the fetch.
+ */
+export function mapDiscovered(
+  pages: any[],
+  mappedBy: Map<string, string | null>,
+): { accounts: DiscoveredAccount[]; errors: string[] } {
+  const accounts: DiscoveredAccount[] = [];
+  const errors: string[] = [];
+
+  for (const page of pages ?? []) {
+    if (!page?.id) continue;
+
+    accounts.push({
+      platform: 'facebook',
+      account_id: page.id,
+      account_name: page.name ?? null,
+      page_id: null,
+      mapped_venue: mappedBy.get(`facebook|${page.id}`) ?? null,
+      insights_readable: null,
+      error: null,
+    });
+
+    const ig = page.instagram_business_account;
+    if (!ig?.id) {
+      // Worth saying out loud. A Page with no linked Instagram account is the
+      // single most common cause of "the handle exists but we cannot read it",
+      // and it is indistinguishable from a permissions problem in the error.
+      errors.push(`Page "${page.name ?? page.id}" (${page.id}) has no linked Instagram business account.`);
+      continue;
+    }
+
+    accounts.push({
+      platform: 'instagram',
+      account_id: ig.id,
+      account_name: ig.username ?? ig.name ?? null,
+      page_id: page.id,
+      mapped_venue: mappedBy.get(`instagram|${ig.id}`) ?? null,
+      insights_readable: null,
+      error: null,
+    });
+  }
+
+  return { accounts, errors };
+}
+
+/**
  * List every Page and Instagram account this token can actually reach.
  *
  * Written because chasing one account's permission error in isolation is
@@ -112,35 +160,9 @@ export async function discoverAccounts(
     (mapped ?? []).map((m: any) => [`${m.platform}|${m.account_id}`, m.venues?.name ?? null]),
   );
 
-  for (const page of payload.data ?? []) {
-    accounts.push({
-      platform: 'facebook',
-      account_id: page.id,
-      account_name: page.name ?? null,
-      page_id: null,
-      mapped_venue: mappedBy.get(`facebook|${page.id}`) ?? null,
-      insights_readable: null,
-      error: null,
-    });
-
-    const ig = page.instagram_business_account;
-    if (!ig) {
-      // Worth saying out loud. A Page with no linked Instagram account is the
-      // single most common cause of "the handle exists but we cannot read it".
-      errors.push(`Page "${page.name ?? page.id}" (${page.id}) has no linked Instagram business account.`);
-      continue;
-    }
-
-    accounts.push({
-      platform: 'instagram',
-      account_id: ig.id,
-      account_name: ig.username ?? ig.name ?? null,
-      page_id: page.id,
-      mapped_venue: mappedBy.get(`instagram|${ig.id}`) ?? null,
-      insights_readable: null,
-      error: null,
-    });
-  }
+  const mappedResult = mapDiscovered(payload.data ?? [], mappedBy);
+  accounts.push(...mappedResult.accounts);
+  errors.push(...mappedResult.errors);
 
   if (opts.probe) {
     // Yesterday to today: the smallest window that returns anything, and small
