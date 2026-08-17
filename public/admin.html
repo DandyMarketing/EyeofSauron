@@ -788,7 +788,8 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     '<button id="meta-discover-btn" class="btn">Discover accounts</button> ' +
     '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button> ' +
     '<button id="meta-probe-btn" class="btn">Probe metric names</button> ' +
-    '<button id="meta-sample-btn" class="btn">Sample raw response</button>' +
+    '<button id="meta-sample-btn" class="btn">Sample raw response</button> ' +
+    '<button id="meta-calibrate-btn" class="btn">Calibrate day alignment</button>' +
     '<div id="meta-result" style="margin-top:16px"></div>';
   app.appendChild(metaSection);
 
@@ -877,6 +878,35 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
     out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') + '</p>' +
       '<table><thead><tr><th>Account</th><th>Stored</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  });
+
+  document.getElementById('meta-calibrate-btn').addEventListener('click', async () => {
+    const out = document.getElementById('meta-result');
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Pulling reach both ways over a week&hellip;</p>';
+
+    const res = await api('GET', '/admin/api/meta/calibrate');
+    if (res.error) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      return;
+    }
+
+    const dates = Object.keys(res.per_day_total_value || {}).sort();
+    const rows = dates.map(function (d) {
+      const a = (res.daily_series || {})[d];
+      const b = (res.per_day_total_value || {})[d];
+      const same = a === b;
+      return '<tr><td>' + escapeHtml(d) + '</td>' +
+        '<td class="r">' + (a === undefined ? '&mdash;' : a) + '</td>' +
+        '<td class="r">' + (b === undefined ? '&mdash;' : b) + '</td>' +
+        '<td>' + (same ? '<span style="color:var(--success)">same</span>' : '<span style="color:var(--text-muted)">differs</span>') + '</td></tr>';
+    }).join('');
+
+    const colour = res.verdict === 'aligned' ? 'var(--success)' : res.verdict === 'off_by_one' ? 'var(--error)' : 'var(--text-muted)';
+    out.innerHTML =
+      '<p style="font-size:14px;font-weight:600;color:' + colour + '">' + escapeHtml(res.verdict || '') + '</p>' +
+      '<p style="font-size:13px;color:var(--text-muted);white-space:normal;max-width:70ch">' + escapeHtml(res.note || '') + '</p>' +
+      '<p style="font-size:12px;color:var(--text-muted)">Same-day agreements: ' + res.matches + ' &middot; agreements one day back: ' + res.matches_shifted_back + '</p>' +
+      '<table><thead><tr><th>Date asked for</th><th class="r">Dated series</th><th class="r">total_value</th><th>Agreement</th></tr></thead><tbody>' + rows + '</tbody></table>';
   });
 
   document.getElementById('meta-sample-btn').addEventListener('click', async () => {

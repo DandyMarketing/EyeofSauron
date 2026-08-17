@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -710,6 +710,32 @@ app.get('/admin/api/meta/sample', async (c) => {
     return c.json({ account: account.account_name, metric, form, since, until, raw: redactTokens(raw) });
   } catch (e: any) {
     return c.json({ account: account.account_name, metric, form, since, until, error: redactTokens(String(e?.message ?? e)) });
+  }
+});
+
+/**
+ * Measure which day a total_value figure belongs to, rather than assuming it.
+ * See calibrateDayAlignment -- an off-by-one here reconciles perfectly and is
+ * still wrong on every single day.
+ */
+app.get('/admin/api/meta/calibrate', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data: account } = await supabaseAdmin
+    .from('social_accounts')
+    .select('account_id, account_name')
+    .eq('platform', 'instagram')
+    .not('venue_id', 'is', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (!account) return c.json({ error: 'No mapped Instagram account to calibrate against.' });
+
+  try {
+    return c.json({ account: account.account_name, ...(await calibrateDayAlignment(account.account_id)) });
+  } catch (e: any) {
+    return c.json({ account: account.account_name, error: redactTokens(String(e?.message ?? e)) });
   }
 });
 
