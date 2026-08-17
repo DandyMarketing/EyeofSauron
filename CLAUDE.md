@@ -29,6 +29,38 @@ I'm Khai — many years in F&B, building this as the company AI. I code alongsid
 
 **Revel ingestion detail:** one Gmail inbox handles all venues because the filename self-identifies. Parse venue + date from the filename. Map the opaque venue key (e.g. `neonpigeon_neonpigeon`) to a `venue_id` via a **lookup table**; an unknown key must be flagged by a watchdog, never guessed. File columns: Row Type (Product/Modifier), Class (Food/Beverage), Name, SKU, Barcode, Category, Subcategory, Qty, Sales (taxable + non-taxable), % Total Sales, COGS. COGS arrives as 0 (food cost comes from Zeemart, not Revel). Flag Modifier rows so they aren't double-counted. Sample verified: Neon Pigeon, 16 Jul 2026 = **$5,974** across 74 products / 283 units; the file's % column reconciles to 100%.
 
+## Company structure (Singapore incorporation)
+
+Each venue is its own private limited company, under an umbrella that operates
+them. This is the standard Singapore structure, and it matters to how the
+accounts are read:
+
+| Legal entity | Trading as |
+|---|---|
+| **The Dandy Partnership Pte Ltd** | umbrella — operates the others |
+| Potus Pte Ltd | Neon Pigeon |
+| 20 Craig Road Pte Ltd | Firangi Superstar |
+| Fat Prince Pte Ltd | Fat Prince |
+
+**Two of the three entity names tell you nothing about the venue.** "Potus" and
+"20 Craig Road" (an address) would not be guessed by any human or model, and
+Meta's verified entity is a fourth name again. This is the concrete reason
+every source that arrives keyed by a legal entity — Xero organisations above
+all — maps to a venue through a lookup table confirmed by a person, never by
+name matching. See BUILD_LOG 2.2 for what name-guessing costs.
+
+**The consequence for P&L work, which is not obvious:** each venue's Pte Ltd
+holds that venue's books, so venue-level profit is clean. But group costs —
+head office, marketing salaries, shared services — may sit in the umbrella
+entity, and inter-company management fees may be charged down into each venue.
+So a venue P&L pulled from Xero may be profit *before* group overhead, or after
+an allocation whose basis is a management decision rather than a fact.
+
+Sauron must not present either as "the venue's profit" without saying which it
+is. Confirm with Khai how group costs are treated before any margin or
+profitability answer is trusted. Entity and venue are currently 1:1; do not
+assume that holds if a single Pte Ltd ever operates two outlets.
+
 ## Tech stack & key decisions
 
 - **Railway** — compute (backend, web app, self-hosted n8n). Holds static secrets as **sealed variables**.
