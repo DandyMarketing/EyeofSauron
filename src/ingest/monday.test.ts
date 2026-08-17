@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDate } from './monday.js';
+import { parseDate, summarisePostLockChange } from './monday.js';
 
 /**
  * BUILD_LOG 2.1. A Monday.com item was literally named "2925-12-30 Tuesday".
@@ -67,5 +67,69 @@ describe('parseDate — plausibility, not just syntax', () => {
     assert.equal(parseDate('bluesheets_21feb_lunch'), null);
     assert.equal(parseDate('new item'), null);
     assert.equal(parseDate(''), null);
+  });
+});
+
+/**
+ * Post-lock changes are the alert that has actually fired in production:
+ * someone edited Monday.com for three dates after they had been reconciled to
+ * the cent against Revel and locked. The alert has to say WHAT changed, or a
+ * person has to diff two boards by eye to find out whether it mattered.
+ */
+describe('summarisePostLockChange', () => {
+  const locked = {
+    dinner: { food_sales: 4000, bev_sales: 2000, covers: 80, service_charge: 600 },
+  };
+
+  test('reports a changed field with both values', () => {
+    const changed = { dinner: { ...locked.dinner, food_sales: 4500 } };
+    assert.deepEqual(summarisePostLockChange(locked, changed), [
+      { period: 'dinner', field: 'food_sales', from: 4000, to: 4500 },
+    ]);
+  });
+
+  test('reports nothing when nothing moved', () => {
+    assert.deepEqual(summarisePostLockChange(locked, { dinner: { ...locked.dinner } }), []);
+  });
+
+  test('largest movement first', () => {
+    // The change worth investigating is rarely the alphabetically first one.
+    const changed = { dinner: { ...locked.dinner, service_charge: 610, food_sales: 8000 } };
+    assert.deepEqual(
+      summarisePostLockChange(locked, changed).map(c => c.field),
+      ['food_sales', 'service_charge'],
+    );
+  });
+
+  test('a meal period that appeared is reported against zero', () => {
+    const changed = { ...locked, lunch: { food_sales: 900, covers: 20 } };
+    const out = summarisePostLockChange(locked, changed);
+    assert.ok(out.some(c => c.period === 'lunch' && c.field === 'food_sales' && c.from === 0 && c.to === 900));
+  });
+
+  test('a meal period that disappeared is reported too', () => {
+    // Deleting a service is a bigger event than editing one, and would
+    // otherwise be silent.
+    const out = summarisePostLockChange(locked, {});
+    assert.ok(out.some(c => c.period === 'dinner' && c.field === 'food_sales' && c.from === 4000 && c.to === 0));
+  });
+
+  test('sub-cent differences are ignored', () => {
+    // Floating point, not an edit.
+    const changed = { dinner: { ...locked.dinner, food_sales: 4000.001 } };
+    assert.deepEqual(summarisePostLockChange(locked, changed), []);
+  });
+
+  test('a one-cent correction is still reported', () => {
+    // Small but real, and the distinction from a $4,000 edit is the point.
+    const changed = { dinner: { ...locked.dinner, food_sales: 4000.01 } };
+    assert.equal(summarisePostLockChange(locked, changed).length, 1);
+  });
+
+  test('missing snapshots do not throw', () => {
+    // Older alert rows may have been written without them.
+    assert.deepEqual(summarisePostLockChange(null, null), []);
+    assert.deepEqual(summarisePostLockChange(undefined, undefined), []);
+    assert.equal(summarisePostLockChange(null, locked).length, 4);
   });
 });

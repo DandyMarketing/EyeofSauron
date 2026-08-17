@@ -6,6 +6,7 @@ import { cors } from 'hono/cors';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
+import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
 import { loadKey } from './lib/crypto.js';
@@ -668,11 +669,23 @@ app.get('/admin/api/alerts', async (c) => {
 
   const { data } = await supabaseAdmin
     .from('reconciliation_alerts')
-    .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, created_at, venues(name)')
+    .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, old_meal_periods, new_meal_periods, created_at, venues(name)')
     .eq('resolved', false)
     .order('business_date', { ascending: false });
 
-  return c.json({ alerts: data ?? [] });
+  // Say what actually moved. "Something changed on 30 July" leaves someone
+  // diffing two boards by eye; the gap between a $2 service-charge correction
+  // and a $4,000 revenue edit is what decides whether to investigate.
+  const alerts = (data ?? []).map((a: any) => ({
+    ...a,
+    changes: a.alert_type === 'post_lock_change'
+      ? summarisePostLockChange(a.old_meal_periods, a.new_meal_periods)
+      : [],
+    old_meal_periods: undefined,
+    new_meal_periods: undefined,
+  }));
+
+  return c.json({ alerts });
 });
 
 /**

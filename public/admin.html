@@ -461,20 +461,21 @@ function fmtTime(iso) {
 }
 
 async function loadAll() {
-  const [usersData, venuesData, systemData, notesData, xeroData, pendingData] = await Promise.all([
+  const [usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData] = await Promise.all([
     api('GET', '/admin/api/users'),
     api('GET', '/admin/api/venues'),
     api('GET', '/admin/api/system?days=3'),
     api('GET', '/admin/api/notes'),
     api('GET', '/admin/api/xero/connections'),
     api('GET', '/admin/api/notes?status=pending'),
+    api('GET', '/admin/api/alerts'),
   ]);
 
   venues = venuesData.venues || [];
-  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || [], pendingData.notes || []);
+  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || [], pendingData.notes || [], alertsData.alerts || []);
 }
 
-function render(users, system, notes, xeroConnections, pendingNotes) {
+function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const app = document.getElementById('app');
   app.innerHTML = '';
 
@@ -609,6 +610,42 @@ function render(users, system, notes, xeroConnections, pendingNotes) {
   sysSection.appendChild(ingCard);
 
   app.appendChild(sysSection);
+
+  // Reconciliation alerts. These are data problems, not job failures -- the
+  // Monday cron kept working while reporting them, and showed as failed for
+  // days because a non-zero exit was conflating the two.
+  if (alerts && alerts.length > 0) {
+    const a = el('div', 'section');
+    a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
+      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree. A post-lock change means someone edited Monday.com after that day was reconciled against Revel and locked &mdash; the edit was rejected, so the two systems now hold different figures. Resolve once you have decided which is right.</p>' +
+      alerts.map(function (al) {
+        const changeRows = (al.changes || []).map(function (c) {
+          return '<div style="font-size:12px;color:var(--text-muted)">' +
+            escapeHtml(c.period) + ' &middot; ' + escapeHtml(c.field) + ': ' +
+            '<span style="color:var(--error)">' + c.from + '</span> &rarr; ' +
+            '<span style="color:var(--success)">' + c.to + '</span></div>';
+        }).join('');
+        return '<div class="alert-card" data-id="' + al.id + '" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">' +
+          '<div style="font-weight:600">' + escapeHtml(al.venues ? al.venues.name : 'Unknown venue') + ' &middot; ' + escapeHtml(al.business_date) + '</div>' +
+          '<div style="color:var(--text-muted);font-size:12px;margin-bottom:6px">' + escapeHtml(al.alert_type.replace(/_/g, ' ')) + '</div>' +
+          (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>') +
+          '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">' +
+            '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
+            '<button class="al-resolve btn btn-small">Resolve</button>' +
+          '</div></div>';
+      }).join('');
+    app.appendChild(a);
+
+    a.querySelectorAll('.alert-card').forEach(function (card) {
+      card.querySelector('.al-resolve').addEventListener('click', async function () {
+        const res = await api('POST', '/admin/api/alerts/' + card.dataset.id + '/resolve', {
+          notes: card.querySelector('.al-note').value || null,
+        });
+        if (res.error) { alert(res.error); return; }
+        await loadAll();
+      });
+    });
+  }
 
   // Review queue — notes captured from conversations, awaiting approval.
   // Nothing here has reached a prompt yet: the system must never write its own

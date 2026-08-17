@@ -213,6 +213,49 @@ export function hashMealPeriods(mealPeriods: Record<string, MealPeriodData>): st
   return createHash('sha256').update(sorted).digest('hex');
 }
 
+export interface FieldChange {
+  period: string;
+  field: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * What actually changed between a locked snapshot and the incoming data.
+ *
+ * A post-lock alert on its own says "something changed on 30 July" and leaves
+ * a person to go and diff two boards by eye. The difference between a $2
+ * service-charge correction and a $4,000 revenue edit is the difference
+ * between ignoring it and investigating it, so the alert has to carry it.
+ *
+ * Fields present on one side only are reported against 0, because a meal
+ * period appearing or disappearing is itself the change worth seeing.
+ */
+export function summarisePostLockChange(
+  oldPeriods: Record<string, Partial<MealPeriodData>> | null | undefined,
+  newPeriods: Record<string, Partial<MealPeriodData>> | null | undefined,
+): FieldChange[] {
+  const changes: FieldChange[] = [];
+  const periods = new Set([...Object.keys(oldPeriods ?? {}), ...Object.keys(newPeriods ?? {})]);
+
+  for (const period of periods) {
+    const before = (oldPeriods?.[period] ?? {}) as Record<string, number>;
+    const after = (newPeriods?.[period] ?? {}) as Record<string, number>;
+    const fields = new Set([...Object.keys(before), ...Object.keys(after)]);
+
+    for (const field of fields) {
+      const from = Number(before[field] ?? 0);
+      const to = Number(after[field] ?? 0);
+      // Cent tolerance: floating point, not a real edit.
+      if (Math.abs(from - to) > 0.005) changes.push({ period, field, from, to });
+    }
+  }
+
+  // Largest movement first -- the one worth looking at is rarely the first
+  // one alphabetically.
+  return changes.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+}
+
 export function reconcileMondayVsRevel(
   mondayGross: number,
   revelGross: number,
