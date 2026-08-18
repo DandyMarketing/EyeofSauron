@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { ingestMetaInsights, isMetaBlockedError, PLATFORM_METRICS, TOTAL_VALUE_METRICS } from '../ingest/meta.js';
+import {
+  ingestMetaInsights, isMetaBlockedError, isMetaAuthError,
+  PLATFORM_METRICS, TOTAL_VALUE_METRICS,
+} from '../ingest/meta.js';
 
 /**
  * Two years of social history, fetched slowly enough not to get us blocked.
@@ -77,15 +80,17 @@ const MARKER_METRIC = 'views';
 let totalStored = 0;
 let windowsSkipped = 0;
 let blocked = false;
+let authFailed = false;
 
 for (const a of targets as any[]) {
+  if (authFailed) break;
   const label = `${a.account_name ?? a.account_id} (${a.venues?.name ?? a.venue_id})`;
   console.log(`\n${label}`);
 
   // Oldest first. A backfill interrupted halfway should leave a contiguous
   // history with a gap at the recent end, which the nightly job then closes on
   // its own -- rather than an archipelago nobody can reason about.
-  for (let offset = days; offset > 0 && !blocked; offset -= windowDays) {
+  for (let offset = days; offset > 0 && !blocked && !authFailed; offset -= windowDays) {
     const start = isoDay(Date.now() - offset * DAY_MS);
     const end = isoDay(Date.now() - Math.max(offset - windowDays + 1, 1) * DAY_MS);
 
@@ -108,6 +113,11 @@ for (const a of targets as any[]) {
       console.log(`  ${start} → ${end}: ${r.rows} rows${r.rows === 0 ? ' (nothing returned)' : ''}`);
 
       for (const [metric, reason] of Object.entries(r.failed_metrics ?? {})) {
+        if (isMetaAuthError(reason)) {
+          console.error(`\n  STOPPING — the token is not valid: ${metric} — ${reason}`);
+          authFailed = true;
+          break;
+        }
         if (isBlockedError(reason)) {
           console.error(`\n  STOPPING — Meta is refusing calls: ${metric} — ${reason}`);
           blocked = true;
@@ -116,6 +126,18 @@ for (const a of targets as any[]) {
       }
     } catch (e: any) {
       const message = String(e?.message ?? e);
+
+      // A dead token before a missing window. Both arrive as an error on one
+      // window, and without this check an expired token reads as "no data this
+      // far back is normal" -- so the run walks every remaining window printing
+      // `skipped`, stores nothing, and exits 0. Waiting does not fix it, and a
+      // backfill that reports success having stored nothing is worse than one
+      // that fails.
+      if (isMetaAuthError(message)) {
+        console.error(`\n  STOPPING — the token is not valid: ${message}`);
+        authFailed = true;
+        break;
+      }
       if (isBlockedError(message)) {
         console.error(`\n  STOPPING — Meta is refusing calls: ${message}`);
         blocked = true;
@@ -130,6 +152,15 @@ for (const a of targets as any[]) {
 }
 
 console.log(`\n${totalStored} rows stored. ${windowsSkipped} window(s) already had data and were skipped.`);
+
+if (authFailed) {
+  console.error('\nStopped because Meta rejected the token. Waiting will not fix this.');
+  console.error('Update META_SYSTEM_USER_TOKEN — in the Railway sealed variable AND in .env if running locally —');
+  console.error('then run this again. Everything already stored will be skipped.');
+  console.error('A process reads its environment once at start, so a run in flight when the token');
+  console.error('was rotated keeps using the old one until it is restarted.');
+  process.exit(1);
+}
 
 if (blocked) {
   console.error('\nStopped early because Meta blocked or throttled us.');

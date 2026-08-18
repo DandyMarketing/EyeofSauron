@@ -74,6 +74,7 @@ if (dryRun) {
 
 let totalFetched = 0;
 let anyBlocked = false;
+let anyAuthFailed = false;
 const findings: string[] = [];
 
 for (const a of targets as any[]) {
@@ -101,8 +102,17 @@ for (const a of targets as any[]) {
 
     // Ran out of posts before reaching the cutoff. Normal for a younger
     // account, and worth saying so nobody reads a short history as a failure.
-    if (!r.reached_cutoff && !r.blocked) {
+    if (!r.reached_cutoff && !r.blocked && !r.auth_failed) {
       findings.push(`${label}: history ends at ${r.oldest_seen?.slice(0, 10) ?? 'no posts'} — the account has nothing older, this is not a gap`);
+    }
+
+    if (r.auth_failed) {
+      // Not the same problem as a throttle, and not fixed by the same thing.
+      // Waiting cures a block; only a human updating a secret cures this.
+      anyAuthFailed = true;
+      console.error(`  STOPPED — Meta rejected the token: ${r.stop_reason}`);
+      console.error('  Everything fetched before that point was stored.');
+      break;
     }
 
     if (r.blocked) {
@@ -121,6 +131,15 @@ console.log(`\n${totalFetched} post(s) fetched.`);
 if (findings.length > 0) {
   console.log(`\nFINDINGS (${findings.length}):`);
   for (const f of findings) console.log(`  - ${f}`);
+}
+
+if (anyAuthFailed) {
+  console.error('\nStopped because Meta rejected the token. Waiting will not fix this.');
+  console.error('Update META_SYSTEM_USER_TOKEN — in the Railway sealed variable AND in .env if running locally —');
+  console.error('then run this again. Posts already stored with metrics are skipped.');
+  console.error('A process reads its environment once at start, so a run in flight when the token');
+  console.error('was rotated keeps using the old one until it is restarted.');
+  process.exit(1);
 }
 
 if (anyBlocked) {
