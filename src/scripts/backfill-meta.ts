@@ -97,7 +97,35 @@ if (targets.length === 0) {
  * so every older window would look incomplete forever and the backfill would
  * re-fetch the entire history on every run.
  */
-const MARKER_METRIC = process.argv.find(a => a.startsWith('--marker='))?.split('=')[1] ?? 'views';
+/**
+ * Fetch ONE metric and nothing else -- for repairing a single metric's gaps.
+ *
+ * Without it, repairing a metric costs a full backfill. A window re-fetch pulls
+ * every aggregate metric for every day in the window, so recovering 22 days of
+ * `reach` meant ~2,300 calls and two hours to store 22 numbers. With --only it
+ * is two calls per window: about ten minutes for all three venues.
+ *
+ * Restricted to the daily-SERIES metrics, because those are the only ones
+ * fetched per window rather than per day. Asking for an aggregate metric here
+ * would fetch nothing at all and report success, which is the failure mode this
+ * whole file keeps running into.
+ */
+const onlyMetric = process.argv.find(a => a.startsWith('--only='))?.split('=')[1];
+const SERIES_METRICS = PLATFORM_METRICS.instagram ?? [];
+
+if (onlyMetric && !SERIES_METRICS.includes(onlyMetric)) {
+  console.error(`--only=${onlyMetric} is not a daily-series metric.`);
+  console.error(`Series metrics: ${SERIES_METRICS.join(', ')}.`);
+  console.error('Aggregate metrics are fetched per day, not per window, so --only cannot narrow them.');
+  process.exit(1);
+}
+
+// When repairing one metric, judge completeness by that same metric. Checking
+// `views` instead would skip every window and repair nothing -- which is
+// precisely how these gaps survived in the first place.
+const MARKER_METRIC = process.argv.find(a => a.startsWith('--marker='))?.split('=')[1]
+  ?? onlyMetric
+  ?? 'views';
 
 if (MARKER_METRIC === 'follower_count' || MARKER_METRIC === 'followers_count') {
   console.error(`--marker=${MARKER_METRIC} would never be satisfied: Meta serves no usable history for it.`);
@@ -106,7 +134,11 @@ if (MARKER_METRIC === 'follower_count' || MARKER_METRIC === 'followers_count') {
 }
 
 console.log(`Completeness judged by "${MARKER_METRIC}": a window is skipped once it holds every day of it.`);
-console.log('Other metrics can still be short — re-run with --marker=<metric> to repair a specific one.\n');
+if (onlyMetric) {
+  console.log(`Fetching ONLY "${onlyMetric}". No aggregate metrics, no follower snapshot — this is a repair run.\n`);
+} else {
+  console.log('Other metrics can still be short — re-run with --only=<metric> to repair one cheaply.\n');
+}
 
 let totalStored = 0;
 let windowsSkipped = 0;
@@ -146,7 +178,12 @@ for (const a of targets as any[]) {
       // `until` once the end_time correction is applied, so asking for `end`
       // silently drops `end` itself. That lost one day per window, every
       // window -- 22 days of reach, invisible until the rows were counted.
-      const r = await ingestMetaInsights(a.platform, a.account_id, start, requestUntil, undefined, windowDays + 1, paceMs);
+      const r = await ingestMetaInsights(
+        a.platform, a.account_id, start, requestUntil,
+        onlyMetric ? [onlyMetric] : undefined,
+        windowDays + 1, paceMs,
+        onlyMetric ? { totalValue: false, accountFields: false } : {},
+      );
       totalStored += r.rows;
       console.log(`  ${start} → ${end}: ${r.rows} rows${r.rows === 0 ? ' (nothing returned)' : ''}`);
 
