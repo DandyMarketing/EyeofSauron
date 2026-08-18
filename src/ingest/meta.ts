@@ -722,6 +722,12 @@ export async function ingestMetaInsights(
   until: string,
   metrics: string[] = PLATFORM_METRICS[platform] ?? [],
   maxTotalValueDays = 7,
+  /**
+   * Milliseconds to wait between per-day calls. Zero for the nightly job,
+   * which makes a handful. A backfill makes hundreds, and 153 in a burst is
+   * what got the app blocked -- there, pacing is the whole point.
+   */
+  paceMs = 0,
 ): Promise<MetaIngestResult> {
   if (
     metrics.length === 0 &&
@@ -812,6 +818,7 @@ export async function ingestMetaInsights(
     // most are already in.
     for (let i = 0; i < span; i++) {
       const day = isoDay(newestDay - i * DAY_MS);
+      if (paceMs > 0 && i > 0) await new Promise(r => setTimeout(r, paceMs));
       const { values, failed } = await fetchTotalValuesForDay(accountId, totalValueMetrics, day);
       for (const [metric, value] of Object.entries(values)) {
         rows.push({ business_date: day, metric, value });
