@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { ingestMetaInsights, ingestMetaPosts, PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS } from '../ingest/meta.js';
+import { ingestMetaInsights, ingestMetaPosts, ingestMetaStories, PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS } from '../ingest/meta.js';
 
 /**
  * Nightly social ingestion.
@@ -98,21 +98,31 @@ for (const a of accounts as any[]) {
       dataFindings.push(`${label}: no data on ${r.missing_days.length} day(s) — ${r.missing_days.join(', ')}`);
     }
 
-    // Posts, and how each one did. Re-read every night on purpose: engagement
-    // accrues for days after publishing, so a post captured once the morning
-    // after is frozen at a fraction of what it finally earned, and the best
-    // post of the month would look like a middling one forever.
+    // Posts and stories. Both are content-level rather than daily, and both
+    // failing does not invalidate the daily metrics that just landed -- so they
+    // are findings rather than execution errors.
     if ((ACCOUNT_FIELDS[a.platform] ?? []).length > 0) {
       try {
         const p = await ingestMetaPosts(a.platform, a.account_id);
-        console.log(`${label}: ${p.posts} posts`);
+        console.log(`${label}: ${p.seen} posts seen, ${p.fetched} refreshed, ${p.skipped_already_current} already current`);
         if (p.without_metrics > 0) {
           dataFindings.push(`${label}: ${p.without_metrics} post(s) stored without metrics — Meta would not report on them`);
         }
       } catch (e: any) {
-        // A post pull failing does not invalidate the daily metrics that just
-        // landed, so it is a finding rather than an execution error.
         dataFindings.push(`${label}: posts failed — ${e?.message ?? e}`);
+      }
+
+      // Stories cannot be backfilled. Whatever this run does not see expires
+      // and is gone for good, so a failure here is worth saying loudly even
+      // though it does not fail the job.
+      try {
+        const st = await ingestMetaStories(a.platform, a.account_id);
+        console.log(`${label}: ${st.seen} stories live`);
+        if (st.without_metrics > 0) {
+          dataFindings.push(`${label}: ${st.without_metrics} story/stories stored without metrics — check STORY_METRICS names against what Meta accepts`);
+        }
+      } catch (e: any) {
+        dataFindings.push(`${label}: STORIES FAILED — ${e?.message ?? e} (stories expire in ~24h and cannot be recovered)`);
       }
     }
   } catch (e: any) {

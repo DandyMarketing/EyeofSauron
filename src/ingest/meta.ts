@@ -629,39 +629,103 @@ export async function fetchMediaInsights(mediaId: string, metrics: string[]): Pr
 export interface PostIngestResult {
   venue_id: string;
   account_id: string;
-  posts: number;
+  content_type: 'post' | 'story';
+  seen: number;
+  fetched: number;
+  skipped_already_current: number;
   stored: boolean;
   without_metrics: number;
   error?: string;
 }
 
 /**
- * Posts and how each one did.
+ * How recently a post must have been published to be worth re-reading.
  *
- * A second call per post is unavoidable -- Meta serves media listings and media
- * insights separately -- so this is bounded by `limit` rather than reaching for
- * everything. Thirty posts is about a month for these venues.
- *
- * Recent posts are re-read on every run on purpose. Engagement accrues for days
- * after publishing, so a post read once on the morning after is frozen at a
- * fraction of what it finally earned, and the best post of the month would look
- * like a middling one forever.
+ * Engagement accrues for days after publishing and then goes quiet. Re-fetching
+ * a three-month-old post every night costs a call and changes nothing, and it
+ * is the only reason the post limit was ever kept small.
  */
-export async function ingestMetaPosts(
+export const POST_REFRESH_DAYS = 14;
+
+/**
+ * Metrics per story. Names are a guess and the fallback is the point.
+ *
+ * Meta renames these on the same schedule as everything else -- `impressions`
+ * became `views` at account level -- and a single bad name kills the whole
+ * request. So the combined call is tried first and, if refused, each name is
+ * tried alone and whatever answers is kept.
+ */
+export const STORY_METRICS = ['reach', 'views', 'replies', 'total_interactions', 'navigation'];
+
+/**
+ * Insights for one media item, degrading one metric at a time.
+ *
+ * Costs one call when everything works, which is almost always, and N only when
+ * Meta has retired a name -- at which point losing the other metrics too would
+ * be the worse outcome.
+ */
+async function mediaMetrics(mediaId: string, wanted: string[]): Promise<Record<string, number>> {
+  try {
+    return metricsFrom(await fetchMediaInsights(mediaId, wanted));
+  } catch {
+    const out: Record<string, number> = {};
+    for (const metric of wanted) {
+      try {
+        Object.assign(out, metricsFrom(await fetchMediaInsights(mediaId, [metric])));
+      } catch {
+        // This one name is gone. The rest may not be.
+      }
+    }
+    return out;
+  }
+}
+
+async function storeMedia(
+  rows: any[],
+  venueId: string,
   platform: string,
   accountId: string,
-  limit = 30,
-): Promise<PostIngestResult> {
-  const { data: account } = await supabase
+): Promise<void> {
+  if (rows.length === 0) return;
+  const { error } = await supabase
+    .from('social_posts')
+    .upsert(
+      rows.map(r => ({ ...r, venue_id: venueId, platform, account_id: accountId, fetched_at: new Date().toISOString() })),
+      { onConflict: 'platform,post_id' },
+    );
+  if (error) throw new Error(`social_posts upsert failed: ${error.message}`);
+}
+
+async function venueIdFor(platform: string, accountId: string): Promise<string> {
+  const { data } = await supabase
     .from('social_accounts')
     .select('venue_id')
     .eq('platform', platform)
     .eq('account_id', accountId)
     .maybeSingle();
-
-  if (!account?.venue_id) {
+  if (!data?.venue_id) {
     throw new Error(`Social account ${platform}/${accountId} is not mapped to a venue.`);
   }
+  return data.venue_id;
+}
+
+/**
+ * Posts, refreshing only what can still change.
+ *
+ * The listing is cheap and returns everything in one call, so we look at a lot
+ * of posts. Insights are the expensive part -- one call each -- so they are
+ * fetched only for posts published inside POST_REFRESH_DAYS, plus any post we
+ * have never seen before.
+ *
+ * That buys three or four times the history for HALF the nightly calls, which
+ * is also what makes room for stories on the same budget.
+ */
+export async function ingestMetaPosts(
+  platform: string,
+  accountId: string,
+  limit = 100,
+): Promise<PostIngestResult> {
+  const venueId = await venueIdFor(platform, accountId);
 
   const params = new URLSearchParams({
     fields: 'id,caption,media_type,permalink,timestamp',
@@ -671,41 +735,95 @@ export async function ingestMetaPosts(
 
   const res = await fetch(`${GRAPH}/${accountId}/media?${params}`);
   const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Meta media listing failed: ${res.status} ${redactTokens(text)}`);
+  if (!res.ok) throw new Error(`Meta media listing failed: ${res.status} ${redactTokens(text)}`);
+
+  const media = (JSON.parse(text)?.data ?? []) as any[];
+
+  const { data: known } = await supabase
+    .from('social_posts')
+    .select('post_id')
+    .eq('platform', platform)
+    .eq('account_id', accountId);
+  const alreadyStored = new Set((known ?? []).map((k: any) => k.post_id));
+
+  const cutoff = new Date(Date.now() - POST_REFRESH_DAYS * DAY_MS).toISOString();
+  const rows = [];
+  let fetched = 0;
+  let skipped = 0;
+  let withoutMetrics = 0;
+
+  for (const item of media) {
+    if (!item?.id || !item?.timestamp) continue;
+
+    // Old AND already stored: its numbers have settled and we have them.
+    if (alreadyStored.has(String(item.id)) && new Date(item.timestamp).toISOString() < cutoff) {
+      skipped++;
+      continue;
+    }
+
+    const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
+    fetched++;
+    if (Object.keys(metrics).length === 0) withoutMetrics++;
+
+    const row = toPostRow(item, metrics);
+    if (row) rows.push({ ...row, content_type: 'post' });
   }
+
+  await storeMedia(rows, venueId, platform, accountId);
+
+  return {
+    venue_id: venueId, account_id: accountId, content_type: 'post',
+    seen: media.length, fetched, skipped_already_current: skipped,
+    stored: rows.length > 0, without_metrics: withoutMetrics,
+  };
+}
+
+/**
+ * Stories, which have to be caught while they exist.
+ *
+ * There is no history here and no second chance: a story and its insights are
+ * gone about 24 hours after posting. Whatever this run does not see is lost
+ * permanently, which is why it runs twice a day rather than nightly -- a single
+ * daily run leaves a story posted just after it aged past 24 hours by the next.
+ *
+ * Every story is fetched every time, with no refresh window. A story that is
+ * still alive is still accruing, and there is no later run that could correct
+ * it.
+ */
+export async function ingestMetaStories(
+  platform: string,
+  accountId: string,
+): Promise<PostIngestResult> {
+  const venueId = await venueIdFor(platform, accountId);
+
+  const params = new URLSearchParams({
+    fields: 'id,caption,media_type,permalink,timestamp',
+    access_token: token(),
+  });
+
+  const res = await fetch(`${GRAPH}/${accountId}/stories?${params}`);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Meta stories listing failed: ${res.status} ${redactTokens(text)}`);
 
   const media = (JSON.parse(text)?.data ?? []) as any[];
   const rows = [];
   let withoutMetrics = 0;
 
   for (const item of media) {
-    let metrics: Record<string, number> = {};
-    try {
-      const wanted = metricsForMediaType(item?.media_type ?? null);
-      metrics = metricsFrom(await fetchMediaInsights(item.id, wanted));
-    } catch {
-      // A post Meta will not report on -- too old, or a type whose metrics it
-      // has retired. The post itself is still worth storing: knowing something
-      // was published and got no measurable response is a finding, and an
-      // absent post looks like a quiet week rather than a missing number.
-      withoutMetrics++;
-    }
+    if (!item?.id || !item?.timestamp) continue;
+    const metrics = await mediaMetrics(item.id, STORY_METRICS);
+    if (Object.keys(metrics).length === 0) withoutMetrics++;
     const row = toPostRow(item, metrics);
-    if (row) rows.push({ ...row, venue_id: account.venue_id, platform, account_id: accountId, fetched_at: new Date().toISOString() });
+    if (row) rows.push({ ...row, content_type: 'story' });
   }
 
-  if (rows.length === 0) {
-    return { venue_id: account.venue_id, account_id: accountId, posts: 0, stored: false, without_metrics: withoutMetrics, error: 'No posts returned.' };
-  }
+  await storeMedia(rows, venueId, platform, accountId);
 
-  const { error } = await supabase
-    .from('social_posts')
-    .upsert(rows, { onConflict: 'platform,post_id' });
-
-  if (error) throw new Error(`social_posts upsert failed: ${error.message}`);
-
-  return { venue_id: account.venue_id, account_id: accountId, posts: rows.length, stored: true, without_metrics: withoutMetrics };
+  return {
+    venue_id: venueId, account_id: accountId, content_type: 'story',
+    seen: media.length, fetched: media.length, skipped_already_current: 0,
+    stored: rows.length > 0, without_metrics: withoutMetrics,
+  };
 }
 
 /**
