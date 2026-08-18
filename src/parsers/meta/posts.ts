@@ -80,7 +80,25 @@ export function metricsFrom(insights: any): Record<string, number> {
  * One media item into a row. Null when it has nothing usable -- an item with no
  * id or no timestamp cannot be stored or joined to anything.
  */
-export function toPostRow(media: any, metrics: Record<string, number> = {}): PostRow | null {
+export function toPostRow(
+  media: any,
+  metrics: Record<string, number> = {},
+  /**
+   * Whether the listing that produced `media` actually ASKED for collaborators.
+   *
+   * This distinction is the whole difference between zero and unknown. Graph
+   * OMITS the collaborators field entirely for a solo post rather than
+   * returning an empty list -- so absence means "none" when we asked, and
+   * "never captured" when we did not. Storing null for both marked every solo
+   * post in the warehouse as unknown, and since is_collab correctly refuses to
+   * guess at nulls, the collab-versus-solo comparison returned collabs only.
+   *
+   * Stories pass false: their listing requests a shorter field set, and a story
+   * cannot have collaborators anyway. Recording a confident zero there would be
+   * an unverified claim, which is the same mistake in the other direction.
+   */
+  listingAskedForCollaborators = false,
+): PostRow | null {
   if (!media?.id || !media?.timestamp) return null;
 
   let business_date: string;
@@ -105,8 +123,11 @@ export function toPostRow(media: any, metrics: Record<string, number> = {}): Pos
     media_product_type: typeof media.media_product_type === 'string' ? media.media_product_type : null,
     // Absent and empty are different: null means we did not capture it, zero
     // means we asked and there were none. A breakout wrongly read as solo is
-    // the mistake this prevents.
-    collaborator_count: Array.isArray(media.collaborators?.data) ? media.collaborators.data.length : null,
+    // the mistake this prevents -- and reading every solo post as unknown is
+    // the mistake that came from getting it backwards.
+    collaborator_count: Array.isArray(media.collaborators?.data)
+      ? media.collaborators.data.length
+      : listingAskedForCollaborators ? 0 : null,
     children_count: Array.isArray(media.children?.data) ? media.children.data.length : null,
     // Derived from the TRUNCATED caption, on purpose: it is the caption we
     // store, so a tag counted here can always be found in the text beside it.

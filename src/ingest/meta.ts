@@ -999,7 +999,7 @@ export async function ingestMetaPosts(
   for (const item of wanted) {
     const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
     if (Object.keys(metrics).length === 0) withoutMetrics++;
-    const row = toPostRow(item, metrics);
+    const row = toPostRow(item, metrics, true);
     if (row) rows.push({ ...row, content_type: 'post' });
   }
 
@@ -1069,7 +1069,7 @@ export async function refreshMetaPostFields(
     seen += page.items.length;
 
     for (const item of page.items) {
-      const row = toPostRow(item, {});
+      const row = toPostRow(item, {}, true);
       if (!row) continue;
 
       const t = item?.timestamp ? new Date(item.timestamp).toISOString() : null;
@@ -1200,7 +1200,7 @@ export async function backfillMetaPosts(
         const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
         fetched++;
         if (Object.keys(metrics).length === 0) withoutMetrics++;
-        const row = toPostRow(item, metrics);
+        const row = toPostRow(item, metrics, true);
         if (row) rows.push({ ...row, content_type: 'post' });
       } catch (e: any) {
         const message = String(e?.message ?? e);
@@ -1219,7 +1219,7 @@ export async function backfillMetaPosts(
         }
         // One post Meta will not report on. Store it anyway -- the caption and
         // the date are still real, and `without_metrics` says what is missing.
-        const row = toPostRow(item, {});
+        const row = toPostRow(item, {}, true);
         if (row) rows.push({ ...row, content_type: 'post' });
         withoutMetrics++;
       }

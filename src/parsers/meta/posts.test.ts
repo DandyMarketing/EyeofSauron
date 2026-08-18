@@ -197,3 +197,35 @@ describe('pageReachesBack — when to stop paging', () => {
     assert.equal(pageReachesBack([{ timestamp: 'whenever' }], cutoff), false);
   });
 });
+
+/**
+ * Graph OMITS the collaborators field for a solo post rather than returning an
+ * empty list. Reading that as "unknown" marked every solo post in the warehouse
+ * unknown -- and since is_collab correctly refuses to guess at nulls, the
+ * collab-versus-solo comparison came back with collabs only and no baseline to
+ * compare them against.
+ */
+describe('collaborator_count — zero and unknown are different', () => {
+  const media = { id: '1', timestamp: '2026-08-16T12:00:00+0000' };
+
+  test('a solo post is ZERO when the listing asked for collaborators', () => {
+    assert.equal(toPostRow(media, {}, true)!.collaborator_count, 0);
+  });
+
+  test('the same post is UNKNOWN when the listing did not ask', () => {
+    // Stories, whose listing requests a shorter field set. A confident zero
+    // there would be an unverified claim.
+    assert.equal(toPostRow(media, {}, false)!.collaborator_count, null);
+  });
+
+  test('collaborators present are counted whether asked for or not', () => {
+    const collab = { ...media, collaborators: { data: [{ id: 'a' }, { id: 'b' }] } };
+    assert.equal(toPostRow(collab, {}, true)!.collaborator_count, 2);
+    assert.equal(toPostRow(collab, {}, false)!.collaborator_count, 2);
+  });
+
+  test('an empty collaborators array is zero, not unknown', () => {
+    const empty = { ...media, collaborators: { data: [] } };
+    assert.equal(toPostRow(empty, {}, false)!.collaborator_count, 0);
+  });
+});
