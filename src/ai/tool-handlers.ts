@@ -5,6 +5,7 @@ import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
+import { fetchMediaThumbnails } from '../ingest/meta.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -241,6 +242,26 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
     .sort((a, b) => (b.score as number) - (a.score as number))
     .slice(0, limit);
 
+  /**
+   * Images, only when asked for, and only for what is being shown.
+   *
+   * One Graph call per post, so it is capped hard -- a top-ten costs ten calls
+   * and a second of latency, which is fine on demand and would not be fine on
+   * every query. The URLs are fetched fresh and never stored: Instagram signs
+   * them and they expire, so a saved thumbnail becomes a broken image, which
+   * reads as data we lost rather than a link that aged out.
+   */
+  let thumbnails: Record<string, string> = {};
+  if (input.thumbnails === true && ranked.length > 0) {
+    const ids = ranked.slice(0, 12).map(r => r.post.post_id);
+    try {
+      thumbnails = await fetchMediaThumbnails(ids, 100);
+    } catch {
+      // Decoration. Losing the answer because the pictures failed would be the
+      // wrong trade.
+    }
+  }
+
   const shape = (s: { post: any; score: number | null }) => ({
     published_at: s.post.published_at,
     business_date: s.post.business_date,
@@ -250,6 +271,7 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
     [rankBy]: s.score,
     metrics: s.post.metrics,
     measured_at: s.post.fetched_at,
+    ...(thumbnails[s.post.post_id] ? { thumbnail_url: thumbnails[s.post.post_id] } : {}),
   });
 
   // Posts published in the last few days are still gathering engagement, so
