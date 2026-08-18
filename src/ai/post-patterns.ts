@@ -13,8 +13,8 @@
  */
 
 export type Dimension =
-  | 'hashtag' | 'mention' | 'media_type' | 'weekday' | 'time_of_day'
-  | 'caption_length' | 'has_question';
+  | 'hashtag' | 'mention' | 'media_type' | 'media_product_type' | 'weekday'
+  | 'time_of_day' | 'caption_length' | 'has_question' | 'is_collab';
 
 export interface PostLike {
   business_date: string;
@@ -25,6 +25,8 @@ export interface PostLike {
   has_question: boolean | null;
   posted_hour: number | null;
   metrics: Record<string, number> | null;
+  media_product_type?: string | null;
+  collaborator_count?: number | null;
 }
 
 export interface PatternGroup {
@@ -111,6 +113,16 @@ function groupsFor(post: PostLike, dimension: Dimension): string[] {
       return post.mentions ?? [];
     case 'media_type':
       return post.media_type ? [post.media_type] : [];
+    // The right column for "do reels work". media_type says VIDEO for both a
+    // feed video and a reel, and the two are distributed nothing alike.
+    case 'media_product_type':
+      return post.media_product_type ? [post.media_product_type] : [];
+    // Null is NOT "solo" -- it means the post predates capturing this, and
+    // calling it solo is how a collab breakout gets credited to its content.
+    case 'is_collab':
+      return post.collaborator_count === null || post.collaborator_count === undefined
+        ? []
+        : [post.collaborator_count > 0 ? 'published with a collaborator' : 'solo'];
     case 'weekday': {
       const d = new Date(`${post.business_date}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? [] : [WEEKDAYS[d.getUTCDay()]];
@@ -355,6 +367,18 @@ export function groupPosts(
   } else if (groups.some(g => g.thin)) {
     caveats.push(
       `Groups marked thin have fewer than ${MIN_MEANINGFUL_SAMPLE} posts and can swing wildly on one post. Do not rank them against the larger groups as though the comparison were equal.`,
+    );
+  }
+
+  if (dimension === 'is_collab') {
+    caveats.push(
+      'A collab post appears on BOTH accounts and reaches the collaborator\'s audience too, so its reach is not comparable to a solo post\'s. If collabs lead here, the finding is about distribution rather than about content — say so, and do not report it as "this kind of content works".',
+    );
+  }
+
+  if (dimension === 'media_product_type') {
+    caveats.push(
+      'REELS and FEED are distribution surfaces, not content types. Reels are pushed to non-followers and feed posts largely are not, so a gap between them says more about how Instagram distributes than about what the venue made.',
     );
   }
 

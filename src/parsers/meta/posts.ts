@@ -20,6 +20,17 @@ export interface PostRow {
   permalink: string | null;
   caption: string | null;
   metrics: Record<string, number>;
+  /**
+   * REELS or FEED. Not the same as media_type, which says VIDEO for both a feed
+   * video and a reel -- and Instagram distributes those completely differently.
+   */
+  media_product_type: string | null;
+  /**
+   * Accounts a post was published WITH. Above zero means it also reached the
+   * collaborator's audience, so its reach is not comparable to a solo post's.
+   */
+  collaborator_count: number | null;
+  children_count: number | null;
   /** Derived from the caption and timestamp. See parsers/meta/features.ts. */
   hashtags: string[];
   mentions: string[];
@@ -91,6 +102,12 @@ export function toPostRow(media: any, metrics: Record<string, number> = {}): Pos
     permalink: typeof media.permalink === 'string' ? media.permalink : null,
     caption,
     metrics,
+    media_product_type: typeof media.media_product_type === 'string' ? media.media_product_type : null,
+    // Absent and empty are different: null means we did not capture it, zero
+    // means we asked and there were none. A breakout wrongly read as solo is
+    // the mistake this prevents.
+    collaborator_count: Array.isArray(media.collaborators?.data) ? media.collaborators.data.length : null,
+    children_count: Array.isArray(media.children?.data) ? media.children.data.length : null,
     // Derived from the TRUNCATED caption, on purpose: it is the caption we
     // store, so a tag counted here can always be found in the text beside it.
     // Deriving from the full caption would produce hashtags that appear in no

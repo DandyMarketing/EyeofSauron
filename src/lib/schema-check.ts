@@ -53,6 +53,11 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '020_post_features.sql',
   },
   {
+    table: 'social_posts',
+    columns: ['media_product_type', 'collaborator_count', 'children_count'],
+    migration: '021_post_distribution.sql',
+  },
+  {
     table: 'venue_notes',
     columns: ['source_question'],
     migration: '015_note_source_question.sql',

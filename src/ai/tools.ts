@@ -90,9 +90,9 @@ export const queryTools: Tool[] = [
         end_date: { type: 'string', description: 'End of range (inclusive), YYYY-MM-DD.' },
         dimension: {
           type: 'string',
-          enum: ['hashtag', 'mention', 'media_type', 'weekday', 'time_of_day', 'caption_length', 'has_question'],
+          enum: ['hashtag', 'mention', 'media_type', 'media_product_type', 'weekday', 'time_of_day', 'caption_length', 'has_question', 'is_collab'],
           description:
-            'What to group by. Default media_type. weekday uses the TRADING date (3am-to-3am, matching sales) so it lines up with the night a post belongs to; time_of_day uses the real Singapore clock hour it was published, which for a 2am post is a different answer — both are correct and they answer different questions.',
+            'What to group by. Default media_type. Use media_product_type rather than media_type for "do reels work": media_type reports VIDEO for both a feed video and a reel, which are distributed nothing alike. is_collab separates posts published WITH another account — those reach the collaborator\'s audience too, so a collab breakout is about distribution, not content. weekday uses the TRADING date (3am-to-3am, matching sales) so it lines up with the night a post belongs to; time_of_day uses the real Singapore clock hour it was published, which for a 2am post is a different answer — both are correct and they answer different questions.',
         },
         metric: {
           type: 'string',
