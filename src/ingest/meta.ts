@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { normaliseInsights, missingDays, type InsightRow } from '../parsers/meta/insights.js';
+import { toPostRow, metricsFrom, metricsForMediaType } from '../parsers/meta/posts.js';
 
 /**
  * Meta (Instagram / Facebook) insights ingestion.
@@ -608,6 +609,103 @@ export async function calibrateDayAlignment(accountId: string, days = 7): Promis
         ? 'Values belong to the day BEFORE the `since` used. The ingest must subtract a day, exactly as the daily series does with end_time.'
         : 'Not enough agreement either way. Do not ingest total_value metrics on a guess -- widen the window and run again.',
   };
+}
+
+/**
+ * Insights for ONE post. A different endpoint shape from account insights: no
+ * period, no date range -- a post's numbers are lifetime totals for that post,
+ * so asking for a window would be meaningless.
+ */
+export async function fetchMediaInsights(mediaId: string, metrics: string[]): Promise<any> {
+  const params = new URLSearchParams({ metric: metrics.join(','), access_token: token() });
+  const res = await fetch(`${GRAPH}/${mediaId}/insights?${params}`);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Meta media insights failed: ${res.status} ${redactTokens(text)}`);
+  }
+  return JSON.parse(text);
+}
+
+export interface PostIngestResult {
+  venue_id: string;
+  account_id: string;
+  posts: number;
+  stored: boolean;
+  without_metrics: number;
+  error?: string;
+}
+
+/**
+ * Posts and how each one did.
+ *
+ * A second call per post is unavoidable -- Meta serves media listings and media
+ * insights separately -- so this is bounded by `limit` rather than reaching for
+ * everything. Thirty posts is about a month for these venues.
+ *
+ * Recent posts are re-read on every run on purpose. Engagement accrues for days
+ * after publishing, so a post read once on the morning after is frozen at a
+ * fraction of what it finally earned, and the best post of the month would look
+ * like a middling one forever.
+ */
+export async function ingestMetaPosts(
+  platform: string,
+  accountId: string,
+  limit = 30,
+): Promise<PostIngestResult> {
+  const { data: account } = await supabase
+    .from('social_accounts')
+    .select('venue_id')
+    .eq('platform', platform)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  if (!account?.venue_id) {
+    throw new Error(`Social account ${platform}/${accountId} is not mapped to a venue.`);
+  }
+
+  const params = new URLSearchParams({
+    fields: 'id,caption,media_type,permalink,timestamp',
+    limit: String(Math.min(Math.max(limit, 1), 100)),
+    access_token: token(),
+  });
+
+  const res = await fetch(`${GRAPH}/${accountId}/media?${params}`);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Meta media listing failed: ${res.status} ${redactTokens(text)}`);
+  }
+
+  const media = (JSON.parse(text)?.data ?? []) as any[];
+  const rows = [];
+  let withoutMetrics = 0;
+
+  for (const item of media) {
+    let metrics: Record<string, number> = {};
+    try {
+      const wanted = metricsForMediaType(item?.media_type ?? null);
+      metrics = metricsFrom(await fetchMediaInsights(item.id, wanted));
+    } catch {
+      // A post Meta will not report on -- too old, or a type whose metrics it
+      // has retired. The post itself is still worth storing: knowing something
+      // was published and got no measurable response is a finding, and an
+      // absent post looks like a quiet week rather than a missing number.
+      withoutMetrics++;
+    }
+    const row = toPostRow(item, metrics);
+    if (row) rows.push({ ...row, venue_id: account.venue_id, platform, account_id: accountId, fetched_at: new Date().toISOString() });
+  }
+
+  if (rows.length === 0) {
+    return { venue_id: account.venue_id, account_id: accountId, posts: 0, stored: false, without_metrics: withoutMetrics, error: 'No posts returned.' };
+  }
+
+  const { error } = await supabase
+    .from('social_posts')
+    .upsert(rows, { onConflict: 'platform,post_id' });
+
+  if (error) throw new Error(`social_posts upsert failed: ${error.message}`);
+
+  return { venue_id: account.venue_id, account_id: accountId, posts: rows.length, stored: true, without_metrics: withoutMetrics };
 }
 
 /**

@@ -33,6 +33,33 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_top_posts',
+    description:
+      'Individual Instagram posts and how each performed, for one venue over a date range. This is the tool for "which posts worked", "best performing content", "what should we post more of", and anything about a specific post. Returns caption, media type, permalink, publish time and every metric held, ranked by whatever basis is asked for. ' +
+      'RANKING BASIS MATTERS AND MUST BE STATED. reach is unique accounts that saw it; total_interactions is likes + comments + shares + saves; engagement_rate is interactions divided by reach, which favours posts with a small but responsive audience and can rank a post with 40 reach above one with 4,000. A post is not "best" in the abstract — say which measure you ranked by and why it suits the question. ' +
+      'A metric ABSENT from a post means Meta does not report it for that media type (an image has no views), NOT that it scored zero. Never treat a missing metric as a zero, and never average across posts where some are missing it. ' +
+      'Posts are dated by TRADING day on the same 3am-to-3am basis as sales, so a 2am post belongs to the night before — that is deliberate, so posts line up with the service they came out of. ' +
+      'Engagement keeps accruing for days after publishing, so a post from yesterday is still growing and will under-rank against older ones. Say so when the range includes the last few days.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        start_date: { type: 'string', description: 'Start of range (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of range (inclusive), YYYY-MM-DD.' },
+        rank_by: {
+          type: 'string',
+          enum: ['reach', 'total_interactions', 'likes', 'comments', 'shares', 'saved', 'views', 'engagement_rate'],
+          description: 'What to rank on. Default total_interactions. Posts missing the chosen metric are listed separately rather than ranked as zero.',
+        },
+        limit: { type: 'number', description: 'How many posts to return. Default 10.' },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_profit_and_loss',
     description:
       'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +
@@ -250,13 +277,13 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'create_chart',
-    description: 'Draw a chart from warehouse data and show it to the user. Call this WHENEVER the answer covers a trend over time — several weeks, months or years — because a line is far easier to read than a column of numbers. Also use it to compare venues side by side. You supply only the metric, venues, dates and chart type; the server re-queries the warehouse and plots the real figures, so never put numbers in this call and never describe a chart you have not created. The chart appears above your reply — reference it and interpret it in words (what moved, when, and why it matters), do not just restate every value. Available metrics: gross_sales, food_bev_sales, net_sales, avg_check, covers, avg_spend_per_head, walk_in_pct, no_show_rate. gross_sales is food + beverage + the 10% service charge; net_sales is that less discounts; food_bev_sales is food + beverage alone and is the basis cost percentages use. When the user just says "sales" with no qualifier, plot net_sales and call it net sales in the reply. Days when a venue was closed are plotted as a gap rather than a zero, and returned as closed_days — mention a closure if it is visible in the chart, but never read it as a sales collapse. Bucketing is chosen automatically — daily under ~5 weeks, weekly under ~4 months, monthly beyond — so a multi-month request produces a readable monthly line rather than hundreds of daily points. To answer "which days of the week are slow / busy", set granularity to "day_of_week": that returns seven bars averaging every Monday, every Tuesday and so on across the range, which is the only way to see the weekly pattern — a daily line over several months is unreadable and cannot answer it. The reply for a day_of_week chart carries every weekday value in by_weekday, so quote those figures rather than estimating from the picture. You may call this more than once for different metrics.',
+    description: 'Draw a chart from warehouse data and show it to the user. Call this WHENEVER the answer covers a trend over time — several weeks, months or years — because a line is far easier to read than a column of numbers. Also use it to compare venues side by side. You supply only the metric, venues, dates and chart type; the server re-queries the warehouse and plots the real figures, so never put numbers in this call and never describe a chart you have not created. The chart appears above your reply — reference it and interpret it in words (what moved, when, and why it matters), do not just restate every value. Available metrics: gross_sales, food_bev_sales, net_sales, avg_check, covers, avg_spend_per_head, walk_in_pct, no_show_rate. gross_sales is food + beverage + the 10% service charge; net_sales is that less discounts; food_bev_sales is food + beverage alone and is the basis cost percentages use. When the user just says "sales" with no qualifier, plot net_sales and call it net sales in the reply. Days when a venue was closed are plotted as a gap rather than a zero, and returned as closed_days — mention a closure if it is visible in the chart, but never read it as a sales collapse. Bucketing is chosen automatically — daily under ~5 weeks, weekly under ~4 months, monthly beyond — so a multi-month request produces a readable monthly line rather than hundreds of daily points. To answer "which days of the week are slow / busy", set granularity to "day_of_week": that returns seven bars averaging every Monday, every Tuesday and so on across the range, which is the only way to see the weekly pattern — a daily line over several months is unreadable and cannot answer it. The reply for a day_of_week chart carries every weekday value in by_weekday, so quote those figures rather than estimating from the picture. Instagram can be plotted too: instagram_reach, instagram_views, instagram_interactions, instagram_followers. Reach is UNIQUE accounts, so a weekly or monthly point is the AVERAGE DAY and not a total -- say \"average daily reach\" whenever the bucket is longer than a day. instagram_followers is the audience size at the END of the bucket, never a sum. Social is NOT blanked on a day the venue was closed, because a closed venue still posts and its audience still sees it. Plotting social beside trade is worth doing, but co-movement is not causation -- describe what moved and never say a post caused revenue. You may call this more than once for different metrics.',
     input_schema: {
       type: 'object' as const,
       properties: {
         metric: {
           type: 'string',
-          enum: ['gross_sales', 'food_bev_sales', 'net_sales', 'avg_check', 'covers', 'avg_spend_per_head', 'walk_in_pct', 'no_show_rate'],
+          enum: ['gross_sales', 'food_bev_sales', 'net_sales', 'avg_check', 'covers', 'avg_spend_per_head', 'walk_in_pct', 'no_show_rate', 'instagram_reach', 'instagram_views', 'instagram_interactions', 'instagram_followers'],
           description: 'What to plot. Revenue metrics come from Revel; covers, walk-in and no-show come from SevenRooms.',
         },
         start_date: { type: 'string', description: 'Start of range (inclusive), YYYY-MM-DD.' },

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { ingestMetaInsights, PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS } from '../ingest/meta.js';
+import { ingestMetaInsights, ingestMetaPosts, PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS } from '../ingest/meta.js';
 
 /**
  * Nightly social ingestion.
@@ -96,6 +96,24 @@ for (const a of accounts as any[]) {
     }
     if (r.missing_days.length > 0) {
       dataFindings.push(`${label}: no data on ${r.missing_days.length} day(s) — ${r.missing_days.join(', ')}`);
+    }
+
+    // Posts, and how each one did. Re-read every night on purpose: engagement
+    // accrues for days after publishing, so a post captured once the morning
+    // after is frozen at a fraction of what it finally earned, and the best
+    // post of the month would look like a middling one forever.
+    if ((ACCOUNT_FIELDS[a.platform] ?? []).length > 0) {
+      try {
+        const p = await ingestMetaPosts(a.platform, a.account_id);
+        console.log(`${label}: ${p.posts} posts`);
+        if (p.without_metrics > 0) {
+          dataFindings.push(`${label}: ${p.without_metrics} post(s) stored without metrics — Meta would not report on them`);
+        }
+      } catch (e: any) {
+        // A post pull failing does not invalidate the daily metrics that just
+        // landed, so it is a finding rather than an execution error.
+        dataFindings.push(`${label}: posts failed — ${e?.message ?? e}`);
+      }
     }
   } catch (e: any) {
     // The account could not be pulled at all: a dead token, a revoked

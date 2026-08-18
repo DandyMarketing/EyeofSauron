@@ -59,7 +59,11 @@ export interface QueryResult {
 // Running out mid-response is what produced empty replies: the turn ends with
 // stop_reason 'max_tokens' and, if the model was still emitting tool calls,
 // no text block at all.
-const MAX_TOKENS = 4096;
+// 4096 was too tight for an analytical answer that also has to interpret a
+// chart: the model would spend the budget on tool calls, get cut off before
+// writing anything, and the user got a blank recovery message instead of the
+// analysis it had already done the work for.
+const MAX_TOKENS = 8192;
 
 // Ceiling on tool rounds. Nothing legitimate needs more, and without it a model
 // that keeps querying spins until the request times out with no answer.
@@ -163,6 +167,8 @@ export async function askSauron(
   //
   // `messages` is safe to reuse: the loop only appends a response once it is a
   // complete tool_use turn, so a truncated final response was never added.
+  let recoveryError: string | null = null;
+
   if (!answer.trim()) {
     const reason = response.stop_reason === 'max_tokens'
       ? 'The previous reply was cut off before it finished.'
@@ -181,14 +187,28 @@ export async function askSauron(
         .filter(b => b.type === 'text')
         .map(b => (b as Anthropic.TextBlock).text)
         .join('\n');
-    } catch {
-      // fall through to the message below
+    } catch (e: any) {
+      // Was swallowed entirely, which left the user with "could not compose a
+      // reply" and left us with nothing to look at. The likely causes -- the
+      // conversation outgrowing the context window after a dozen rounds of
+      // tool results, or a transient API error -- are indistinguishable from
+      // the outside and both fixable, but only if they are visible.
+      recoveryError = String(e?.message ?? e);
+      console.error(`[engine] recovery reply failed after ${rounds} tool rounds: ${recoveryError}`);
     }
   }
 
   if (!answer.trim()) {
     answer = toolCalls.length > 0
-      ? `I queried the warehouse (${[...new Set(toolCalls.map(t => t.name.replace(/_/g, ' ')))].join(', ')}) but could not compose a reply. Please ask again, or narrow the question to a shorter date range.`
+      // Say which of the two it was. "Ask again" is the right advice after a
+      // transient error and useless advice after running out of query rounds,
+      // where the fix is a narrower question -- and the person on the other end
+      // cannot tell them apart.
+      ? `I queried the warehouse (${[...new Set(toolCalls.map(t => t.name.replace(/_/g, ' ')))].join(', ')}) but could not compose a reply. ${
+          rounds >= MAX_TOOL_ROUNDS
+            ? 'That question needed more separate queries than I am allowed in one go. Try asking about one venue, or a shorter period, and I can build up from there.'
+            : 'Please ask again — that looked like a temporary fault rather than a problem with the question.'
+        }`
       : 'I could not produce a reply to that. Please try rephrasing the question.';
   }
 

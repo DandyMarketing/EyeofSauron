@@ -15,6 +15,10 @@ export type Metric =
   | 'gross_sales'
   | 'food_bev_sales'
   | 'net_sales'
+  | 'instagram_reach'
+  | 'instagram_views'
+  | 'instagram_interactions'
+  | 'instagram_followers'
   | 'covers'
   | 'avg_spend_per_head'
   | 'avg_check'
@@ -36,6 +40,25 @@ const DOW_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat
  * correct weighted average over any number of days -- they need no adjustment.
  */
 const ADDITIVE_METRICS = new Set<Metric>(['gross_sales', 'food_bev_sales', 'net_sales', 'covers']);
+
+/**
+ * Social metrics, and how each one may be combined across days.
+ *
+ * `how` is the whole point of this table. Adding seven days of reach
+ * double-counts everyone who appeared on more than one of them, and adding
+ * seven days of follower TOTALS is meaningless arithmetic on a level. Both
+ * produce a confident chart that is simply wrong, and neither looks wrong.
+ *
+ *   sum   a genuine per-day count -- views, interactions
+ *   mean  unique accounts, so a weekly figure is "an average day", not a total
+ *   last  a level: the follower count at the end of the bucket
+ */
+const SOCIAL_METRICS: Record<string, { metric: string; how: 'sum' | 'mean' | 'last' }> = {
+  instagram_reach:        { metric: 'reach',              how: 'mean' },
+  instagram_views:        { metric: 'views',              how: 'sum'  },
+  instagram_interactions: { metric: 'total_interactions', how: 'sum'  },
+  instagram_followers:    { metric: 'followers_count',    how: 'last' },
+};
 
 /** Below this many trading days a weekday average is noise, not a pattern. */
 const LOW_SAMPLE_DAYS = 4;
@@ -76,6 +99,10 @@ const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; sour
   gross_sales:        { label: 'Gross sales',        unit: 'currency', source: 'Revel (POS)' },
   food_bev_sales:     { label: 'Food & beverage sales', unit: 'currency', source: 'Revel (POS)' },
   net_sales:          { label: 'Net sales',          unit: 'currency', source: 'Revel (POS)' },
+  instagram_reach:        { label: 'Instagram reach (avg/day)', unit: 'count', source: 'Meta' },
+  instagram_views:        { label: 'Instagram views',           unit: 'count', source: 'Meta' },
+  instagram_interactions: { label: 'Instagram interactions',    unit: 'count', source: 'Meta' },
+  instagram_followers:    { label: 'Instagram followers',       unit: 'count', source: 'Meta' },
   avg_check:          { label: 'Average check',      unit: 'currency', source: 'Revel (POS)' },
   covers:             { label: 'Covers',             unit: 'count',    source: 'SevenRooms' },
   avg_spend_per_head: { label: 'Spend per head',     unit: 'currency', source: 'Revel revenue / SevenRooms covers' },
@@ -175,11 +202,11 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
     // bucket -> running totals, so ratios are computed on summed numerator and
     // denominator rather than averaging per-day ratios (which would weight a
     // quiet Monday the same as a busy Saturday).
-    const acc = new Map<string, { revenue: number; covers: number; checks: number; txns: number; walkIn: number; noShow: number; bookings: number; days: Set<string> }>();
+    const acc = new Map<string, { revenue: number; covers: number; checks: number; txns: number; walkIn: number; noShow: number; bookings: number; days: Set<string>; social: number; socialN: number; socialLastDate: string }>();
     const closedDates = new Set<string>();
     const touch = (b: string) => {
       allBuckets.add(b);
-      if (!acc.has(b)) acc.set(b, { revenue: 0, covers: 0, checks: 0, txns: 0, walkIn: 0, noShow: 0, bookings: 0, days: new Set() });
+      if (!acc.has(b)) acc.set(b, { revenue: 0, covers: 0, checks: 0, txns: 0, walkIn: 0, noShow: 0, bookings: 0, days: new Set(), social: 0, socialN: 0, socialLastDate: '' });
       return acc.get(b)!;
     };
 
@@ -230,6 +257,29 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
       }
     }
 
+    // Social lives in a different table and on a different clock: a day with no
+    // social row is a day we did not capture, never a day of zero reach.
+    const socialCfg = SOCIAL_METRICS[input.metric];
+    if (socialCfg) {
+      const rows = await pagedSelect('social_daily', 'business_date, metric, value', venue.id, input.start_date, input.end_date);
+      for (const r of rows) {
+        if (r.metric !== socialCfg.metric) continue;
+        const v = Number(r.value);
+        if (!Number.isFinite(v)) continue;
+        const a = touch(bucketOf(r.business_date, granularity));
+        if (socialCfg.how === 'last') {
+          // A level, not a count: the newest reading in the bucket wins.
+          if (r.business_date >= a.socialLastDate) {
+            a.social = v;
+            a.socialLastDate = r.business_date;
+          }
+        } else {
+          a.social += v;
+        }
+        a.socialN++;
+      }
+    }
+
     const points = [...acc.entries()]
       .sort((x, y) => sortBucket(x[0], y[0]))
       .map(([label, a]) => {
@@ -237,7 +287,9 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         // the axis and reads as a catastrophic trading day rather than a day the
         // venue never opened. At week/month/weekday granularity the closed day
         // simply contributes nothing to its bucket, which is correct.
-        if (granularity === 'day' && closedDates.has(label)) {
+        // A closed venue still posts, and its audience still sees the posts.
+        // Blanking social on a closure would erase real activity.
+        if (granularity === 'day' && closedDates.has(label) && !socialCfg) {
           return { label, value: null };
         }
         const n = a.days.size;
@@ -246,6 +298,24 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
           case 'gross_sales':
           case 'food_bev_sales':
           case 'net_sales':        value = a.revenue; break;
+          case 'instagram_views':
+          case 'instagram_interactions':
+            // Summing every Tuesday gives a meaningless total; the question a
+            // weekday chart asks is what an average Tuesday looks like.
+            value = a.socialN === 0 ? null
+              : granularity === 'day_of_week' ? a.social / a.socialN
+              : a.social;
+            break;
+          case 'instagram_reach':
+            // Unique accounts. Never summed across days -- the same person on
+            // Monday and Tuesday is one person, so a weekly total would be
+            // inflated by exactly the loyal audience you most want to count once.
+            value = a.socialN === 0 ? null : a.social / a.socialN;
+            break;
+          case 'instagram_followers':
+            // A level. The bucket's value is where it ended, not a total.
+            value = a.socialN === 0 ? null : a.social;
+            break;
           case 'covers':           value = a.covers; break;
           case 'avg_check':        value = a.txns > 0 ? a.checks / a.txns : null; break;
           case 'avg_spend_per_head': value = a.covers > 0 ? a.revenue / a.covers : null; break;
