@@ -95,6 +95,7 @@ if (dryRun) {
 }
 
 let totalFetched = 0;
+let totalUpdated = 0;
 let anyBlocked = false;
 let anyAuthFailed = false;
 const findings: string[] = [];
@@ -110,6 +111,7 @@ for (const a of targets as any[]) {
         paceMs,
         onPage: p => console.log(`  page ${p.page}: ${p.updated} updated so far`),
       });
+      totalUpdated += r.updated;
       console.log(`  ${r.pages} page(s), ${r.seen} listed, ${r.updated} updated`);
       if (r.blocked) {
         anyBlocked = true;
@@ -168,7 +170,13 @@ for (const a of targets as any[]) {
   }
 }
 
-console.log(`\n${totalFetched} post(s) fetched.`);
+// Report what the run actually did. In fields-only mode no insights are
+// fetched by design, so printing "0 post(s) fetched" under a line saying 327
+// rows were updated reads as a run that achieved nothing -- the same shape as
+// every other silent-success bug this file has had.
+console.log(fieldsOnly
+  ? `\n${totalUpdated} post(s) updated. No insights were fetched — that is what --fields-only means.`
+  : `\n${totalFetched} post(s) fetched.`);
 
 if (findings.length > 0) {
   console.log(`\nFINDINGS (${findings.length}):`);
@@ -190,5 +198,5 @@ if (anyBlocked) {
   process.exit(1);
 }
 
-console.log('Post backfill complete.');
+console.log(fieldsOnly ? 'Field refresh complete.' : 'Post backfill complete.');
 process.exit(0);
