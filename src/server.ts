@@ -6,6 +6,7 @@ import { cors } from 'hono/cors';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
+import { warnSchema } from './lib/schema-check.js';
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
@@ -1010,6 +1011,12 @@ app.use('/*', async (c, next) => {
 app.use('/*', serveStatic({ root: './public' }));
 
 const port = Number(process.env.PORT) || 3000;
-serve({ fetch: app.fetch, port }, () => {
+serve({ fetch: app.fetch, port }, async () => {
   console.log(`EyeofSauron API listening on :${port}`);
+
+  // Warn, do not exit. A job that cannot write should stop; a web server that
+  // refuses to boot over one missing column takes down every feature that does
+  // not touch it, and a degraded app beats a dead one. The point is that the
+  // deploy log says so at 15:12 rather than a user finding out at 15:59.
+  await warnSchema();
 });

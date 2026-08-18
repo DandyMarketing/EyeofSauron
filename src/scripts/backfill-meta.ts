@@ -4,6 +4,7 @@ import {
   ingestMetaInsights, isMetaBlockedError, isMetaAuthError,
   PLATFORM_METRICS, TOTAL_VALUE_METRICS,
 } from '../ingest/meta.js';
+import { requireSchema } from '../lib/schema-check.js';
 
 /**
  * Two years of social history, fetched slowly enough not to get us blocked.
@@ -50,6 +51,9 @@ const isBlockedError = isMetaBlockedError;
 
 console.log(`Meta backfill — ${days} days back, ${windowDays}-day windows, ${paceMs}ms between calls`);
 console.log('Run by hand only. Safe to stop and restart: days already stored are skipped.\n');
+
+// Before a single call to Meta, for the same reason as the post backfill.
+await requireSchema();
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')

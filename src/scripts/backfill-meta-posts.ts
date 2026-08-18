@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { backfillMetaPosts, ACCOUNT_FIELDS } from '../ingest/meta.js';
+import { requireSchema } from '../lib/schema-check.js';
 
 /**
  * Two years of individual posts, fetched slowly enough not to get us blocked.
@@ -38,6 +39,11 @@ const sinceIso = new Date(Date.now() - days * 86_400_000).toISOString();
 
 console.log(`Meta post backfill — back to ${sinceIso.slice(0, 10)}, ${paceMs}ms between insight calls`);
 console.log('Run by hand only. Safe to stop and restart: posts already stored with metrics are not re-fetched.\n');
+
+// Before a single call to Meta. Twenty minutes into a run is the worst
+// possible moment to discover a column is missing -- and it is exactly when
+// this failed on 18 Aug 2026, twice.
+await requireSchema();
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')
