@@ -846,8 +846,16 @@ async function venueIdFor(platform: string, accountId: string): Promise<string> 
   return data.venue_id;
 }
 
-/** The listing fields. One place, so the nightly job and the backfill agree. */
-const MEDIA_FIELDS = 'id,caption,media_type,permalink,timestamp';
+/**
+ * The listing fields. One place, so the nightly job and the backfill agree.
+ *
+ * Every name here was PROVEN by probing them one at a time against a live reel
+ * and a live image. That matters because Graph rejects the entire request when
+ * a single field is invalid -- add one hopefully and the whole listing fails,
+ * taking every post with it.
+ */
+const MEDIA_FIELDS =
+  'id,caption,media_type,media_product_type,permalink,timestamp,collaborators,children';
 
 /**
  * Posts we already hold USABLE metrics for.
