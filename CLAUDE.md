@@ -29,6 +29,79 @@ I'm Khai — many years in F&B, building this as the company AI. I code alongsid
 
 **Revel ingestion detail:** one Gmail inbox handles all venues because the filename self-identifies. Parse venue + date from the filename. Map the opaque venue key (e.g. `neonpigeon_neonpigeon`) to a `venue_id` via a **lookup table**; an unknown key must be flagged by a watchdog, never guessed. File columns: Row Type (Product/Modifier), Class (Food/Beverage), Name, SKU, Barcode, Category, Subcategory, Qty, Sales (taxable + non-taxable), % Total Sales, COGS. COGS arrives as 0 (food cost comes from Zeemart, not Revel). Flag Modifier rows so they aren't double-counted. Sample verified: Neon Pigeon, 16 Jul 2026 = **$5,974** across 74 products / 283 units; the file's % column reconciles to 100%.
 
+### Google Business Profile: check the licence before building the pipe
+
+**Not blocked, but not cleared either. Do not build ingestion until this is
+settled.**
+
+Google Business Profile is the most tempting source we have not connected —
+direction requests, call clicks, food orders and menu clicks are closer to
+footfall than any Instagram number will ever be. Someone asking Maps how to get
+to Fat Prince is nearly a cover.
+
+The obstacle is not technical. Google's
+[content policies](https://developers.google.com/my-business/content/policies)
+say you may not "pre-fetch, cache, index, or store any content provided through
+the Business Profile APIs for use outside of your Business Profile project",
+and where storage is allowed it must be **no more than 30 calendar days** and
+**"cannot be manipulated or aggregated in any way"**.
+
+Warehouse-first plus daily aggregation plus joining to covers is a direct
+description of what that forbids. Enforcement is API project disablement
+"without warning".
+
+Three things are genuinely unresolved and none is an engineering question:
+
+- whether the **Performance API** carries the same terms as the management APIs
+  this page seems aimed at;
+- what "outside of your Business Profile project" means when the locations are
+  **your own**;
+- what agreement **Metricool** operates under, since it plainly does store and
+  aggregate this data.
+
+That third point matters, because it inverts the usual preference. Normally we
+take the raw source and avoid a middleman. Here, if Google forbids us from
+storing it and permits a partner to, then going through the partner is the
+legitimate route rather than the compromise.
+
+**Get the answer in writing when requesting API access**, and prefer it to any
+reading of the page. The only unambiguously safe design is querying live per
+question and storing nothing — which cannot do trends, comparisons, or anything
+joined to trade, and is therefore most of the reason to want it.
+
+Location ids are already known, from Metricool's brand settings:
+
+| Venue | Google location |
+|---|---|
+| Firangi Superstar | `accounts/102505042675622804445/locations/11636347290593663654` |
+| Neon Pigeon | `accounts/102505042675622804445/locations/17617416516498414612` |
+| Fat Prince | `accounts/102505042675622804445/locations/14934836359944958535` |
+
+### What each social source is actually for
+
+Settled 18 Aug 2026, after checking what each one can really provide:
+
+- **Meta API** — our own Instagram. Two years of history, the full metric set.
+  Authoritative.
+- **Google API** — Business Profile, subject to the licence question above.
+- **Metricool** — **competitors, and nothing else.** Its Instagram history only
+  begins Jan/Feb 2026, so it is the shallower source for anything we already
+  own. What it uniquely provides is competitor followers, post and reel counts,
+  average likes and comments, and engagement per 1,000 followers. Meta will
+  never expose insights for an account you do not own, so no direct integration
+  can replace this.
+
+Ingesting Instagram from both Meta and Metricool would give two figures for the
+same metric that disagree slightly — the Monday-versus-Revel problem, bought
+voluntarily. Don't.
+
+Competitor data is **public-surface only**: post counts, likes, comments,
+followers. Not reach, not impressions, not saves. It answers "are we posting
+more than them, and does their audience respond harder per follower" and not
+"how many people did they reach". Cross-venue benchmarking runs on owned data
+and is solid; competitor benchmarking is directional. Sauron must say which of
+the two it is using.
+
 ## Company structure (Singapore incorporation)
 
 Each venue is its own private limited company, under an umbrella that operates
