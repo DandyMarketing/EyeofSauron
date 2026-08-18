@@ -9,7 +9,7 @@ import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js'
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
-import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment } from './ingest/meta.js';
+import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment, askMetaForValidMetrics } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
@@ -658,9 +658,13 @@ app.post('/admin/api/meta/probe-metrics', async (c) => {
     if (seen.has(a.platform)) continue;
     seen.add(a.platform);
     try {
-      results.push({ platform: a.platform, account_name: a.account_name, probes: await probeMetrics(a.platform, a.account_id) });
+      const probes = await probeMetrics(a.platform, a.account_id);
+      // When nothing we guessed was accepted, stop guessing and ask. Meta's
+      // rejection of a nonsense name lists the names it does accept.
+      const hint = probes.some(p => p.ok) ? null : await askMetaForValidMetrics(a.account_id);
+      results.push({ platform: a.platform, account_name: a.account_name, probes, hint });
     } catch (e: any) {
-      results.push({ platform: a.platform, account_name: a.account_name, probes: [], error: String(e?.message ?? e) });
+      results.push({ platform: a.platform, account_name: a.account_name, probes: [], error: redactTokens(String(e?.message ?? e)) });
     }
   }
 
