@@ -119,6 +119,34 @@ export function isMetaBlockedError(message: string): boolean {
   return /API access blocked|rate limit|too many calls|reduce the amount of data|temporarily blocked|#4\b|#17\b|#32\b/i.test(message);
 }
 
+/**
+ * Meta saying the token is no good -- expired, rotated, revoked, or missing a
+ * permission it used to have.
+ *
+ * Separate from `isMetaBlockedError` because the remedy is opposite. A block
+ * says "come back later" and waiting fixes it. This says "nothing you do will
+ * work until a human changes a secret", and waiting fixes nothing.
+ *
+ * Worth its own check because of how it fails otherwise. A backfill catches an
+ * error per window and, not recognising it, files it under "no data this far
+ * back is normal" -- then walks every remaining window printing `skipped`,
+ * stores nothing, and exits 0. A dead token reported as a completed backfill,
+ * which is the same shape as the cron that showed green for four days while
+ * storing nothing (BUILD_LOG 6.1).
+ *
+ * The token was rotated on 18 Aug 2026, which is what made this reachable: any
+ * process still running held the old value in memory, because a process reads
+ * its environment once at start.
+ *
+ * Deliberately NOT matching the bare string `OAuthException`. Meta stamps that
+ * type on errors that have nothing to do with authentication -- `(#100) The
+ * value must be a valid insights metric` arrives as an OAuthException too, and
+ * matching it would turn every mistyped metric name into a full stop.
+ */
+export function isMetaAuthError(message: string): boolean {
+  return /Error validating access token|Invalid OAuth access token|access token could not be decrypted|Session has expired|#190\b|#102\b|#10\b|META_SYSTEM_USER_TOKEN is not set/i.test(message);
+}
+
 /** Read plain fields off the account node. Not an insights call. */
 export async function fetchAccountFields(
   accountId: string,
@@ -834,6 +862,10 @@ export interface PostBackfillResult extends PostIngestResult {
   oldest_seen: string | null;
   reached_cutoff: boolean;
   blocked: boolean;
+  /** Meta's own words for why it stopped. Null when it ran to the end. */
+  stop_reason: string | null;
+  /** True when the token was rejected -- a human must act, waiting will not help. */
+  auth_failed: boolean;
 }
 
 /**
@@ -889,6 +921,7 @@ export async function backfillMetaPosts(
   let oldestSeen: string | null = null;
   let reachedCutoff = false;
   let blocked = false;
+  let stopReason: string | null = null;
 
   while (url && !blocked) {
     const page: { items: any[]; next: string | null } = await fetchMediaPage(url);
@@ -921,11 +954,17 @@ export async function backfillMetaPosts(
         if (row) rows.push({ ...row, content_type: 'post' });
       } catch (e: any) {
         const message = String(e?.message ?? e);
-        if (isMetaBlockedError(message)) {
+        if (isMetaBlockedError(message) || isMetaAuthError(message)) {
           // Everything gathered so far still gets written below. Losing a
           // page's work because the page after it was refused would make a
           // restart re-fetch ground it had already paid for.
+          //
+          // A rejected token stops here too. Storing the post with an empty
+          // metrics object -- what the line below does for an ordinary refusal
+          // -- would be wrong: it would mark every remaining post as "seen, no
+          // metrics available" when the truth is nobody ever asked.
           blocked = true;
+          stopReason = message;
           break;
         }
         // One post Meta will not report on. Store it anyway -- the caption and
@@ -956,6 +995,8 @@ export async function backfillMetaPosts(
     seen, fetched, skipped_already_current: seen - fetched,
     stored: storedAny, without_metrics: withoutMetrics,
     pages, oldest_seen: oldestSeen, reached_cutoff: reachedCutoff, blocked,
+    stop_reason: stopReason,
+    auth_failed: stopReason !== null && isMetaAuthError(stopReason),
   };
 }
 

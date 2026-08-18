@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { ingestMetaInsights, ingestMetaPosts, ingestMetaStories, PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS } from '../ingest/meta.js';
+import {
+  ingestMetaInsights, ingestMetaPosts, ingestMetaStories, isMetaAuthError,
+  PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS,
+} from '../ingest/meta.js';
 
 /**
  * Nightly social ingestion.
@@ -160,6 +163,15 @@ if (executionErrors.length > 0) {
  */
 const allFailed = executionErrors.length > 0 && executionErrors.length === accounts.length;
 if (allFailed) console.error('\nEvery account failed — this is a token or permission problem, not bad luck.');
+
+// Name the cure, not just the symptom. A rejected token looks identical to a
+// network problem in the log above, and the two want opposite responses: one is
+// waited out, the other needs someone to change a secret.
+if ([...executionErrors, ...dataFindings].some(isMetaAuthError)) {
+  console.error('\nMeta rejected the token. Update META_SYSTEM_USER_TOKEN in the Railway sealed variable.');
+  console.error('Retrying will not help until it is changed, and every night it stays broken is a');
+  console.error('permanent hole in the follower series and every story posted that day.');
+}
 
 /**
  * Storing nothing at all is a failure, however politely it was reported.

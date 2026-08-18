@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapDiscovered, redactTokens, PLATFORM_METRICS, TOTAL_VALUE_METRICS, TOTAL_VALUE_SINCE_OFFSET_DAYS, ACCOUNT_FIELDS } from './meta.js';
+import { mapDiscovered, redactTokens, isMetaAuthError, isMetaBlockedError, PLATFORM_METRICS, TOTAL_VALUE_METRICS, TOTAL_VALUE_SINCE_OFFSET_DAYS, ACCOUNT_FIELDS } from './meta.js';
 
 /**
  * These cover the shapes Graph returns, which is the part that surprises you.
@@ -234,5 +234,61 @@ describe('account fields versus insights metrics', () => {
       ];
       assert.equal(new Set(all).size, all.length, `${platform} has a duplicate metric name`);
     }
+  });
+});
+
+/**
+ * These two decide what a long-running pull does when Meta says no, and they
+ * want opposite responses. A block is waited out. A rejected token is not --
+ * it needs a human to change a secret, and every hour spent waiting is an hour
+ * of stories expiring and follower counts never recorded.
+ *
+ * Confusing them is not theoretical. Before this existed, an expired token fell
+ * through a backfill's catch into "a window Meta has no data for is normal this
+ * far back", so the run walked every remaining window, stored nothing, and
+ * exited 0 — a dead token reported as a completed backfill.
+ */
+describe('telling a dead token apart from a throttle', () => {
+  test('recognises the ways Meta says the token is no good', () => {
+    for (const message of [
+      'Meta request failed: 400 {"error":{"message":"Error validating access token: Session has expired"}}',
+      'Invalid OAuth access token',
+      'The access token could not be decrypted',
+      'Meta request failed: 400 (#190) Access token has expired',
+      'META_SYSTEM_USER_TOKEN is not set. Create a System User...',
+    ]) {
+      assert.equal(isMetaAuthError(message), true, message);
+    }
+  });
+
+  test('a mistyped metric name is NOT an auth failure', () => {
+    // Meta stamps type OAuthException on this too. Matching that bare string
+    // would turn every bad metric name into a full stop, which is the opposite
+    // of the graceful per-metric fallback the ingestion depends on.
+    const badMetric =
+      'Meta request failed: 400 {"error":{"message":"(#100) The value must be a valid insights metric","type":"OAuthException","code":100}}';
+    assert.equal(isMetaAuthError(badMetric), false);
+  });
+
+  test('#100 does not trip the #10 permission check', () => {
+    // A word boundary, not a prefix match. Without it every (#100) response
+    // would read as a permission failure.
+    assert.equal(isMetaAuthError('(#100) something'), false);
+    assert.equal(isMetaAuthError('(#10) Application does not have permission'), true);
+  });
+
+  test('a throttle is a block, not an auth failure', () => {
+    // Waiting fixes this one. Reporting it as a dead token would send someone
+    // to rotate a perfectly good secret.
+    const throttled = 'Meta request failed: 403 API access blocked — too many calls';
+    assert.equal(isMetaBlockedError(throttled), true);
+    assert.equal(isMetaAuthError(throttled), false);
+  });
+
+  test('an ordinary empty window is neither', () => {
+    // This one really does mean "keep going".
+    const nothing = 'Meta request failed: 400 no data available for this period';
+    assert.equal(isMetaAuthError(nothing), false);
+    assert.equal(isMetaBlockedError(nothing), false);
   });
 });
