@@ -5,6 +5,7 @@ import {
   PLATFORM_METRICS, TOTAL_VALUE_METRICS,
 } from '../ingest/meta.js';
 import { requireSchema } from '../lib/schema-check.js';
+import { backfillWindow, daysCoveredBy } from '../lib/backfill-window.js';
 
 /**
  * Two years of social history, fetched slowly enough not to get us blocked.
@@ -104,7 +105,7 @@ if (MARKER_METRIC === 'follower_count' || MARKER_METRIC === 'followers_count') {
   process.exit(1);
 }
 
-console.log(`Completeness judged by "${MARKER_METRIC}". A window is skipped when it has ${windowDays} day(s) of it.`);
+console.log(`Completeness judged by "${MARKER_METRIC}": a window is skipped once it holds every day of it.`);
 console.log('Other metrics can still be short — re-run with --marker=<metric> to repair a specific one.\n');
 
 let totalStored = 0;
@@ -121,8 +122,8 @@ for (const a of targets as any[]) {
   // history with a gap at the recent end, which the nightly job then closes on
   // its own -- rather than an archipelago nobody can reason about.
   for (let offset = days; offset > 0 && !blocked && !authFailed; offset -= windowDays) {
-    const start = isoDay(Date.now() - offset * DAY_MS);
-    const end = isoDay(Date.now() - Math.max(offset - windowDays + 1, 1) * DAY_MS);
+    const window = backfillWindow(offset, windowDays, Date.now());
+    const { start, end, requestUntil } = window;
 
     const { count } = await supabase
       .from('social_daily')
@@ -132,13 +133,20 @@ for (const a of targets as any[]) {
       .gte('business_date', start)
       .lte('business_date', end);
 
-    if ((count ?? 0) >= windowDays) {
+    // Against the window's REAL length, not the nominal one. The newest window
+    // is short whenever the range is not a whole number of windows, and
+    // demanding a full 30 days there would re-fetch it on every run for ever.
+    if ((count ?? 0) >= daysCoveredBy(window)) {
       windowsSkipped++;
       continue;
     }
 
     try {
-      const r = await ingestMetaInsights(a.platform, a.account_id, start, end, undefined, windowDays, paceMs);
+      // requestUntil, not end: Meta's daily series stops one day short of
+      // `until` once the end_time correction is applied, so asking for `end`
+      // silently drops `end` itself. That lost one day per window, every
+      // window -- 22 days of reach, invisible until the rows were counted.
+      const r = await ingestMetaInsights(a.platform, a.account_id, start, requestUntil, undefined, windowDays + 1, paceMs);
       totalStored += r.rows;
       console.log(`  ${start} → ${end}: ${r.rows} rows${r.rows === 0 ? ' (nothing returned)' : ''}`);
 
