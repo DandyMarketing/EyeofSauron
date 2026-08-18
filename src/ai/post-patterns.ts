@@ -140,6 +140,30 @@ const OVERLAPPING: Dimension[] = ['hashtag', 'mention'];
  */
 function valueOf(post: PostLike, metric: string): number | null {
   const m = post.metrics ?? {};
+
+  /**
+   * Comments per like. A proxy for how CONTESTED a post was.
+   *
+   * Praise costs a tap; disagreement costs typing. So a post people argued
+   * about carries far more comments per like than a popular one, and the two
+   * are otherwise indistinguishable from reach alone.
+   *
+   * Khai's examples: a Neon Pigeon duck gyoza post that people said looked like
+   * siew mai, and a Firangi chutney post that people said was made wrong. Both
+   * went far. Ranking those on reach would conclude "do more of this", which is
+   * a confident, well-evidenced recommendation to pick fights with your own
+   * customers. This exists so the difference can be stated instead.
+   *
+   * It is a proxy and not a sentiment reading: a genuinely great post can also
+   * draw discussion. High contention means "go and look", never "this was bad".
+   */
+  if (metric === 'contention') {
+    const comments = m.comments;
+    const likes = m.likes;
+    if (typeof comments !== 'number' || typeof likes !== 'number' || likes === 0) return null;
+    return comments / likes;
+  }
+
   if (metric === 'engagement_rate') {
     const interactions = m.total_interactions;
     const reach = m.reach;
@@ -246,6 +270,12 @@ export function groupPosts(
   if (OVERLAPPING.includes(dimension)) {
     caveats.push(
       'One post can appear in several groups here, so group sizes add up to more than the post count and no group is a share of the whole.',
+    );
+  }
+
+  if (metric === 'contention') {
+    caveats.push(
+      'contention is comments divided by likes — how much a post was ARGUED about, not how good it was. A high figure means go and read the comments before drawing any conclusion. Never recommend repeating a high-contention post on the strength of its reach: controversy does travel on Instagram, and recommending more of it is recommending the venue pick fights with its own customers. Say plainly that the post travelled because it was contested.',
     );
   }
 
