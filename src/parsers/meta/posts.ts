@@ -85,6 +85,53 @@ export function toPostRow(media: any, metrics: Record<string, number> = {}): Pos
 }
 
 /**
+ * Which media in a page still need an insights call.
+ *
+ * The listing is one call for up to a hundred posts; insights are one call
+ * EACH. So this is the whole cost of a post backfill, and getting it wrong in
+ * either direction hurts: fetch too much and Meta blocks the app again, fetch
+ * too little and the warehouse holds posts with no numbers on them.
+ *
+ * Two reasons to fetch, and a post only has to satisfy one:
+ *
+ * - we have no usable metrics for it, whether because it is new or because an
+ *   earlier attempt came back empty; or
+ * - it is younger than the refresh cutoff, so its figures are still moving and
+ *   whatever we stored is already out of date.
+ *
+ * Everything else has settled and we already have it. Re-reading a two-year-old
+ * post cannot change a number.
+ */
+export function selectForInsights(
+  items: any[],
+  haveMetricsFor: Set<string>,
+  refreshCutoffIso: string,
+): any[] {
+  return items.filter(item => {
+    if (!item?.id || !item?.timestamp) return false;
+    if (!haveMetricsFor.has(String(item.id))) return true;
+    return new Date(item.timestamp).toISOString() >= refreshCutoffIso;
+  });
+}
+
+/**
+ * Whether paging has reached far enough back to stop.
+ *
+ * Meta returns media newest first, so the moment a page contains anything older
+ * than the cutoff, every later page is older still. An empty page also means
+ * stop -- it is the account running out of history, which is the ordinary end
+ * of a backfill rather than a fault.
+ */
+export function pageReachesBack(items: any[], cutoffIso: string): boolean {
+  if (items.length === 0) return true;
+  return items.some(item => {
+    if (!item?.timestamp) return false;
+    const t = new Date(item.timestamp).getTime();
+    return !Number.isNaN(t) && new Date(t).toISOString() < cutoffIso;
+  });
+}
+
+/**
  * Which metrics to ask for, by media type.
  *
  * Asking a still image for video views fails the whole request, and Meta

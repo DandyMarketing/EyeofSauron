@@ -12,7 +12,8 @@
     "ask": "NODE_USE_ENV_PROXY=1 tsx src/scripts/ask.ts",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "ingest:meta": "NODE_USE_ENV_PROXY=1 tsx src/scripts/ingest-meta.ts",
-    "backfill:meta": "NODE_USE_ENV_PROXY=1 tsx src/scripts/backfill-meta.ts"
+    "backfill:meta": "NODE_USE_ENV_PROXY=1 tsx src/scripts/backfill-meta.ts",
+    "backfill:posts": "NODE_USE_ENV_PROXY=1 tsx src/scripts/backfill-meta-posts.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

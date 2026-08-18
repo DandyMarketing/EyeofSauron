@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase.js';
 import { normaliseInsights, missingDays, type InsightRow } from '../parsers/meta/insights.js';
-import { toPostRow, metricsFrom, metricsForMediaType } from '../parsers/meta/posts.js';
+import {
+  toPostRow, metricsFrom, metricsForMediaType, selectForInsights, pageReachesBack,
+} from '../parsers/meta/posts.js';
 
 /**
  * Meta (Instagram / Facebook) insights ingestion.
@@ -104,6 +106,18 @@ export const ACCOUNT_FIELDS: Record<string, string[]> = {
 
 const DAY_MS = 86_400_000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * Meta's ways of saying "stop".
+ *
+ * Continuing past any of these makes it worse -- the app was blocked for a
+ * full day on 18 Aug 2026 by exactly that. Lives here rather than in one
+ * script because every long-running pull needs the same answer to the same
+ * question, and two copies would drift.
+ */
+export function isMetaBlockedError(message: string): boolean {
+  return /API access blocked|rate limit|too many calls|reduce the amount of data|temporarily blocked|#4\b|#17\b|#32\b/i.test(message);
+}
 
 /** Read plain fields off the account node. Not an insights call. */
 export async function fetchAccountFields(
@@ -709,16 +723,73 @@ async function venueIdFor(platform: string, accountId: string): Promise<string> 
   return data.venue_id;
 }
 
+/** The listing fields. One place, so the nightly job and the backfill agree. */
+const MEDIA_FIELDS = 'id,caption,media_type,permalink,timestamp';
+
+/**
+ * Posts we already hold USABLE metrics for.
+ *
+ * Deliberately not "posts we have a row for". A post stored with an empty
+ * metrics object is a post whose insights call failed, and treating it as done
+ * would make that failure permanent -- the row exists, so nothing ever looks
+ * at it again, and the post sits in the warehouse forever with no numbers on
+ * it. Read the metrics, not just the id, so a failed fetch is retried on the
+ * next run and quietly heals.
+ */
+async function postsWithMetrics(platform: string, accountId: string): Promise<Set<string>> {
+  const have = new Set<string>();
+  const PAGE = 1000;
+
+  // Two years of posts across three venues is a few thousand rows, and
+  // PostgREST caps a response at 1,000 by default. Paging here is not
+  // premature: without it this silently returns the first 1,000 and every post
+  // beyond that looks unfetched, so a backfill would re-request insights for
+  // all of them. That is precisely the burst that got the app blocked.
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('social_posts')
+      .select('post_id, metrics')
+      .eq('platform', platform)
+      .eq('account_id', accountId)
+      .range(from, from + PAGE - 1);
+
+    if (error) throw new Error(`Could not read stored posts: ${error.message}`);
+    for (const row of data ?? []) {
+      if (row?.metrics && Object.keys(row.metrics).length > 0) have.add(String(row.post_id));
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return have;
+}
+
+/** One page of the media listing. Returns the raw items and the next cursor. */
+async function fetchMediaPage(url: string): Promise<{ items: any[]; next: string | null }> {
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Meta media listing failed: ${res.status} ${redactTokens(text)}`);
+  const json = JSON.parse(text);
+  return {
+    items: (json?.data ?? []) as any[],
+    // Meta hands back a fully-formed next URL with the token embedded in it.
+    // Never log this: that token is the same secret redactTokens exists for.
+    next: typeof json?.paging?.next === 'string' ? json.paging.next : null,
+  };
+}
+
 /**
  * Posts, refreshing only what can still change.
  *
  * The listing is cheap and returns everything in one call, so we look at a lot
  * of posts. Insights are the expensive part -- one call each -- so they are
  * fetched only for posts published inside POST_REFRESH_DAYS, plus any post we
- * have never seen before.
+ * have no usable metrics for.
  *
  * That buys three or four times the history for HALF the nightly calls, which
  * is also what makes room for stories on the same budget.
+ *
+ * This reads ONE page. Deep history is `backfillMetaPosts`, run by hand: a
+ * nightly job that pages back through two years would make thousands of calls
+ * every night to re-learn what it already knew.
  */
 export async function ingestMetaPosts(
   platform: string,
@@ -728,43 +799,22 @@ export async function ingestMetaPosts(
   const venueId = await venueIdFor(platform, accountId);
 
   const params = new URLSearchParams({
-    fields: 'id,caption,media_type,permalink,timestamp',
+    fields: MEDIA_FIELDS,
     limit: String(Math.min(Math.max(limit, 1), 100)),
     access_token: token(),
   });
 
-  const res = await fetch(`${GRAPH}/${accountId}/media?${params}`);
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Meta media listing failed: ${res.status} ${redactTokens(text)}`);
-
-  const media = (JSON.parse(text)?.data ?? []) as any[];
-
-  const { data: known } = await supabase
-    .from('social_posts')
-    .select('post_id')
-    .eq('platform', platform)
-    .eq('account_id', accountId);
-  const alreadyStored = new Set((known ?? []).map((k: any) => k.post_id));
-
+  const { items: media } = await fetchMediaPage(`${GRAPH}/${accountId}/media?${params}`);
+  const haveMetricsFor = await postsWithMetrics(platform, accountId);
   const cutoff = new Date(Date.now() - POST_REFRESH_DAYS * DAY_MS).toISOString();
+  const wanted = selectForInsights(media, haveMetricsFor, cutoff);
+
   const rows = [];
-  let fetched = 0;
-  let skipped = 0;
   let withoutMetrics = 0;
 
-  for (const item of media) {
-    if (!item?.id || !item?.timestamp) continue;
-
-    // Old AND already stored: its numbers have settled and we have them.
-    if (alreadyStored.has(String(item.id)) && new Date(item.timestamp).toISOString() < cutoff) {
-      skipped++;
-      continue;
-    }
-
+  for (const item of wanted) {
     const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
-    fetched++;
     if (Object.keys(metrics).length === 0) withoutMetrics++;
-
     const row = toPostRow(item, metrics);
     if (row) rows.push({ ...row, content_type: 'post' });
   }
@@ -773,8 +823,139 @@ export async function ingestMetaPosts(
 
   return {
     venue_id: venueId, account_id: accountId, content_type: 'post',
-    seen: media.length, fetched, skipped_already_current: skipped,
+    seen: media.length, fetched: wanted.length,
+    skipped_already_current: media.length - wanted.length,
     stored: rows.length > 0, without_metrics: withoutMetrics,
+  };
+}
+
+export interface PostBackfillResult extends PostIngestResult {
+  pages: number;
+  oldest_seen: string | null;
+  reached_cutoff: boolean;
+  blocked: boolean;
+}
+
+/**
+ * The whole post history, paged back to a cutoff.
+ *
+ * Run by hand, never on a schedule.
+ *
+ * `ingestMetaPosts` reads the most recent hundred posts and stops, which is
+ * right for a nightly job and left us holding about three months of history --
+ * enough to say which post won last week, nowhere near enough to say what KIND
+ * of post wins. Thirty posts a month against ten content categories is three
+ * posts a cell: a hunch, not a finding. Two years is where the question becomes
+ * answerable, so the backfill exists to make the sample big enough to mean
+ * something.
+ *
+ * Same three disciplines as the daily backfill, for the same reasons:
+ *
+ * PACING -- 153 calls in a burst got the app blocked for a day. Every insights
+ * call waits.
+ *
+ * RESUMABILITY -- a post already stored WITH metrics costs nothing on a second
+ * run; it is not re-requested at all. Stopping and restarting is free.
+ *
+ * STOPPING -- if Meta starts refusing, this gives up immediately rather than
+ * pushing into a throttle that is already telling us to stop.
+ */
+export async function backfillMetaPosts(
+  platform: string,
+  accountId: string,
+  opts: {
+    sinceIso: string;
+    paceMs?: number;
+    onPage?: (info: { page: number; seen: number; fetched: number; oldest: string | null }) => void;
+  },
+): Promise<PostBackfillResult> {
+  const venueId = await venueIdFor(platform, accountId);
+  const paceMs = Math.max(opts.paceMs ?? 3000, 0);
+  const haveMetricsFor = await postsWithMetrics(platform, accountId);
+  const refreshCutoff = new Date(Date.now() - POST_REFRESH_DAYS * DAY_MS).toISOString();
+
+  const params = new URLSearchParams({
+    fields: MEDIA_FIELDS,
+    limit: '100',
+    access_token: token(),
+  });
+
+  let url: string | null = `${GRAPH}/${accountId}/media?${params}`;
+  let pages = 0;
+  let seen = 0;
+  let fetched = 0;
+  let withoutMetrics = 0;
+  let storedAny = false;
+  let oldestSeen: string | null = null;
+  let reachedCutoff = false;
+  let blocked = false;
+
+  while (url && !blocked) {
+    const page: { items: any[]; next: string | null } = await fetchMediaPage(url);
+    pages++;
+    seen += page.items.length;
+
+    for (const item of page.items) {
+      const t = item?.timestamp ? new Date(item.timestamp).toISOString() : null;
+      if (t && (oldestSeen === null || t < oldestSeen)) oldestSeen = t;
+    }
+
+    // Only the items inside the window we asked for. Meta pages in blocks of a
+    // hundred, so the page that crosses the cutoff also carries posts from
+    // before it -- storing those would quietly extend the history past what was
+    // requested and make the run's cost unpredictable.
+    const inRange = page.items.filter(i => {
+      const t = i?.timestamp ? new Date(i.timestamp).toISOString() : null;
+      return t !== null && t >= opts.sinceIso;
+    });
+
+    const wanted = selectForInsights(inRange, haveMetricsFor, refreshCutoff);
+    const rows = [];
+
+    for (const item of wanted) {
+      try {
+        const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
+        fetched++;
+        if (Object.keys(metrics).length === 0) withoutMetrics++;
+        const row = toPostRow(item, metrics);
+        if (row) rows.push({ ...row, content_type: 'post' });
+      } catch (e: any) {
+        const message = String(e?.message ?? e);
+        if (isMetaBlockedError(message)) {
+          // Everything gathered so far still gets written below. Losing a
+          // page's work because the page after it was refused would make a
+          // restart re-fetch ground it had already paid for.
+          blocked = true;
+          break;
+        }
+        // One post Meta will not report on. Store it anyway -- the caption and
+        // the date are still real, and `without_metrics` says what is missing.
+        const row = toPostRow(item, {});
+        if (row) rows.push({ ...row, content_type: 'post' });
+        withoutMetrics++;
+      }
+      if (paceMs > 0) await new Promise(r => setTimeout(r, paceMs));
+    }
+
+    if (rows.length > 0) {
+      await storeMedia(rows, venueId, platform, accountId);
+      storedAny = true;
+    }
+
+    opts.onPage?.({ page: pages, seen: page.items.length, fetched: rows.length, oldest: oldestSeen });
+
+    if (pageReachesBack(page.items, opts.sinceIso)) {
+      reachedCutoff = true;
+      break;
+    }
+    url = page.next;
+  }
+
+  return {
+    venue_id: venueId, account_id: accountId, content_type: 'post',
+    seen, fetched, skipped_already_current: seen - fetched,
+    stored: storedAny, without_metrics: withoutMetrics,
+    pages, oldest_seen: oldestSeen, reached_cutoff: reachedCutoff, blocked,
   };
 }
 
