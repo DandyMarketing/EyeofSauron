@@ -322,6 +322,80 @@ function token(): string {
   return t;
 }
 
+/**
+ * Which fields Graph will actually give us for one media item.
+ *
+ * Asked one at a time on purpose. Graph rejects the WHOLE request when a single
+ * field name is invalid, so a hopeful list of twelve tells you only that one of
+ * them was wrong -- the same trap as the account metrics, which cost three red
+ * rows of "every metric failed" before anyone noticed the cause was our own
+ * field list.
+ */
+export async function probeMediaFields(
+  mediaId: string,
+  candidates: string[],
+  paceMs = 300,
+): Promise<{ available: Record<string, string>; rejected: Record<string, string> }> {
+  const available: Record<string, string> = {};
+  const rejected: Record<string, string> = {};
+
+  for (const field of candidates) {
+    try {
+      const params = new URLSearchParams({ fields: field, access_token: token() });
+      const res = await fetch(`${GRAPH}/${mediaId}?${params}`);
+      const text = await res.text();
+      if (!res.ok) {
+        rejected[field] = redactTokens(text).slice(0, 200);
+      } else {
+        const json = JSON.parse(text);
+        const value = json?.[field];
+        available[field] = value === undefined
+          ? '(accepted, but empty for this item)'
+          : redactTokens(JSON.stringify(value)).slice(0, 160);
+      }
+    } catch (e: any) {
+      rejected[field] = String(e?.message ?? e).slice(0, 200);
+    }
+    if (paceMs > 0) await new Promise(r => setTimeout(r, paceMs));
+  }
+
+  return { available, rejected };
+}
+
+/**
+ * Whether this token may read comments, and what a comment carries.
+ *
+ * Reports SHAPE and counts only -- never comment text or usernames. A probe
+ * that prints what people wrote puts personal data into a deploy log, which is
+ * a place it can never be deleted from and was never meant to reach. Whether
+ * the edge works is the question; what anyone said is not.
+ */
+export async function probeCommentsAccess(mediaId: string): Promise<{
+  allowed: boolean;
+  count?: number;
+  fields_present?: string[];
+  reason?: string;
+}> {
+  const params = new URLSearchParams({
+    fields: 'id,timestamp,like_count,text',
+    limit: '5',
+    access_token: token(),
+  });
+
+  const res = await fetch(`${GRAPH}/${mediaId}/comments?${params}`);
+  const text = await res.text();
+
+  if (!res.ok) {
+    return { allowed: false, reason: redactTokens(text).slice(0, 300) };
+  }
+
+  const data = (JSON.parse(text)?.data ?? []) as any[];
+  const present = new Set<string>();
+  for (const c of data) for (const k of Object.keys(c ?? {})) present.add(k);
+
+  return { allowed: true, count: data.length, fields_present: [...present] };
+}
+
 export interface DiscoveredAccount {
   platform: 'facebook' | 'instagram';
   account_id: string;
