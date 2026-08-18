@@ -50,6 +50,8 @@ export async function handleToolCall(
   switch (name) {
     case 'query_social_performance':
       return querySocialPerformance(input);
+    case 'query_top_posts':
+      return queryTopPosts(input);
     case 'query_profit_and_loss':
       return queryProfitAndLoss(input);
     case 'query_product_mix':
@@ -150,6 +152,98 @@ async function querySocialPerformance(input: Record<string, any>): Promise<strin
     caution: 'These are two series measured over the same days. Co-movement is NOT evidence that social activity caused trade — weather, holidays, events and bookings explain far more variance. Report what is visible; do not attribute revenue to a post.',
     days_without_social_data: gaps,
     days,
+  });
+}
+
+/**
+ * Individual posts, ranked.
+ *
+ * "Best" is not a property of a post, it is a choice of measure -- a post with
+ * 40 reach and 12 interactions beats one with 4,000 reach and 300 on
+ * engagement rate, and loses on every other basis. So the basis is returned
+ * alongside the ranking and the tool description tells the model to name it.
+ *
+ * Posts missing the chosen metric are listed SEPARATELY rather than ranked as
+ * zero. An image has no `views`; ranking it as zero views would bury every
+ * photo beneath every reel and call it a finding about content.
+ */
+async function queryTopPosts(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required' });
+  }
+
+  const { data, error } = await supabase
+    .from('social_posts')
+    .select('post_id, published_at, business_date, media_type, permalink, caption, metrics, fetched_at')
+    .eq('venue_id', venueId)
+    .gte('business_date', input.start_date)
+    .lte('business_date', input.end_date)
+    .order('published_at', { ascending: false })
+    .limit(500);
+
+  if (error) return JSON.stringify({ error: error.message });
+
+  if (!data || data.length === 0) {
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      posts: [],
+      note: 'No posts have been ingested for this venue and period. This does NOT mean nothing was posted — say the data is unavailable rather than describing it as a quiet period.',
+    });
+  }
+
+  const rankBy = typeof input.rank_by === 'string' ? input.rank_by : 'total_interactions';
+  const limit = Math.min(Math.max(Number(input.limit) || 10, 1), 50);
+
+  const scoreOf = (metrics: any): number | null => {
+    if (rankBy === 'engagement_rate') {
+      const reach = Number(metrics?.reach);
+      const interactions = Number(metrics?.total_interactions);
+      // No reach means no denominator. A rate computed against zero is not a
+      // very high rate, it is not a rate.
+      if (!Number.isFinite(reach) || reach <= 0 || !Number.isFinite(interactions)) return null;
+      return Number(((interactions / reach) * 100).toFixed(2));
+    }
+    const value = metrics?.[rankBy];
+    return typeof value === 'number' ? value : null;
+  };
+
+  const scored = data.map((p: any) => ({ post: p, score: scoreOf(p.metrics) }));
+  const ranked = scored
+    .filter(s => s.score !== null)
+    .sort((a, b) => (b.score as number) - (a.score as number))
+    .slice(0, limit);
+
+  const shape = (s: { post: any; score: number | null }) => ({
+    published_at: s.post.published_at,
+    business_date: s.post.business_date,
+    media_type: s.post.media_type,
+    permalink: s.post.permalink,
+    caption: s.post.caption,
+    [rankBy]: s.score,
+    metrics: s.post.metrics,
+    measured_at: s.post.fetched_at,
+  });
+
+  // Posts published in the last few days are still gathering engagement, so
+  // they rank low for reasons that have nothing to do with the content.
+  const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const stillGrowing = data.filter((p: any) => p.published_at > threeDaysAgo).length;
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    ranked_by: rankBy,
+    posts_in_period: data.length,
+    caution: 'Ranking depends entirely on the measure. Say which one was used. Engagement rate favours small responsive audiences; reach favours breadth. Neither is "best" on its own.',
+    ...(stillGrowing > 0 ? {
+      still_accruing: `${stillGrowing} post(s) were published in the last 3 days and are still gathering engagement — they will under-rank against older posts for reasons unrelated to the content. Say so.`,
+    } : {}),
+    ...(scored.length - ranked.length > 0 ? {
+      not_ranked: `${scored.length - ranked.length} post(s) have no "${rankBy}" value. Meta does not report every metric for every media type — an image has no views. They are excluded from the ranking, NOT scored as zero.`,
+    } : {}),
+    posts: ranked.map(shape),
   });
 }
 
