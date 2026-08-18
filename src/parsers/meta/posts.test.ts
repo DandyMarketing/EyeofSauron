@@ -1,6 +1,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { businessDateOf, metricsFrom, toPostRow, metricsForMediaType } from './posts.js';
+import {
+  businessDateOf, metricsFrom, toPostRow, metricsForMediaType,
+  selectForInsights, pageReachesBack,
+} from './posts.js';
 
 /**
  * The whole point of storing posts in this warehouse is putting them beside
@@ -121,5 +124,76 @@ describe('metricsForMediaType', () => {
   test('an unknown type falls back to the metrics every post has', () => {
     assert.deepEqual(metricsForMediaType(null), metricsForMediaType('IMAGE'));
     assert.deepEqual(metricsForMediaType('SOMETHING_NEW'), metricsForMediaType('IMAGE'));
+  });
+});
+
+/**
+ * This decides the entire cost of a post backfill. One listing call covers a
+ * hundred posts; insights are one call EACH, and 153 calls in a burst is what
+ * got the app blocked for a day. Fetching too much is an outage; fetching too
+ * little leaves posts in the warehouse with no numbers on them.
+ */
+describe('selectForInsights — what still needs a call', () => {
+  const old = { id: 'old', timestamp: '2024-01-05T12:00:00+0000' };
+  const recent = { id: 'recent', timestamp: '2026-08-17T12:00:00+0000' };
+  const cutoff = '2026-08-04T00:00:00.000Z';
+
+  test('a settled post we already hold metrics for is not re-fetched', () => {
+    // Its numbers stopped moving long ago. Re-reading it cannot change a thing.
+    assert.deepEqual(selectForInsights([old], new Set(['old']), cutoff), []);
+  });
+
+  test('a post we have never seen is fetched however old it is', () => {
+    assert.deepEqual(selectForInsights([old], new Set(), cutoff), [old]);
+  });
+
+  test('one settled post being held does not spare its neighbours', () => {
+    // The caller passes only the posts it holds USABLE metrics for, so a row
+    // that exists with an empty metrics object -- a failed insights call --
+    // arrives here absent from the set and is retried. Keying on "we have a
+    // row" instead would make that failure permanent: the row exists, so
+    // nothing ever looks at it again.
+    const another = { id: 'another', timestamp: '2024-02-05T12:00:00+0000' };
+    assert.deepEqual(selectForInsights([old, another], new Set(['old']), cutoff), [another]);
+  });
+
+  test('a recent post is re-fetched even though we already have metrics', () => {
+    // Engagement accrues for days after publishing, so what we stored on the
+    // night is already out of date.
+    assert.deepEqual(selectForInsights([recent], new Set(['recent']), cutoff), [recent]);
+  });
+
+  test('items with no id or timestamp are dropped rather than fetched', () => {
+    // Neither can be stored, so a call spent on one is a call wasted.
+    assert.deepEqual(selectForInsights([{ id: 'x' }, { timestamp: recent.timestamp }], new Set(), cutoff), []);
+  });
+});
+
+describe('pageReachesBack — when to stop paging', () => {
+  const cutoff = '2025-01-01T00:00:00.000Z';
+
+  test('a page entirely inside the window keeps paging', () => {
+    assert.equal(pageReachesBack([{ timestamp: '2026-05-01T00:00:00+0000' }], cutoff), false);
+  });
+
+  test('one item older than the cutoff stops it', () => {
+    // Meta returns media newest first, so once a page crosses the cutoff every
+    // later page is older still. Continuing would page back through years of
+    // history nobody asked for.
+    assert.equal(pageReachesBack(
+      [{ timestamp: '2026-05-01T00:00:00+0000' }, { timestamp: '2024-05-01T00:00:00+0000' }],
+      cutoff,
+    ), true);
+  });
+
+  test('an empty page stops it', () => {
+    // The account has run out of history. That is the ordinary end of a
+    // backfill, not a fault -- and treating it as "keep going" would loop.
+    assert.equal(pageReachesBack([], cutoff), true);
+  });
+
+  test('an unreadable timestamp does not end the run on its own', () => {
+    // One bad item is not evidence we have reached the cutoff.
+    assert.equal(pageReachesBack([{ timestamp: 'whenever' }], cutoff), false);
   });
 });

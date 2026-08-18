@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { ingestMetaInsights, PLATFORM_METRICS, TOTAL_VALUE_METRICS } from '../ingest/meta.js';
+import { ingestMetaInsights, isMetaBlockedError, PLATFORM_METRICS, TOTAL_VALUE_METRICS } from '../ingest/meta.js';
 
 /**
  * Two years of social history, fetched slowly enough not to get us blocked.
@@ -42,10 +42,8 @@ const onlySlug = process.argv.find(a => a.startsWith('--venue='))?.split('=')[1]
 const DAY_MS = 86_400_000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** Meta's ways of saying "stop". Continuing past any of these makes it worse. */
-function isBlockedError(message: string): boolean {
-  return /API access blocked|rate limit|too many calls|reduce the amount of data|temporarily blocked|#4\b|#17\b|#32\b/i.test(message);
-}
+/** Meta's ways of saying "stop". Shared with the post backfill, which needs it too. */
+const isBlockedError = isMetaBlockedError;
 
 console.log(`Meta backfill — ${days} days back, ${windowDays}-day windows, ${paceMs}ms between calls`);
 console.log('Run by hand only. Safe to stop and restart: days already stored are skipped.\n');
