@@ -76,10 +76,36 @@ if (targets.length === 0) {
   process.exit(1);
 }
 
-// One representative metric decides whether a day is already done. Checking all
-// twelve would be twelve times the queries to answer the same question, and
-// they are always written together.
-const MARKER_METRIC = 'views';
+/**
+ * Which metric decides whether a window has already been done.
+ *
+ * One representative metric instead of all twelve, because they are written
+ * together and checking each would be twelve queries answering one question.
+ *
+ * That reasoning has a hole, and Fat Prince found it. Metrics do NOT always
+ * land together: `views` had all 729 days while `reach` had 678, missing 29 at
+ * the start and 22 scattered inside. Because the marker was complete, every
+ * window looked done, every window was skipped, and re-running could never
+ * repair `reach` -- the gap was permanent and silent.
+ *
+ * So the marker is now a flag. `--marker=reach` re-checks coverage by reach and
+ * refills exactly the windows it is missing from, at no cost for the ones it
+ * already has. The default stays cheap for the ordinary case.
+ *
+ * Do NOT set this to `follower_count`: Meta serves only the last 30 days of it,
+ * so every older window would look incomplete forever and the backfill would
+ * re-fetch the entire history on every run.
+ */
+const MARKER_METRIC = process.argv.find(a => a.startsWith('--marker='))?.split('=')[1] ?? 'views';
+
+if (MARKER_METRIC === 'follower_count' || MARKER_METRIC === 'followers_count') {
+  console.error(`--marker=${MARKER_METRIC} would never be satisfied: Meta serves no usable history for it.`);
+  console.error('Every window would look incomplete and the whole history would be re-fetched each run.');
+  process.exit(1);
+}
+
+console.log(`Completeness judged by "${MARKER_METRIC}". A window is skipped when it has ${windowDays} day(s) of it.`);
+console.log('Other metrics can still be short — re-run with --marker=<metric> to repair a specific one.\n');
 
 let totalStored = 0;
 let windowsSkipped = 0;
