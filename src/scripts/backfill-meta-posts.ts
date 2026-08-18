@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
-import { backfillMetaPosts, ACCOUNT_FIELDS } from '../ingest/meta.js';
+import { backfillMetaPosts, refreshMetaPostFields, ACCOUNT_FIELDS } from '../ingest/meta.js';
 import { requireSchema } from '../lib/schema-check.js';
 
 /**
@@ -35,10 +35,26 @@ const paceMs = Math.max(arg('pace', 3000), 200);
 const onlySlug = process.argv.find(a => a.startsWith('--venue='))?.split('=')[1];
 const dryRun = process.argv.includes('--dry-run');
 
+/**
+ * Refresh the listing fields on posts already stored, and fetch nothing else.
+ *
+ * For columns added AFTER the posts were ingested. The ordinary backfill skips
+ * a post once it has metrics -- that skip is what makes restarting free, and it
+ * also means a new column stays null on everything already stored, looking
+ * perfectly healthy while being empty.
+ *
+ * Costs a listing call per hundred posts and no per-post calls at all: about a
+ * dozen requests for two years across three venues, against roughly a thousand
+ * for a real backfill.
+ */
+const fieldsOnly = process.argv.includes('--fields-only');
+
 const sinceIso = new Date(Date.now() - days * 86_400_000).toISOString();
 
 console.log(`Meta post backfill — back to ${sinceIso.slice(0, 10)}, ${paceMs}ms between insight calls`);
-console.log('Run by hand only. Safe to stop and restart: posts already stored with metrics are not re-fetched.\n');
+console.log(fieldsOnly
+  ? 'FIELDS ONLY — refreshing listing fields on stored posts. No insights calls, no metrics touched.\n'
+  : 'Run by hand only. Safe to stop and restart: posts already stored with metrics are not re-fetched.\n');
 
 // Before a single call to Meta. Twenty minutes into a run is the worst
 // possible moment to discover a column is missing -- and it is exactly when
@@ -86,6 +102,26 @@ const findings: string[] = [];
 for (const a of targets as any[]) {
   const label = `${a.account_name ?? a.account_id} (${a.venues?.name ?? a.venue_id})`;
   console.log(`\n${label}`);
+
+  if (fieldsOnly) {
+    try {
+      const r = await refreshMetaPostFields(a.platform, a.account_id, {
+        sinceIso,
+        paceMs,
+        onPage: p => console.log(`  page ${p.page}: ${p.updated} updated so far`),
+      });
+      console.log(`  ${r.pages} page(s), ${r.seen} listed, ${r.updated} updated`);
+      if (r.blocked) {
+        anyBlocked = true;
+        console.error('  STOPPED — Meta began refusing calls.');
+        break;
+      }
+    } catch (e: any) {
+      console.error(`  FAILED — ${e?.message ?? e}`);
+      process.exit(1);
+    }
+    continue;
+  }
 
   try {
     const r = await backfillMetaPosts(a.platform, a.account_id, {
