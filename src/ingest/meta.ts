@@ -763,6 +763,59 @@ export async function fetchMediaInsights(mediaId: string, metrics: string[]): Pr
   return JSON.parse(text);
 }
 
+/**
+ * Fresh image URLs for a handful of posts, fetched at the moment they are
+ * needed.
+ *
+ * NOT stored, and that is the whole design. Instagram's CDN URLs are signed and
+ * expire, so a thumbnail saved today is a broken image in a fortnight -- and a
+ * broken image in a report is worse than no image, because it reads as data we
+ * lost rather than a link that aged out. Graph reissues them on request, so the
+ * honest shape is to ask when someone actually wants to look.
+ *
+ * Which field carries the picture depends on the media type, and it is the
+ * reverse of what you would guess: a reel returns the VIDEO in `media_url` with
+ * the still in `thumbnail_url`, while a photo returns the picture in
+ * `media_url` and nothing in `thumbnail_url`. Asking for both and preferring
+ * the thumbnail handles both without needing to know the type first.
+ *
+ * One call per post, so callers must cap the list. Ten is a top-ten; a hundred
+ * is a way to get the app blocked.
+ */
+export async function fetchMediaThumbnails(
+  postIds: string[],
+  paceMs = 0,
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+
+  for (const postId of postIds) {
+    try {
+      const params = new URLSearchParams({
+        fields: 'thumbnail_url,media_url',
+        access_token: token(),
+      });
+      const res = await fetch(`${GRAPH}/${postId}?${params}`);
+      if (!res.ok) continue;
+      const json = JSON.parse(await res.text());
+
+      const url = typeof json?.thumbnail_url === 'string' && json.thumbnail_url
+        ? json.thumbnail_url
+        : typeof json?.media_url === 'string' ? json.media_url : null;
+
+      // Only https, and only Instagram's own CDN. This string ends up in an
+      // <img src> in the browser, so a URL from anywhere else is not a
+      // thumbnail we failed to get -- it is something we should not render.
+      if (url && /^https:\/\/[\w.-]*cdninstagram\.com\//.test(url)) out[postId] = url;
+    } catch {
+      // A post whose image cannot be fetched simply has none. It is decoration:
+      // failing the whole query over it would trade the answer for the picture.
+    }
+    if (paceMs > 0) await new Promise(r => setTimeout(r, paceMs));
+  }
+
+  return out;
+}
+
 export interface PostIngestResult {
   venue_id: string;
   account_id: string;

@@ -62,6 +62,10 @@ export const queryTools: Tool[] = [
           description: 'Feed posts (default) or Stories. They are NEVER returned together and must never be compared: a Story reaches only existing followers, a post can go further, so mixing them just shows posts winning on audience rather than on content.',
         },
         limit: { type: 'number', description: 'How many to return. Default 10.' },
+        thumbnails: {
+          type: 'boolean',
+          description: 'Fetch a picture for each post returned. Use it when someone wants to SEE the posts rather than read numbers about them — "show me", "what did they look like", any question about the creative. Costs one API call per post and a second of latency, so leave it off for pure number questions. When a post comes back with thumbnail_url, render it in the answer as ![](url) so it is actually visible; the URLs expire within days, which is why they are fetched fresh and must never be quoted back later from memory.',
+        },
       },
       required: ['venue_slug', 'start_date', 'end_date'],
     },

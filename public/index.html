@@ -150,6 +150,28 @@
     border-top-left-radius: 4px;
   }
 
+  /* Post thumbnails. Small enough to sit inline in a sentence or a table cell
+     without turning the conversation into a gallery, and clickable through the
+     permalink the model puts beside them. */
+  .post-thumb {
+    max-width: 160px;
+    max-height: 160px;
+    border-radius: 8px;
+    object-fit: cover;
+    vertical-align: middle;
+    margin: 4px 6px 4px 0;
+    background: rgba(255,255,255,0.04);
+  }
+  /* A URL that has expired. Collapsed rather than left as a broken-image icon,
+     because a broken icon reads as data we lost. */
+  .post-thumb.expired {
+    max-width: 0;
+    max-height: 0;
+    margin: 0;
+    opacity: 0;
+  }
+  .bubble a { color: var(--accent, #e8a33d); text-decoration: underline; }
+
   .bubble p { margin-bottom: 8px; }
   .bubble p:last-child { margin-bottom: 0; }
 
@@ -575,6 +597,38 @@ function renderMarkdown(text) {
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
+  /**
+   * Images and links, restricted to https.
+   *
+   * This renderer writes straight into innerHTML, so a URL is not just text --
+   * it is an attribute in a live document. `javascript:` in an href would run,
+   * and a quote in a URL would break out of the attribute and let anything
+   * follow. So both are allowlisted to https and the quotes are escaped, rather
+   * than trusting that a URL from our own API is safe: post captions pass
+   * through here too, and comment text is planned.
+   *
+   * Instagram's CDN signs its URLs and they expire within days. onerror
+   * therefore replaces a dead thumbnail with a link to the post rather than
+   * leaving a broken-image icon, which reads as data we lost rather than a
+   * link that aged out.
+   */
+  const safeUrl = u => (/^https:\/\//i.test(u) ? u.replace(/["'<>]/g, '') : '');
+
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return '';
+    const altText = String(alt).replace(/["'<>]/g, '');
+    return '<img class="post-thumb" src="' + safe + '" alt="' + altText + '" loading="lazy" ' +
+           'referrerpolicy="no-referrer" ' +
+           'onerror="this.classList.add(\'expired\');this.alt=\'image expired\'">';
+  });
+
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, text, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return text;
+    return '<a href="' + safe + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+  });
+
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -622,7 +676,7 @@ function renderMarkdown(text) {
   html = html.split('\n\n').map(block => {
     block = block.trim();
     if (!block) return '';
-    if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<table')) return block;
+    if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<table') || block.startsWith('<img')) return block;
     return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
   }).join('');
 
