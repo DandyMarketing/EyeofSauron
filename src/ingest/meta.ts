@@ -669,16 +669,36 @@ export async function ingestMetaInsights(
     const span = Math.min(requested, maxTotalValueDays);
     if (span < requested) daysCapped = span;
 
+    // Never ask for a window that starts tomorrow.
+    //
+    // These metrics are read by opening the window the day AFTER the one
+    // wanted, so the newest day we can request is yesterday -- asking for today
+    // opens at tomorrow, and Meta refuses a future range. The loop used to
+    // start at `until`, so every run began by failing all twelve metrics on a
+    // day it could never have.
+    const newestDay = Math.min(endMs, Date.now() - DAY_MS);
+
     // Most recent days first: if a rate limit does bite, the days that matter
     // most are already in.
     for (let i = 0; i < span; i++) {
-      const day = isoDay(endMs - i * DAY_MS);
+      const day = isoDay(newestDay - i * DAY_MS);
       const { values, failed } = await fetchTotalValuesForDay(accountId, totalValueMetrics, day);
       for (const [metric, value] of Object.entries(values)) {
         rows.push({ business_date: day, metric, value });
       }
       Object.assign(failedMetrics, failed);
     }
+  }
+
+  // A metric that failed on one day but returned data on another is not
+  // refused. `failedMetrics` accumulates across days, so a single bad day --
+  // one Meta had no answer for, or one we should never have asked about --
+  // marked all twelve as refused for the whole run even while their rows were
+  // landing. Reported failure has to mean "we got nothing", or the report is
+  // noise and stops being read.
+  const metricsWithData = new Set(rows.map(r => r.metric));
+  for (const metric of Object.keys(failedMetrics)) {
+    if (metricsWithData.has(metric)) delete failedMetrics[metric];
   }
 
   // The audience size, as it stands now.
