@@ -4,6 +4,7 @@ import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
+import { groupPosts, type Dimension } from './post-patterns.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -52,6 +53,8 @@ export async function handleToolCall(
       return querySocialPerformance(input);
     case 'query_top_posts':
       return queryTopPosts(input);
+    case 'query_post_patterns':
+      return queryPostPatterns(input);
     case 'query_profit_and_loss':
       return queryProfitAndLoss(input);
     case 'query_product_mix':
@@ -263,6 +266,58 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
  * window are returned and the periods present are named in the response --
  * the model needs to see which periods it actually got.
  */
+/**
+ * What KIND of post works, rather than which post won.
+ *
+ * The features it groups by are derived from the caption and timestamp, so a
+ * period ingested before those existed has none. That case is reported as
+ * missing data rather than as an empty finding -- "no posts used that hashtag"
+ * and "we have not computed hashtags for that period" lead to opposite
+ * decisions.
+ */
+async function queryPostPatterns(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required' });
+  }
+
+  const dimension = (input.dimension ?? 'media_type') as Dimension;
+  const metric = typeof input.metric === 'string' ? input.metric : 'reach';
+
+  // Stories are excluded and not offered. They reach only existing followers,
+  // so grouping them beside posts would compare content against audience.
+  const { data, error } = await supabase
+    .from('social_posts')
+    .select('business_date, media_type, hashtags, mentions, caption_length, has_question, posted_hour, metrics')
+    .eq('venue_id', venueId)
+    .eq('content_type', 'post')
+    .gte('business_date', input.start_date)
+    .lte('business_date', input.end_date)
+    .limit(2000);
+
+  if (error) return JSON.stringify({ error: error.message });
+
+  if (!data || data.length === 0) {
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      groups: [],
+      note: 'No posts have been ingested for this venue and period. This does NOT mean nothing was posted — say the data is unavailable rather than describing it as a quiet period.',
+    });
+  }
+
+  const result = groupPosts(data as any[], dimension, metric, Math.min(Math.max(Number(input.limit) || 15, 1), 50));
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    posts_in_period: data.length,
+    ...result,
+    how_to_read:
+      'Groups are ranked by MEDIAN, because one post going unusually well drags a mean up and would put a group of three at the top on a single fluke. A large gap between median and mean means that group rests on one post — say so rather than recommending it. This is a correlation between a feature and a number, never a cause: posts are not assigned to categories at random, so a category that does well may simply be the one used for the strongest material.',
+  });
+}
+
 async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
   const venueId = await getVenueId(input.venue_slug);
   if (!input.start_date || !input.end_date) {

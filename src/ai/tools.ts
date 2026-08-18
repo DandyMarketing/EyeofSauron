@@ -66,6 +66,42 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_post_patterns',
+    description:
+      'What KIND of Instagram post performs, rather than which individual post won. Groups a venue\'s posts by a feature — hashtag, media type, weekday, time of day, caption length, whether it asks a question, who it mentions — and reports how each group performed. This is the tool for "what should we post more of", "does posting at 6pm work better", "which hashtags actually help", "do reels beat photos", and any attempt to repeat a success. ' +
+      'SAMPLE SIZE IS THE WHOLE STORY HERE. Each group carries a post count and a "thin" flag. A venue posts roughly thirty times a month, so splitting a single month ten ways leaves three posts a group — and three posts will show a 40% difference from pure noise. Never recommend an action off a thin group; say it is a hint worth watching and ask for a longer period. Widen the date range before drawing a conclusion. ' +
+      'Groups are ranked by MEDIAN, not mean, so one viral post cannot carry a group to the top. Both are returned: a large gap between them means that group rests on a single post, and saying so is more useful than the ranking. ' +
+      'THIS IS CORRELATION AND NEVER CAUSE. Posts are not assigned to categories at random — the venue chooses which content gets a reel and which gets a photo, so a category that performs well may simply be the one used for the strongest material. Say "posts tagged X have done better" and never "tagging X makes posts do better". ' +
+      'A post missing the chosen metric is EXCLUDED, not counted as zero, and the count of exclusions is returned — Meta does not report every metric for every media type. ' +
+      'For hashtags and mentions one post lands in several groups at once, so the counts add to more than the number of posts and no group is a share of the whole. ' +
+      'If posts_excluded_no_feature is large, the derived features have not been computed for that period yet — report that as missing data, NOT as a venue that used no hashtags. ' +
+      'Stories are excluded entirely: they reach only existing followers, so grouping them beside posts compares audience rather than content.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        start_date: { type: 'string', description: 'Start of range (inclusive), YYYY-MM-DD. Prefer a long range — a single month is too few posts to split.' },
+        end_date: { type: 'string', description: 'End of range (inclusive), YYYY-MM-DD.' },
+        dimension: {
+          type: 'string',
+          enum: ['hashtag', 'mention', 'media_type', 'weekday', 'time_of_day', 'caption_length', 'has_question'],
+          description:
+            'What to group by. Default media_type. weekday uses the TRADING date (3am-to-3am, matching sales) so it lines up with the night a post belongs to; time_of_day uses the real Singapore clock hour it was published, which for a 2am post is a different answer — both are correct and they answer different questions.',
+        },
+        metric: {
+          type: 'string',
+          enum: ['reach', 'total_interactions', 'likes', 'comments', 'shares', 'saved', 'views', 'engagement_rate'],
+          description: 'What to measure each group by. Default reach. engagement_rate is interactions divided by REACH, not by followers — it measures how hard the people who saw a post responded, and flatters small responsive audiences.',
+        },
+        limit: { type: 'number', description: 'How many groups to return. Default 15.' },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_profit_and_loss',
     description:
       'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +
