@@ -4,7 +4,7 @@ import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
-import { groupPosts, type Dimension } from './post-patterns.js';
+import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -203,6 +203,7 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
   }
 
   const rankBy = typeof input.rank_by === 'string' ? input.rank_by : 'total_interactions';
+  const ratioCtx = ratioContextFrom(data as any[]);
   const limit = Math.min(Math.max(Number(input.limit) || 10, 1), 50);
 
   const scoreOf = (metrics: any): number | null => {
@@ -219,7 +220,11 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
       const likes = Number(metrics?.likes);
       // No likes means no denominator, the same as reach for engagement rate.
       if (!Number.isFinite(comments) || !Number.isFinite(likes) || likes <= 0) return null;
-      return Number((comments / likes).toFixed(3));
+      // Shrunk toward the account's own rate. The raw ratio put posts with
+      // THREE likes and one comment at the top of the list, above everything
+      // that actually happened.
+      const shrunk = (comments + ratioCtx.k * ratioCtx.baseline) / (likes + ratioCtx.k);
+      return Number(shrunk.toFixed(3));
     }
     const value = metrics?.[rankBy];
     return typeof value === 'number' ? value : null;
