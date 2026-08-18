@@ -1,3 +1,5 @@
+import { featuresOf, postedHourOf } from './features.js';
+
 /**
  * Turning Meta's media responses into rows, without the network.
  *
@@ -18,6 +20,12 @@ export interface PostRow {
   permalink: string | null;
   caption: string | null;
   metrics: Record<string, number>;
+  /** Derived from the caption and timestamp. See parsers/meta/features.ts. */
+  hashtags: string[];
+  mentions: string[];
+  caption_length: number;
+  has_question: boolean;
+  posted_hour: number | null;
 }
 
 /**
@@ -71,16 +79,24 @@ export function toPostRow(media: any, metrics: Record<string, number> = {}): Pos
     return null;
   }
 
+  // Captions are long and people paste whole menus into them. Enough to
+  // recognise which post is meant, not enough to bloat every query.
+  const caption = typeof media.caption === 'string' ? media.caption.slice(0, 2000) : null;
+
   return {
     post_id: String(media.id),
     published_at: new Date(media.timestamp).toISOString(),
     business_date,
     media_type: typeof media.media_type === 'string' ? media.media_type : null,
     permalink: typeof media.permalink === 'string' ? media.permalink : null,
-    // Captions are long and people paste whole menus into them. Enough to
-    // recognise which post is meant, not enough to bloat every query.
-    caption: typeof media.caption === 'string' ? media.caption.slice(0, 2000) : null,
+    caption,
     metrics,
+    // Derived from the TRUNCATED caption, on purpose: it is the caption we
+    // store, so a tag counted here can always be found in the text beside it.
+    // Deriving from the full caption would produce hashtags that appear in no
+    // caption anyone can read, which is unfalsifiable data.
+    ...featuresOf(caption),
+    posted_hour: postedHourOf(media.timestamp),
   };
 }
 
