@@ -1089,11 +1089,22 @@ export async function ingestMetaInsights(
    * what got the app blocked -- there, pacing is the whole point.
    */
   paceMs = 0,
+  /**
+   * Narrow what gets fetched. Both default on.
+   *
+   * Repairing ONE metric otherwise costs the same as a full backfill: a window
+   * re-fetch pulls every aggregate metric for every day in it, so recovering 22
+   * days of `reach` would have been ~2,300 calls and two hours, to store 22
+   * numbers. With `totalValue: false` it is two calls per window.
+   */
+  opts: { totalValue?: boolean; accountFields?: boolean } = {},
 ): Promise<MetaIngestResult> {
+  const wantTotalValue = opts.totalValue !== false;
+  const wantAccountFields = opts.accountFields !== false;
   if (
     metrics.length === 0 &&
-    (TOTAL_VALUE_METRICS[platform] ?? []).length === 0 &&
-    (ACCOUNT_FIELDS[platform] ?? []).length === 0
+    (!wantTotalValue || (TOTAL_VALUE_METRICS[platform] ?? []).length === 0) &&
+    (!wantAccountFields || (ACCOUNT_FIELDS[platform] ?? []).length === 0)
   ) {
     // Facebook Pages, today. Saying "nothing configured" is honest; running
     // Instagram metric names against a Page and reporting Graph's rejection
@@ -1152,7 +1163,7 @@ export async function ingestMetaInsights(
   // per account, and a rate limit hit halfway through would leave a partial day
   // stored with no sign of it. The cap is REPORTED, never silent -- a truncated
   // range that says nothing reads as a complete one.
-  const totalValueMetrics = TOTAL_VALUE_METRICS[platform] ?? [];
+  const totalValueMetrics = wantTotalValue ? (TOTAL_VALUE_METRICS[platform] ?? []) : [];
   let daysCapped: number | undefined;
 
   if (totalValueMetrics.length > 0) {
@@ -1206,7 +1217,7 @@ export async function ingestMetaInsights(
   // an older date would invent a past reading -- a follower curve made of the
   // same number repeated, which looks like a flat audience rather than missing
   // data. One row per run; a second run the same day simply overwrites it.
-  const accountFields = ACCOUNT_FIELDS[platform] ?? [];
+  const accountFields = wantAccountFields ? (ACCOUNT_FIELDS[platform] ?? []) : [];
   if (accountFields.length > 0) {
     try {
       const snapshot = await fetchAccountFields(accountId, accountFields);
