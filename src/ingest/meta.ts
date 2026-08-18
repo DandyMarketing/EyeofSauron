@@ -123,6 +123,59 @@ export async function fetchAccountFields(
   return out;
 }
 
+/**
+ * All the aggregate-only metrics for one day, in a single call.
+ *
+ * Twelve metrics asked for one at a time is twelve requests per day per
+ * account -- 153 for a three-day run across three venues. That volume, from a
+ * brand-new token on a container Meta had never seen, tripped its automated
+ * security on the first night and blocked the app outright. Asking for them
+ * together makes the same run about twenty calls.
+ *
+ * The one-at-a-time path still exists, as a FALLBACK. Graph rejects an entire
+ * request when a single metric name is invalid, and Meta retires names on its
+ * own schedule -- so when the combined call fails, each metric is retried alone
+ * and the survivors are kept. Resilience when it is needed, rather than paid
+ * for on every call of every night.
+ */
+export async function fetchTotalValuesForDay(
+  accountId: string,
+  metrics: string[],
+  businessDate: string,
+): Promise<{ values: Record<string, number>; failed: Record<string, string> }> {
+  const values: Record<string, number> = {};
+  const failed: Record<string, string> = {};
+  if (metrics.length === 0) return { values, failed };
+
+  const base = new Date(`${businessDate}T00:00:00Z`).getTime();
+  const since = isoDay(base + TOTAL_VALUE_SINCE_OFFSET_DAYS * DAY_MS);
+  const until = isoDay(base + (TOTAL_VALUE_SINCE_OFFSET_DAYS + 1) * DAY_MS);
+
+  try {
+    const raw = await fetchInsights(accountId, metrics, since, until, 'total_value');
+    for (const entry of raw?.data ?? []) {
+      const value = entry?.total_value?.value;
+      // Keyed by the name Meta echoes back, not by our request order. A
+      // response that omits or reorders a metric would otherwise be read
+      // against the wrong one.
+      if (typeof value === 'number' && typeof entry?.name === 'string') {
+        values[entry.name] = value;
+      }
+    }
+    return { values, failed };
+  } catch {
+    for (const metric of metrics) {
+      try {
+        const value = await fetchTotalValueForDay(accountId, metric, businessDate);
+        if (value !== null) values[metric] = value;
+      } catch (e: any) {
+        failed[metric] = String(e?.message ?? e).slice(0, 300);
+      }
+    }
+    return { values, failed };
+  }
+}
+
 /** One day's figure for a metric Meta only aggregates. Null if it gave none. */
 export async function fetchTotalValueForDay(
   accountId: string,
@@ -620,14 +673,11 @@ export async function ingestMetaInsights(
     // most are already in.
     for (let i = 0; i < span; i++) {
       const day = isoDay(endMs - i * DAY_MS);
-      for (const metric of totalValueMetrics) {
-        try {
-          const value = await fetchTotalValueForDay(accountId, metric, day);
-          if (value !== null) rows.push({ business_date: day, metric, value });
-        } catch (e: any) {
-          failedMetrics[metric] = String(e?.message ?? e).slice(0, 300);
-        }
+      const { values, failed } = await fetchTotalValuesForDay(accountId, totalValueMetrics, day);
+      for (const [metric, value] of Object.entries(values)) {
+        rows.push({ business_date: day, metric, value });
       }
+      Object.assign(failedMetrics, failed);
     }
   }
 
