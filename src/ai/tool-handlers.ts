@@ -215,6 +215,11 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
       if (!Number.isFinite(reach) || reach <= 0 || !Number.isFinite(interactions)) return null;
       return Number(((interactions / reach) * 100).toFixed(2));
     }
+    if (rankBy === 'reach_multiple') {
+      const reach = Number(metrics?.reach);
+      if (!Number.isFinite(reach) || ratioCtx.medianReach <= 0) return null;
+      return Number((reach / ratioCtx.medianReach).toFixed(2));
+    }
     if (rankBy === 'contention') {
       const comments = Number(metrics?.comments);
       const likes = Number(metrics?.likes);

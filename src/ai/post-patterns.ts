@@ -146,6 +146,8 @@ const OVERLAPPING: Dimension[] = ['hashtag', 'mention'];
 export interface RatioContext {
   baseline: number;
   k: number;
+  /** The venue's median post reach, for judging a breakout against its own normal. */
+  medianReach: number;
 }
 
 function shrinkRatio(numerator: number, denominator: number, ctx: RatioContext): number {
@@ -168,17 +170,30 @@ export function ratioContextFrom(posts: PostLike[]): RatioContext {
     }
   }
 
-  if (likeCounts.length === 0) return { baseline: 0, k: 1 };
+  const reaches = posts
+    .map(p => p.metrics?.reach)
+    .filter((r): r is number => typeof r === 'number' && r > 0);
 
-  const sorted = likeCounts.sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const medianLikes = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  const med = (xs: number[]): number => {
+    if (xs.length === 0) return 0;
+    const sorted = [...xs].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  };
+
+  // Median, never mean. One post at 141,241 against a normal of 800 would drag
+  // a mean to several thousand and make every ordinary post look like a
+  // failure -- which is the same distortion that made ranking by mean wrong.
+  const medianReach = med(reaches);
+
+  if (likeCounts.length === 0) return { baseline: 0, k: 1, medianReach };
 
   return {
     baseline: likes > 0 ? comments / likes : 0,
     // At least 1, or a set of near-zero-like posts would divide by nothing and
     // reintroduce the exact instability this exists to remove.
-    k: Math.max(medianLikes, 1),
+    k: Math.max(med(likeCounts), 1),
+    medianReach,
   };
 }
 
@@ -213,6 +228,25 @@ function valueOf(post: PostLike, metric: string, ctx: RatioContext): number | nu
    * It is a proxy and not a sentiment reading: a genuinely great post can also
    * draw discussion. High contention means "go and look", never "this was bad".
    */
+  /**
+   * How far a post travelled beyond this venue's normal, as a multiple.
+   *
+   * THE MEASURE THAT ACTUALLY FINDS A BREAKOUT. Neon Pigeon's foie gras duck
+   * gyoza reel reached 141,241 against a median of about 800 -- roughly 150
+   * times normal. It was found by looking for it, not by any measure we had:
+   * `contention` ranked it near the BOTTOM, because 65 comments against 5,330
+   * likes is far below the account's own rate. A post can escape the follower
+   * base entirely and be perfectly uncontroversial while doing it.
+   *
+   * Against the venue's own median rather than an absolute threshold, because
+   * 2,000 reach is a triumph for one account and a bad night for another.
+   */
+  if (metric === 'reach_multiple') {
+    const reach = m.reach;
+    if (typeof reach !== 'number' || ctx.medianReach <= 0) return null;
+    return reach / ctx.medianReach;
+  }
+
   if (metric === 'contention') {
     const comments = m.comments;
     const likes = m.likes;
@@ -327,6 +361,12 @@ export function groupPosts(
   if (OVERLAPPING.includes(dimension)) {
     caveats.push(
       'One post can appear in several groups here, so group sizes add up to more than the post count and no group is a share of the whole.',
+    );
+  }
+
+  if (metric === 'reach_multiple') {
+    caveats.push(
+      'reach_multiple is a post\'s reach divided by this venue\'s MEDIAN post reach, so 1.0 is a normal post and 150 means it escaped the follower base entirely. Distribution on Instagram is extremely skewed: a handful of posts do the overwhelming majority of the reach, so never average this and never quote a mean. A breakout is also mostly a fact about the algorithm rather than about the venue — say what the post was, not that the venue can repeat it on demand.',
     );
   }
 

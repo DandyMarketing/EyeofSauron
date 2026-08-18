@@ -238,3 +238,48 @@ describe('contention — telling an argument apart from a hit', () => {
     assert.equal(result.posts_considered, 0);
   });
 });
+
+/**
+ * The measure that works, added after the one that did not.
+ *
+ * Neon Pigeon's foie gras duck gyoza reel reached 141,241 against a median of
+ * about 800. `contention` ranked it near the BOTTOM -- 65 comments on 5,330
+ * likes is well below the account's own rate -- so the post it was built to
+ * find was the post it was worst at finding. A post can escape the follower
+ * base completely while being entirely uncontroversial.
+ */
+describe('reach_multiple — finding a post that escaped the follower base', () => {
+  const ordinary = () => post({ media_type: 'IMAGE', metrics: { reach: 800, likes: 20, comments: 1 } });
+
+  test('a normal post scores about 1', () => {
+    const result = groupPosts(Array.from({ length: 9 }, ordinary), 'media_type', 'reach_multiple');
+    assert.equal(result.groups[0].median, 1);
+  });
+
+  test('the gyoza reel is found, at roughly 150x', () => {
+    const viral = post({ media_type: 'REELS', metrics: { reach: 141_241, likes: 5330, comments: 65 } });
+    const result = groupPosts([...Array.from({ length: 20 }, ordinary), viral], 'media_type', 'reach_multiple');
+
+    const reels = result.groups.find(g => g.group === 'REELS')!;
+    assert.ok(reels.median > 100, `expected a large multiple, got ${reels.median}`);
+    assert.equal(result.groups[0].group, 'REELS');
+  });
+
+  test('contention would have MISSED that post — the reason this measure exists', () => {
+    const viral = post({ media_type: 'REELS', metrics: { reach: 141_241, likes: 5330, comments: 65 } });
+    const chatty = post({ media_type: 'IMAGE', metrics: { reach: 1500, likes: 44, comments: 18 } });
+    const result = groupPosts([...Array.from({ length: 20 }, ordinary), viral, chatty], 'media_type', 'contention');
+
+    // The chatty post outranks the viral one on contention. That is correct
+    // behaviour for contention and exactly why it must not be used to find
+    // breakouts.
+    assert.equal(result.groups[0].group, 'IMAGE');
+  });
+
+  test('warns that reach is skewed and a breakout is not a repeatable choice', () => {
+    const result = groupPosts([ordinary()], 'media_type', 'reach_multiple');
+    const caveat = result.caveats.find(c => c.includes('skewed'));
+    assert.ok(caveat, 'no caveat about skew');
+    assert.ok(caveat!.includes('never quote a mean') || caveat!.includes('never average'));
+  });
+});
