@@ -39,7 +39,8 @@ export const queryTools: Tool[] = [
       'RANKING BASIS MATTERS AND MUST BE STATED. reach is unique accounts that saw it; total_interactions is likes + comments + shares + saves; engagement_rate is interactions divided by reach, which favours posts with a small but responsive audience and can rank a post with 40 reach above one with 4,000. A post is not "best" in the abstract — say which measure you ranked by and why it suits the question. ' +
       'A metric ABSENT from a post means Meta does not report it for that media type (an image has no views), NOT that it scored zero. Never treat a missing metric as a zero, and never average across posts where some are missing it. ' +
       'Posts are dated by TRADING day on the same 3am-to-3am basis as sales, so a 2am post belongs to the night before — that is deliberate, so posts line up with the service they came out of. ' +
-      'Engagement keeps accruing for days after publishing, so a post from yesterday is still growing and will under-rank against older ones. Say so when the range includes the last few days.',
+      'Engagement keeps accruing for days after publishing, so a post from yesterday is still growing and will under-rank against older ones. Say so when the range includes the last few days. ' +
+      'Set content:"stories" for Stories. Stories are captured while they are live and vanish after ~24 hours, so a gap in them means nobody was looking at that moment, NOT that none were posted — and unlike everything else, a gap can never be filled. Their metrics differ from posts (replies, navigation) and a Story reaches only existing followers, so never rank or average them against posts.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -54,7 +55,12 @@ export const queryTools: Tool[] = [
           enum: ['reach', 'total_interactions', 'likes', 'comments', 'shares', 'saved', 'views', 'engagement_rate'],
           description: 'What to rank on. Default total_interactions. Posts missing the chosen metric are listed separately rather than ranked as zero.',
         },
-        limit: { type: 'number', description: 'How many posts to return. Default 10.' },
+        content: {
+          type: 'string',
+          enum: ['posts', 'stories'],
+          description: 'Feed posts (default) or Stories. They are NEVER returned together and must never be compared: a Story reaches only existing followers, a post can go further, so mixing them just shows posts winning on audience rather than on content.',
+        },
+        limit: { type: 'number', description: 'How many to return. Default 10.' },
       },
       required: ['venue_slug', 'start_date', 'end_date'],
     },

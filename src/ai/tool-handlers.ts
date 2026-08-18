@@ -173,10 +173,16 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
     return JSON.stringify({ error: 'start_date and end_date are required' });
   }
 
+  // Posts and stories are never ranked together. A story reaches only people
+  // who already follow you; a post can go further. Mixed, posts win every time
+  // and it says nothing about the content.
+  const contentType = input.content === 'stories' ? 'story' : 'post';
+
   const { data, error } = await supabase
     .from('social_posts')
     .select('post_id, published_at, business_date, media_type, permalink, caption, metrics, fetched_at')
     .eq('venue_id', venueId)
+    .eq('content_type', contentType)
     .gte('business_date', input.start_date)
     .lte('business_date', input.end_date)
     .order('published_at', { ascending: false })
@@ -234,6 +240,7 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
   return JSON.stringify({
     venue: input.venue_slug,
     requested: `${input.start_date} to ${input.end_date}`,
+    content_type: contentType,
     ranked_by: rankBy,
     posts_in_period: data.length,
     caution: 'Ranking depends entirely on the measure. Say which one was used. Engagement rate favours small responsive audiences; reach favours breadth. Neither is "best" on its own.',
