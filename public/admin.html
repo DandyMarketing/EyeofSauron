@@ -868,7 +868,13 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       const failed = r.failed_metrics ? Object.keys(r.failed_metrics) : [];
       return '<tr>' +
         '<td>' + escapeHtml(r.account_name || r.account_id || '') + '</td>' +
-        '<td>' + (r.stored ? '<span style="color:var(--success)">' + r.rows + ' rows</span>' : '<span style="color:var(--error)">not stored</span>') + '</td>' +
+        // A deliberate skip is not a failure. Colouring it red teaches people
+        // to ignore red, and then the real one goes unread too.
+        '<td>' + (r.stored
+          ? '<span style="color:var(--success)">' + r.rows + ' rows</span>'
+          : r.skipped
+            ? '<span style="color:var(--text-muted)">skipped</span>'
+            : '<span style="color:var(--error)">not stored</span>') + '</td>' +
         '<td style="font-size:12px;color:var(--text-muted);white-space:normal;max-width:420px">' +
           escapeHtml(r.error || '') +
           (failed.length ? '<br>Metrics refused: ' + escapeHtml(failed.join(', ')) : '') +
@@ -953,6 +959,10 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
             // you to completely different screens.
             (bad[0].error ? '<div style="margin-top:4px;white-space:normal">Reason given: ' + escapeHtml(bad[0].error) + '</div>' : '') +
             '</div>'
+          : '') +
+        (r.hint
+          ? '<div style="margin-top:8px;font-size:12px;color:var(--text-muted);white-space:normal">' +
+            '<strong>Meta&rsquo;s own list of what it accepts:</strong><br>' + escapeHtml(r.hint) + '</div>'
           : '') +
         (r.error ? '<div style="font-size:12px;color:var(--error)">' + escapeHtml(r.error) + '</div>' : '') +
         '</div>';

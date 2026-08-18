@@ -237,6 +237,13 @@ export interface MetaIngestResult {
    * shortened range that says nothing about it reads as a complete one.
    */
   total_value_days_capped?: number;
+  /**
+   * True when we chose not to pull, rather than tried and failed. Facebook
+   * today: we have no working metric names, so asking would be our error
+   * reported as Meta's. A deliberate skip must not read as a failure, or the
+   * screen trains people to ignore red.
+   */
+  skipped?: boolean;
   error?: string;
 }
 
@@ -442,6 +449,27 @@ export function redactTokens<T>(value: T): T {
   );
 }
 
+/**
+ * Ask Meta what it WILL accept, by asking for something it will not.
+ *
+ * Its rejection for an unknown Instagram metric enumerates every valid name --
+ * "metric[0] must be one of the following values: reach, follower_count, ...".
+ * That list is more current than any documentation and it costs one call. It is
+ * how follower_count was found, and Facebook Page names are exactly the problem
+ * it should solve: every page_* name we guessed was refused, and guessing more
+ * of them is not a plan.
+ */
+export async function askMetaForValidMetrics(accountId: string): Promise<string | null> {
+  const until = new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.now() - 2 * DAY_MS).toISOString().slice(0, 10);
+  try {
+    await fetchInsights(accountId, ['__deliberately_not_a_metric__'], since, until);
+    return null;   // It accepted a nonsense name. That is its own surprise.
+  } catch (e: any) {
+    return String(e?.message ?? e).slice(0, 1500);
+  }
+}
+
 export interface MetricProbe {
   metric: string;
   /** 'day' = plain daily series, 'total_value' = the newer aggregate form. */
@@ -607,7 +635,7 @@ export async function ingestMetaInsights(
     // would blame Meta for our own mistake.
     return {
       venue_id: '', platform, account_id: accountId, from_date: since, to_date: until,
-      rows: 0, missing_days: [], stored: false,
+      rows: 0, missing_days: [], stored: false, skipped: true,
       error: `No metrics are configured for ${platform}. Run the metric probe to find names this platform accepts.`,
     };
   }
