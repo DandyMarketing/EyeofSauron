@@ -178,3 +178,48 @@ describe('engagement_rate', () => {
     assert.equal(result.posts_excluded_missing_metric, 1);
   });
 });
+
+/**
+ * Khai's observation, from two real posts: a Neon Pigeon duck gyoza people said
+ * looked like siew mai, and a Firangi chutney people said was made wrong. Both
+ * travelled a long way. On reach alone they look like triumphs, and the
+ * recommendation that follows is "do more of this" -- which is advice to pick
+ * fights with your own customers, delivered with a straight face and real
+ * numbers behind it.
+ */
+describe('contention — telling an argument apart from a hit', () => {
+  test('is comments divided by likes', () => {
+    const result = groupPosts([
+      post({ media_type: 'IMAGE', metrics: { likes: 200, comments: 40 } }),
+    ], 'media_type', 'contention');
+    assert.equal(result.groups[0].median, 0.2);
+  });
+
+  test('a contested post outranks a more-liked one', () => {
+    // The gyoza post: fewer likes, far more argument.
+    const result = groupPosts([
+      post({ media_type: 'CAROUSEL_ALBUM', metrics: { likes: 800, comments: 12 } }),
+      post({ media_type: 'IMAGE', metrics: { likes: 300, comments: 90 } }),
+    ], 'media_type', 'contention');
+
+    assert.equal(result.groups[0].group, 'IMAGE');
+    assert.ok(result.groups[0].median > result.groups[1].median);
+  });
+
+  test('says outright that this is argument, not quality', () => {
+    const result = groupPosts([
+      post({ metrics: { likes: 100, comments: 50 } }),
+    ], 'media_type', 'contention');
+
+    const caveat = result.caveats.find(c => c.includes('ARGUED about'));
+    assert.ok(caveat, 'no caveat explaining what contention measures');
+    assert.ok(caveat!.includes('pick fights'));
+  });
+
+  test('a post with no likes is excluded rather than dividing by zero', () => {
+    const result = groupPosts([
+      post({ metrics: { likes: 0, comments: 5 } }),
+    ], 'media_type', 'contention');
+    assert.equal(result.posts_considered, 0);
+  });
+});

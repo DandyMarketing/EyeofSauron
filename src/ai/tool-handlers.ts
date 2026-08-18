@@ -214,6 +214,13 @@ async function queryTopPosts(input: Record<string, any>): Promise<string> {
       if (!Number.isFinite(reach) || reach <= 0 || !Number.isFinite(interactions)) return null;
       return Number(((interactions / reach) * 100).toFixed(2));
     }
+    if (rankBy === 'contention') {
+      const comments = Number(metrics?.comments);
+      const likes = Number(metrics?.likes);
+      // No likes means no denominator, the same as reach for engagement rate.
+      if (!Number.isFinite(comments) || !Number.isFinite(likes) || likes <= 0) return null;
+      return Number((comments / likes).toFixed(3));
+    }
     const value = metrics?.[rankBy];
     return typeof value === 'number' ? value : null;
   };
