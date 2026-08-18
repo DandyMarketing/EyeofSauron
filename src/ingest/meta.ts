@@ -669,14 +669,18 @@ export async function ingestMetaInsights(
     const span = Math.min(requested, maxTotalValueDays);
     if (span < requested) daysCapped = span;
 
-    // Never ask for a window that starts tomorrow.
+    // The newest business date these metrics can answer for is TWO days ago.
     //
-    // These metrics are read by opening the window the day AFTER the one
-    // wanted, so the newest day we can request is yesterday -- asking for today
-    // opens at tomorrow, and Meta refuses a future range. The loop used to
-    // start at `until`, so every run began by failing all twelve metrics on a
-    // day it could never have.
-    const newestDay = Math.min(endMs, Date.now() - DAY_MS);
+    // Two facts compound. The window opens the day AFTER the date wanted, and
+    // Meta will not accept a window opening later than yesterday -- it answers
+    // "(#100) since param is not valid". So the latest window we may open is
+    // yesterday, and that window reads the day before it.
+    //
+    // The calibration run said this plainly and I read it twice without seeing
+    // it: on 17 August the newest window that worked opened on the 16th. Both
+    // earlier attempts here were off by a day in the same direction, each time
+    // failing every metric on a day Meta was never going to serve.
+    const newestDay = Math.min(endMs, Date.now() - (TOTAL_VALUE_SINCE_OFFSET_DAYS + 1) * DAY_MS);
 
     // Most recent days first: if a rate limit does bite, the days that matter
     // most are already in.
