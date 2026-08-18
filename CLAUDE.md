@@ -77,6 +77,57 @@ Location ids are already known, from Metricool's brand settings:
 | Neon Pigeon | `accounts/102505042675622804445/locations/17617416516498414612` |
 | Fat Prince | `accounts/102505042675622804445/locations/14934836359944958535` |
 
+### Meta's follower data has two hard limits, and neither is obvious
+
+Measured 18 Aug 2026 by listing row counts per metric after a full two-year
+backfill. Both were invisible until then, because a metric that returns nothing
+looks exactly like a metric nobody asked for.
+
+- **`followers_count`** (plural, the audience TOTAL) — **no history at all.**
+  The series starts the day we began capturing it. Every night the job does not
+  run is a permanent hole.
+- **`follower_count`** (singular, new followers that day) — **last 30 days
+  only.** Not two years. A question about follower movement further back has no
+  data, however much other history the venue has.
+
+Together these kill an idea that keeps suggesting itself: reconstructing the
+historical follower total by subtracting cumulative daily gains from today's
+figure. There are no daily gains to subtract beyond a month.
+
+**The consequence for analysis.** Post performance cannot be normalised by
+follower count for anything historical, so `query_post_patterns` uses
+interactions ÷ **reach**. That measures how hard the people who saw a post
+responded, not how many it deserved to reach — and old posts still flatter or
+flatter less depending on the account's size at the time, which we cannot know
+before mid-July 2026. Say so when comparing across long periods.
+
+**Unresolved:** whether `follower_count` is net or gross. Across 30 days at Neon
+Pigeon it ran min 0, max 10, avg 3 and never once went negative — unlikely for a
+genuinely net figure on an 11,000-follower account, so it probably excludes
+unfollows. `follows_and_unfollows`, the metric that would answer it directly,
+returned **zero rows for two full years** and now sits in `CANDIDATE_METRICS`
+rather than being requested. A reminder to re-test is scheduled for 26 Aug 2026,
+once enough `followers_count` history exists to compare against.
+
+Until it is resolved, never report the sum of `follower_count` as growth — it is
+"new follows", and unfollows may not be deducted.
+
+### Metrics do not all land together — one marker cannot prove a window complete
+
+Fat Prince, same investigation: `views` had all 729 days while `reach` had 678 —
+missing 29 at the start and 22 scattered inside. Everything else had 729.
+
+The backfill judged a window done by checking one representative metric, which
+was `views`. So every window looked complete, every window was skipped, and
+re-running could never repair `reach`. The gap was permanent and silent, and the
+run reported success.
+
+`backfill-meta.ts` now takes `--marker=<metric>`, so a specific metric's gaps
+can be refilled. Be aware that repairing one metric re-fetches every metric for
+the affected windows — correctness over economy, but it is not free. Never set
+the marker to `follower_count` or `followers_count`; with no usable history,
+every window would look incomplete forever.
+
 ### What each social source is actually for
 
 Settled 18 Aug 2026, after checking what each one can really provide:

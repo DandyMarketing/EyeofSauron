@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { featuresOf, postedHourOf } from '../parsers/meta/features.js';
+import { requireSchema } from '../lib/schema-check.js';
 
 /**
  * Fill in derived post features for rows that predate them.
@@ -28,6 +29,8 @@ console.log(all
   ? 'Recomputing features for EVERY post.'
   : 'Recomputing features for posts that have none yet.');
 if (dryRun) console.log('=== DRY RUN — no writes ===');
+
+await requireSchema();
 
 let scanned = 0;
 let updated = 0;

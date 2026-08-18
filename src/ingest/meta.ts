@@ -68,8 +68,29 @@ export const TOTAL_VALUE_METRICS: Record<string, string[]> = {
   instagram: [
     'views', 'profile_views', 'website_clicks', 'accounts_engaged',
     'total_interactions', 'likes', 'comments', 'shares', 'saves', 'replies',
-    'follows_and_unfollows', 'profile_links_taps',
+    'profile_links_taps',
   ],
+  facebook: [],
+};
+
+/**
+ * Metrics we want and cannot currently get. Not dead code -- a to-do with a
+ * reason attached, so nobody re-adds one hopefully and re-learns why.
+ *
+ * `follows_and_unfollows` is the painful one. It ran in every backfill and
+ * returned NOTHING, ever: two years of windows, zero rows, and no complaint
+ * loud enough for anyone to notice until the row counts were listed per metric
+ * on 18 Aug 2026. It is the metric that would answer whether `follower_count`
+ * counts unfollows, so its absence is why that question is still open. It
+ * likely needs a `breakdown` parameter we do not send.
+ *
+ * `profile_views` and `website_clicks` were refused as a daily SERIES, which is
+ * why they sit in the aggregate list above instead -- they work there.
+ *
+ * Run `probeMetrics` against a live account before moving anything out of here.
+ */
+export const CANDIDATE_METRICS: Record<string, string[]> = {
+  instagram: ['follows_and_unfollows', 'online_followers'],
   facebook: [],
 };
 

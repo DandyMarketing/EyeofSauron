@@ -4,6 +4,7 @@ import {
   ingestMetaInsights, ingestMetaPosts, ingestMetaStories, isMetaAuthError,
   PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS,
 } from '../ingest/meta.js';
+import { requireSchema } from '../lib/schema-check.js';
 
 /**
  * Nightly social ingestion.
@@ -32,6 +33,10 @@ const until = new Date().toISOString().slice(0, 10);
 const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 
 console.log(`Meta social ingestion — ${since} to ${until}\n`);
+
+// A nightly job that cannot write is a night of stories lost, and stories
+// cannot be re-fetched. Better to fail before making the calls than after.
+await requireSchema();
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')
