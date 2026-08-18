@@ -133,4 +133,27 @@ if (executionErrors.length > 0) {
 const allFailed = executionErrors.length > 0 && executionErrors.length === accounts.length;
 if (allFailed) console.error('\nEvery account failed — this is a token or permission problem, not bad luck.');
 
-process.exit(executionErrors.length > 0 ? 1 : 0);
+/**
+ * Storing nothing at all is a failure, however politely it was reported.
+ *
+ * On 18 Aug 2026 every call came back "API access blocked" — the token had
+ * stopped working. `ingestMetaInsights` caught each one and returned
+ * `stored: false` with the reason, so they were all counted as data findings
+ * and this exited 0. A dead token reported as a successful run.
+ *
+ * That is the exact failure this file's comments claim to guard against, and
+ * the guard only covered errors that were THROWN. What matters is the outcome,
+ * not which path the news arrived by: if any account was configured to pull and
+ * not one row landed, the job failed.
+ */
+const attempted = (accounts as any[]).some(a =>
+  (PLATFORM_METRICS[a.platform] ?? []).length +
+  (TOTAL_VALUE_METRICS[a.platform] ?? []).length +
+  (ACCOUNT_FIELDS[a.platform] ?? []).length > 0);
+
+const storedNothing = !dryRun && attempted && totalRows === 0;
+if (storedNothing) {
+  console.error('\nNothing was stored by any account. Treating this as a failed run, not a quiet day.');
+}
+
+process.exit(executionErrors.length > 0 || storedNothing ? 1 : 0);
