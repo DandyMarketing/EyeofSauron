@@ -960,6 +960,100 @@ export async function ingestMetaPosts(
   };
 }
 
+/**
+ * Refresh the LISTING fields on posts we already hold, without re-fetching
+ * insights.
+ *
+ * Needed because the backfill deliberately skips a post once it has metrics --
+ * that skip is what makes a restart free, and it also means a column added
+ * later is never filled for anything already stored. Migration 021 added
+ * media_product_type and collaborator_count, and without this every one of the
+ * 1,001 existing posts would carry null in both for ever, while looking
+ * perfectly healthy.
+ *
+ * Cheap in a way the rest of this file is not: one listing call per hundred
+ * posts and no per-post calls at all. Two years across three venues is about a
+ * dozen requests.
+ *
+ * Writes an UPDATE per post rather than an upsert, and touches only the columns
+ * the listing can speak to. An upsert here would carry `metrics: {}` along with
+ * it and wipe the insights on every post it touched -- destroying the expensive
+ * data to fill in the cheap.
+ *
+ * Captions are refreshed too, and their derived features with them: Instagram
+ * lets a caption be edited after posting, so the hashtags we hold can genuinely
+ * go stale.
+ */
+export async function refreshMetaPostFields(
+  platform: string,
+  accountId: string,
+  opts: { sinceIso: string; paceMs?: number; onPage?: (info: { page: number; updated: number }) => void },
+): Promise<{ pages: number; seen: number; updated: number; blocked: boolean }> {
+  await venueIdFor(platform, accountId);
+  const paceMs = Math.max(opts.paceMs ?? 1000, 0);
+
+  const params = new URLSearchParams({ fields: MEDIA_FIELDS, limit: '100', access_token: token() });
+  let url: string | null = `${GRAPH}/${accountId}/media?${params}`;
+  let pages = 0;
+  let seen = 0;
+  let updated = 0;
+  let blocked = false;
+
+  while (url && !blocked) {
+    let page: { items: any[]; next: string | null };
+    try {
+      page = await fetchMediaPage(url);
+    } catch (e: any) {
+      const message = String(e?.message ?? e);
+      if (isMetaBlockedError(message) || isMetaAuthError(message)) {
+        blocked = true;
+        break;
+      }
+      throw e;
+    }
+
+    pages++;
+    seen += page.items.length;
+
+    for (const item of page.items) {
+      const row = toPostRow(item, {});
+      if (!row) continue;
+
+      const t = item?.timestamp ? new Date(item.timestamp).toISOString() : null;
+      if (t !== null && t < opts.sinceIso) continue;
+
+      const { error } = await supabase
+        .from('social_posts')
+        .update({
+          media_type: row.media_type,
+          media_product_type: row.media_product_type,
+          collaborator_count: row.collaborator_count,
+          children_count: row.children_count,
+          permalink: row.permalink,
+          caption: row.caption,
+          hashtags: row.hashtags,
+          mentions: row.mentions,
+          caption_length: row.caption_length,
+          has_question: row.has_question,
+          posted_hour: row.posted_hour,
+        })
+        .eq('platform', platform)
+        .eq('post_id', row.post_id);
+
+      if (error) throw new Error(`social_posts field refresh failed: ${error.message}`);
+      updated++;
+    }
+
+    opts.onPage?.({ page: pages, updated });
+
+    if (pageReachesBack(page.items, opts.sinceIso)) break;
+    url = page.next;
+    if (paceMs > 0) await new Promise(r => setTimeout(r, paceMs));
+  }
+
+  return { pages, seen, updated, blocked };
+}
+
 export interface PostBackfillResult extends PostIngestResult {
   pages: number;
   oldest_seen: string | null;
