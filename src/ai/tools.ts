@@ -54,7 +54,7 @@ export const queryTools: Tool[] = [
         rank_by: {
           type: 'string',
           enum: ['reach', 'total_interactions', 'likes', 'comments', 'shares', 'saved', 'views', 'engagement_rate', 'contention'],
-          description: 'What to rank on. Default total_interactions. contention is comments divided by likes and surfaces posts people ARGUED about. Posts missing the chosen metric are listed separately rather than ranked as zero.',
+          description: 'What to rank on. Default total_interactions. contention is comments per like, shrunk toward the account average, and surfaces posts people DISCUSSED — which includes giveaways and caption questions, not only disagreement. Posts missing the chosen metric are listed separately rather than ranked as zero.',
         },
         content: {
           type: 'string',
@@ -76,7 +76,7 @@ export const queryTools: Tool[] = [
       'A post missing the chosen metric is EXCLUDED, not counted as zero, and the count of exclusions is returned — Meta does not report every metric for every media type. ' +
       'For hashtags and mentions one post lands in several groups at once, so the counts add to more than the number of posts and no group is a share of the whole. ' +
       'If posts_excluded_no_feature is large, the derived features have not been computed for that period yet — report that as missing data, NOT as a venue that used no hashtags. ' +
-      'CONTROVERSY IS NOT SUCCESS. A post can travel a long way because people disagreed with it — a dish that looked wrong to them, a recipe they thought was done badly. Reach cannot tell those apart from a post people loved, but the contention measure can: it is comments divided by likes, and disagreement costs typing where praise costs a tap. Before recommending more of anything that ranked high on reach, check its contention. If it is high, say the post travelled because it was CONTESTED, and do not recommend repeating it without saying that out loud. ' +
+      'CONTROVERSY IS NOT SUCCESS. A post can travel a long way because people disagreed with it — a dish that looked wrong to them, a recipe they thought was done badly. Reach cannot tell those apart from a post people loved. The contention measure narrows it down — disagreement costs typing where praise costs a tap — but it cannot prove disagreement, because giveaways and caption questions drive comments too. Before recommending more of anything that ranked high on reach, check its contention. If it is high, say the post travelled because it was CONTESTED, and do not recommend repeating it without saying that out loud. ' +
       'Stories are excluded entirely: they reach only existing followers, so grouping them beside posts compares audience rather than content.',
     input_schema: {
       type: 'object' as const,
@@ -96,7 +96,7 @@ export const queryTools: Tool[] = [
         metric: {
           type: 'string',
           enum: ['reach', 'total_interactions', 'likes', 'comments', 'shares', 'saved', 'views', 'engagement_rate', 'contention'],
-          description: 'What to measure each group by. Default reach. contention is comments divided by likes — how much a post was ARGUED about. engagement_rate is interactions divided by REACH, not by followers — it measures how hard the people who saw a post responded, and flatters small responsive audiences.',
+          description: 'What to measure each group by. Default reach. contention is comments per like, shrunk toward the account average so tiny-denominator posts cannot top the list — it measures how much a post was DISCUSSED, which includes giveaways and questions, not only disagreement. engagement_rate is interactions divided by REACH, not by followers — it measures how hard the people who saw a post responded, and flatters small responsive audiences.',
         },
         limit: { type: 'number', description: 'How many groups to return. Default 15.' },
       },

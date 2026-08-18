@@ -188,15 +188,7 @@ describe('engagement_rate', () => {
  * numbers behind it.
  */
 describe('contention — telling an argument apart from a hit', () => {
-  test('is comments divided by likes', () => {
-    const result = groupPosts([
-      post({ media_type: 'IMAGE', metrics: { likes: 200, comments: 40 } }),
-    ], 'media_type', 'contention');
-    assert.equal(result.groups[0].median, 0.2);
-  });
-
-  test('a contested post outranks a more-liked one', () => {
-    // The gyoza post: fewer likes, far more argument.
+  test('a post discussed far above the account average ranks top', () => {
     const result = groupPosts([
       post({ media_type: 'CAROUSEL_ALBUM', metrics: { likes: 800, comments: 12 } }),
       post({ media_type: 'IMAGE', metrics: { likes: 300, comments: 90 } }),
@@ -206,13 +198,36 @@ describe('contention — telling an argument apart from a hit', () => {
     assert.ok(result.groups[0].median > result.groups[1].median);
   });
 
+  test('a three-like post cannot top the list', () => {
+    // THE BUG THIS REPLACED. Raw comments/likes made 1 comment on 3 likes score
+    // 0.333 and beat every real post -- the first live run returned exactly
+    // that, a page of posts with single-digit likes above a giveaway that drew
+    // eighteen genuine comments. A ratio on a tiny denominator is not a small
+    // signal, it is noise wearing a number.
+    const noisy = post({ media_type: 'IMAGE', metrics: { likes: 3, comments: 1 } });
+    const real = post({ media_type: 'REELS', metrics: { likes: 44, comments: 18 } });
+    const ordinary = Array.from({ length: 20 }, () =>
+      post({ media_type: 'CAROUSEL_ALBUM', metrics: { likes: 40, comments: 2 } }));
+
+    const result = groupPosts([noisy, real, ...ordinary], 'media_type', 'contention');
+    assert.equal(result.groups[0].group, 'REELS');
+    assert.ok(
+      result.groups.findIndex(g => g.group === 'REELS') <
+      result.groups.findIndex(g => g.group === 'IMAGE'),
+      'the 3-like post outranked the genuinely discussed one',
+    );
+  });
+
   test('says outright that this is argument, not quality', () => {
     const result = groupPosts([
       post({ metrics: { likes: 100, comments: 50 } }),
     ], 'media_type', 'contention');
 
-    const caveat = result.caveats.find(c => c.includes('ARGUED about'));
+    const caveat = result.caveats.find(c => c.includes('DISCUSSED'));
     assert.ok(caveat, 'no caveat explaining what contention measures');
+    // Must not claim it proves disagreement: giveaways drive comments too, and
+    // the first live run was topped by exactly that -- a "tag a friend" post.
+    assert.ok(caveat!.includes('giveaway'));
     assert.ok(caveat!.includes('pick fights'));
   });
 

@@ -127,6 +127,62 @@ function groupsFor(post: PostLike, dimension: Dimension): string[] {
 const OVERLAPPING: Dimension[] = ['hashtag', 'mention'];
 
 /**
+ * What a raw ratio needs before it can be ranked on.
+ *
+ * The first version of `contention` was comments divided by likes and nothing
+ * else, and the top of the list came back as posts with THREE likes and one
+ * comment, scoring 0.333 and beating everything real. A ratio with a tiny
+ * denominator is not a small signal, it is noise wearing a number.
+ *
+ * `baseline` is the account's own comments-per-like across the posts in scope;
+ * `k` is how much evidence a post needs before it is judged on its own record
+ * rather than on the account's. Set to the median like count, so a typical post
+ * is judged half on itself and half on the baseline, a 3-like post is pulled
+ * almost entirely to the baseline, and an 800-like post barely moves.
+ *
+ * This is the same thin-sample rule already applied to GROUPS, finally applied
+ * to individual posts -- which is where it was needed first and was missing.
+ */
+export interface RatioContext {
+  baseline: number;
+  k: number;
+}
+
+function shrinkRatio(numerator: number, denominator: number, ctx: RatioContext): number {
+  return (numerator + ctx.k * ctx.baseline) / (denominator + ctx.k);
+}
+
+/** The account's own rate and how much evidence to demand, from the posts in scope. */
+export function ratioContextFrom(posts: PostLike[]): RatioContext {
+  let comments = 0;
+  let likes = 0;
+  const likeCounts: number[] = [];
+
+  for (const p of posts) {
+    const c = p.metrics?.comments;
+    const l = p.metrics?.likes;
+    if (typeof c === 'number' && typeof l === 'number' && l > 0) {
+      comments += c;
+      likes += l;
+      likeCounts.push(l);
+    }
+  }
+
+  if (likeCounts.length === 0) return { baseline: 0, k: 1 };
+
+  const sorted = likeCounts.sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const medianLikes = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+
+  return {
+    baseline: likes > 0 ? comments / likes : 0,
+    // At least 1, or a set of near-zero-like posts would divide by nothing and
+    // reintroduce the exact instability this exists to remove.
+    k: Math.max(medianLikes, 1),
+  };
+}
+
+/**
  * The value being compared, for one post.
  *
  * `engagement_rate` is interactions over reach rather than over followers, and
@@ -138,7 +194,7 @@ const OVERLAPPING: Dimension[] = ['hashtag', 'mention'];
  * the account, so it measures how hard the people who saw it responded, not how
  * many people it deserved to reach.
  */
-function valueOf(post: PostLike, metric: string): number | null {
+function valueOf(post: PostLike, metric: string, ctx: RatioContext): number | null {
   const m = post.metrics ?? {};
 
   /**
@@ -161,7 +217,7 @@ function valueOf(post: PostLike, metric: string): number | null {
     const comments = m.comments;
     const likes = m.likes;
     if (typeof comments !== 'number' || typeof likes !== 'number' || likes === 0) return null;
-    return comments / likes;
+    return shrinkRatio(comments, likes, ctx);
   }
 
   if (metric === 'engagement_rate') {
@@ -194,13 +250,14 @@ export function groupPosts(
   metric: string,
   limit = 15,
 ): PatternResult {
+  const ctx = ratioContextFrom(posts);
   const buckets = new Map<string, number[]>();
   let missingMetric = 0;
   let missingFeature = 0;
   let considered = 0;
 
   for (const post of posts) {
-    const value = valueOf(post, metric);
+    const value = valueOf(post, metric, ctx);
 
     // A metric Meta does not report for that media type is ABSENT, not zero.
     // Counting it as zero would make images look terrible at video metrics --
@@ -275,7 +332,7 @@ export function groupPosts(
 
   if (metric === 'contention') {
     caveats.push(
-      'contention is comments divided by likes — how much a post was ARGUED about, not how good it was. A high figure means go and read the comments before drawing any conclusion. Never recommend repeating a high-contention post on the strength of its reach: controversy does travel on Instagram, and recommending more of it is recommending the venue pick fights with its own customers. Say plainly that the post travelled because it was contested.',
+      'contention is comments per like, shrunk toward the account\'s own average so a post with three likes cannot top the list. It measures how much a post was DISCUSSED, and discussion has several causes: a giveaway asking people to tag a friend, a question in the caption, or genuine disagreement. It does NOT distinguish between them — that needs the comment text. So never call a high figure controversy without reading the comments, and never recommend repeating a high-reach post without checking it: if a post travelled because people disagreed with it, saying "do more of this" is telling the venue to pick fights with its own customers.',
     );
   }
 
