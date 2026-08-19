@@ -89,6 +89,21 @@ export async function ingestSupplierBills(
     const invoices = (JSON.parse(text)?.Invoices ?? []) as any[];
     if (invoices.length === 0) break;
 
+    /**
+     * A PAGE at a time, not a bill at a time.
+     *
+     * The first version upserted each bill, selected its id back, then upserted
+     * its lines -- two round-trips per bill. Neon Pigeon alone posts 390 bills a
+     * month, so two years across three venues is roughly 28,000 round-trips and
+     * several hours, nearly all of it waiting.
+     *
+     * Batched by page it is two round-trips per hundred bills: about 600 for the
+     * whole backfill. The Xero side is unchanged -- four calls a month per venue
+     * -- so this is purely the write pattern, which is where the time was.
+     */
+    const pageBills: any[] = [];
+    const linesByInvoice = new Map<string, ReturnType<typeof toBillLineRows>>();
+
     for (const invoice of invoices) {
       const bill = toBillRow(invoice);
       if (!bill) {
@@ -99,24 +114,42 @@ export async function ingestSupplierBills(
       }
       if (!isSpend(bill)) nonSpend++;
 
-      const { data: stored, error } = await supabase
+      pageBills.push({
+        ...bill,
+        venue_id: venueId,
+        tenant_id: tenantId,
+        fetched_at: new Date().toISOString(),
+      });
+      linesByInvoice.set(bill.invoice_id, toBillLineRows(invoice));
+    }
+
+    if (pageBills.length > 0) {
+      const { data: storedBills, error } = await supabase
         .from('supplier_bills')
-        .upsert(
-          { ...bill, venue_id: venueId, tenant_id: tenantId, fetched_at: new Date().toISOString() },
-          { onConflict: 'tenant_id,invoice_id' },
-        )
-        .select('id')
-        .single();
+        .upsert(pageBills, { onConflict: 'tenant_id,invoice_id' })
+        .select('id, invoice_id');
 
       if (error) throw new Error(`supplier_bills upsert failed: ${error.message}`);
-      bills++;
+      bills += storedBills?.length ?? 0;
 
-      const lineRows = toBillLineRows(invoice).map(l => ({
-        ...l,
-        bill_id: stored.id,
-        venue_id: venueId,
-        fetched_at: new Date().toISOString(),
-      }));
+      // Keyed by the invoice id we sent, never by position: an upsert makes no
+      // promise about the order it returns rows in, and lines attached to the
+      // wrong bill would be spend filed against the wrong supplier.
+      const idOf = new Map((storedBills ?? []).map(b => [b.invoice_id, b.id]));
+
+      const lineRows = [];
+      for (const [invoiceId, invoiceLines] of linesByInvoice) {
+        const billId = idOf.get(invoiceId);
+        if (!billId) continue;
+        for (const line of invoiceLines) {
+          lineRows.push({
+            ...line,
+            bill_id: billId,
+            venue_id: venueId,
+            fetched_at: new Date().toISOString(),
+          });
+        }
+      }
 
       if (lineRows.length > 0) {
         const { error: lineError } = await supabase
