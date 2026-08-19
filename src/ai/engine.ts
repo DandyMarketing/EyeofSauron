@@ -2,6 +2,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
 import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
+import {
+  webSearchTool,
+  extractSources,
+  searchErrors,
+  searchRequestCount,
+  EXTERNAL_CONTEXT_FRAMING,
+  type WebSource,
+} from './web-search.js';
 
 const client = new Anthropic();
 
@@ -53,6 +61,14 @@ export interface QueryResult {
   toolCalls: Array<{ name: string; input: Record<string, any> }>;
   /** SVG charts produced by create_chart, in the order the model asked for them. */
   charts: Array<{ title: string; svg: string }>;
+  /**
+   * External pages the answer cited, if it searched the web.
+   *
+   * Rendered beside the answer so an external claim can be checked without
+   * trusting the model to have labelled it as external. A warehouse figure has
+   * no entry here and needs none -- it came from our own data.
+   */
+  sources: WebSource[];
 }
 
 // 2048 was too tight once answers began carrying tables and chart commentary.
@@ -68,6 +84,17 @@ const MAX_TOKENS = 8192;
 // Ceiling on tool rounds. Nothing legitimate needs more, and without it a model
 // that keeps querying spins until the request times out with no answer.
 const MAX_TOOL_ROUNDS = 12;
+
+/**
+ * Ceiling on `pause_turn` continuations.
+ *
+ * A long server-side search can pause mid-turn; the documented way to resume is
+ * to send the paused assistant message back unchanged. That is not a tool
+ * round -- no query of ours ran -- so it needs its own counter, and it needs a
+ * ceiling for the same reason MAX_TOOL_ROUNDS has one: a resume that keeps
+ * pausing would otherwise loop until the request times out.
+ */
+const MAX_PAUSE_CONTINUATIONS = 4;
 
 export async function askSauron(
   question: string,
@@ -98,22 +125,91 @@ export async function askSauron(
     systemPrompt += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;
   }
 
+  systemPrompt += `\n${EXTERNAL_CONTEXT_FRAMING}`;
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user', content: question },
   ];
 
-  let response = await client.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: MAX_TOKENS,
-    system: systemPrompt,
-    tools: queryTools,
-    messages,
-  });
+  /**
+   * Our query tools plus Anthropic's server-side web search.
+   *
+   * The search runs on Anthropic's side: we never see the query leave, and the
+   * results arrive as blocks in the response rather than through
+   * handleToolCall. What comes back to us is the part worth having -- the
+   * citations behind whatever the answer claims.
+   */
+  const tools: Anthropic.Messages.ToolUnion[] = [...queryTools, webSearchTool()];
+
+  const sources: WebSource[] = [];
+  let searches = 0;
+
+  /**
+   * Every request goes through here so nothing has to remember to account for
+   * a response. Sources, search count and search failures were being collected
+   * in one place and missed in another the first time this was written.
+   */
+  const send = async (opts: Partial<Anthropic.MessageCreateParamsNonStreaming> = {}) => {
+    const r = await client.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: MAX_TOKENS,
+      system: systemPrompt,
+      tools,
+      messages,
+      ...opts,
+    });
+
+    sources.push(...extractSources(r.content));
+    searches += searchRequestCount(r.usage);
+
+    // A failed search returns HTTP 200 with an error object where the results
+    // should be, so it is invisible unless it is said out loud. The model
+    // carries on and writes an answer with no external context in it, which
+    // reads exactly like an answer that did not need any.
+    for (const code of searchErrors(r.content)) {
+      console.warn(`[engine] web search failed: ${code}`);
+    }
+
+    return r;
+  };
+
+  let response = await send();
 
   // Tool use loop
   let rounds = 0;
-  while (response.stop_reason === 'tool_use' && rounds++ < MAX_TOOL_ROUNDS) {
+  let pauses = 0;
+
+  for (;;) {
+    /**
+     * A paused turn is not a tool round -- none of our tools ran. Resume by
+     * sending the assistant message back unchanged and adding nothing after
+     * it; a "continue" message here would be read as a new instruction.
+     */
+    if (response.stop_reason === 'pause_turn') {
+      if (pauses++ >= MAX_PAUSE_CONTINUATIONS) {
+        console.warn(`[engine] gave up after ${pauses} paused turns`);
+        break;
+      }
+      messages.push({ role: 'assistant', content: response.content });
+      response = await send();
+      continue;
+    }
+
+    if (response.stop_reason !== 'tool_use') break;
+    if (rounds++ >= MAX_TOOL_ROUNDS) break;
+
+    /**
+     * Pushed back UNCHANGED, and that is load-bearing now rather than merely
+     * tidy: a turn carrying web results includes `encrypted_content` that the
+     * API decrypts to restore those results on the next call. Rebuilding this
+     * array, or dropping blocks we do not recognise, fails the request with a
+     * 400 rather than degrading quietly.
+     *
+     * This is also the turn shape that arrives when the model calls web search
+     * and one of our tools together: the API defers the search, hands back our
+     * tool calls, and runs the search once we answer them.
+     */
     const assistantContent = response.content;
     messages.push({ role: 'assistant', content: assistantContent });
 
@@ -147,13 +243,7 @@ export async function askSauron(
 
     messages.push({ role: 'user', content: toolResults });
 
-    response = await client.messages.create({
-      model: 'claude-sonnet-5',
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      tools: queryTools,
-      messages,
-    });
+    response = await send();
   }
 
   let answer = response.content
@@ -177,11 +267,18 @@ export async function askSauron(
         : 'No reply was produced.';
 
     try {
-      const recovery = await client.messages.create({
-        model: 'claude-sonnet-5',
-        max_tokens: MAX_TOKENS,
+      /**
+       * Query tools are withheld so the model must answer in prose rather than
+       * running another lap. Web search is NOT withheld, and that is not an
+       * oversight: `messages` may hold search results whose encrypted content
+       * the API decrypts on the way in, and removing the tool that produced
+       * them risks a 400 on the one request whose whole job is to rescue a
+       * turn that already went wrong. The instruction below is what stops it
+       * searching again.
+       */
+      const recovery = await send({
+        tools: [webSearchTool()],
         system: `${systemPrompt}\n\n${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
-        messages,
       });
       answer = recovery.content
         .filter(b => b.type === 'text')
@@ -212,5 +309,25 @@ export async function askSauron(
       : 'I could not produce a reply to that. Please try rephrasing the question.';
   }
 
-  return { answer, toolCalls, charts };
+  /**
+   * Said out loud because searches are billed per search on top of tokens, and
+   * because a feature nobody can see the cost of is one nobody notices has run
+   * away. The Brave version this replaced was never configured and reported
+   * nothing, so it looked identical to a feature that was simply never needed.
+   */
+  if (searches > 0) {
+    console.log(`[engine] ${searches} web search(es), ${sources.length} cited source(s)`);
+  }
+
+  // Deduplicated across the whole turn: `extractSources` dedupes within one
+  // response, and the same page is commonly cited in several of them.
+  const seen = new Set<string>();
+  const uniqueSources = sources.filter(s => {
+    const key = `${s.url}|${s.quote}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return { answer, toolCalls, charts, sources: uniqueSources };
 }

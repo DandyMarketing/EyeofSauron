@@ -16,3 +16,14 @@ console.log(`\n--- Tool calls made: ${result.toolCalls.length} ---`);
 for (const tc of result.toolCalls) {
   console.log(`  ${tc.name}(${JSON.stringify(tc.input)})`);
 }
+
+// Printed separately from the answer, and labelled, for the same reason the
+// web app renders them apart: a figure from the web is not a warehouse figure.
+if (result.sources.length > 0) {
+  console.log(`\n--- From the web (NOT our data): ${result.sources.length} source(s) ---`);
+  for (const s of result.sources) {
+    console.log(`  ${s.title ?? s.url}`);
+    console.log(`    ${s.url}`);
+    console.log(`    "${s.quote}"`);
+  }
+}

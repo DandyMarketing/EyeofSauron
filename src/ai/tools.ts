@@ -357,18 +357,16 @@ export const queryTools: Tool[] = [
       required: ['metric', 'start_date', 'end_date'],
     },
   },
-  {
-    name: 'web_search',
-    description: 'Search the web for external context to enrich your analysis. Use this for: industry benchmarks (e.g. "average food cost % casual dining Singapore"), local events or holidays that may impact sales, F&B trends, weather data, competitive analysis, or any external reference that would strengthen a recommendation. Do NOT use this for internal data — use the database tools for that.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Search query. Be specific, e.g. "average food cost percentage casual dining Singapore 2026" or "public holidays Singapore August 2026".',
-        },
-      },
-      required: ['query'],
-    },
-  },
 ];
+
+/**
+ * `web_search` used to be defined here, calling the Brave Search API from
+ * handleToolCall. It is now Anthropic's server-side tool, declared in
+ * src/ai/web-search.ts and added to the tool list in the engine -- so it is
+ * absent from this file by design, not by omission.
+ *
+ * The reason for moving it is provenance: the server-side tool returns
+ * citations tying each claim to a url and the sentence it came from, which is
+ * what lets an external figure be checked instead of taken on trust. Brave
+ * returned prose snippets with no such link.
+ */

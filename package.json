@@ -20,7 +20,7 @@
     "probe:bills": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-bills.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
+    "@anthropic-ai/sdk": "^0.118.0",
     "@hono/node-server": "^2.0.12",
     "@supabase/supabase-js": "^2.47.0",
     "csv-parse": "^5.6.0",
