@@ -58,9 +58,15 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
  */
 const DEFAULT_XERO_SCOPES = [
   'offline_access',
-  'accounting.reports.read',
+  // GRANULAR, not `accounting.reports.read`. The broad reports scope is
+  // unavailable to any app created on or after 2 March 2026 and Xero rejects
+  // the entire authorization with `invalid_scope`. There is a test guarding
+  // this, and it caught the mistake being made a second time.
+  'accounting.reports.profitandloss.read',
+  // Added one at a time on purpose. Xero names no offending scope when it
+  // refuses, so a list that grows by two is a list nobody can debug --
+  // requesting journals and transactions together produced exactly that.
   'accounting.journals.read',
-  'accounting.transactions.read',
 ].join(' ');
 
 /**
