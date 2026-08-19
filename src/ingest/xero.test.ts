@@ -79,10 +79,15 @@ describe('buildAuthorizeUrl', () => {
     assert.ok(scopes.includes('offline_access'), 'missing offline_access — the connection would die in 30 minutes');
   });
 
-  test('asks for the journal scope, which the ledger drill-down needs', () => {
-    // The P&L reports an account total. Journals are the postings beneath it,
-    // and the only way to answer "marketing cost 26,034 on what".
-    assert.ok(XERO_SCOPES.includes('accounting.journals.read'));
+  test('does NOT ask for the journals scope', () => {
+    // The general-ledger Journals endpoint has no granular equivalent, so an
+    // app created under granular scopes cannot have it and asking fails consent
+    // outright with `invalid_scope`. Tried on 19 Aug 2026; it cost two rounds of
+    // reconnecting before the cause was found.
+    assert.ok(
+      !/accounting\.journals/.test(XERO_SCOPES),
+      'journals has no granular scope — requesting it fails the whole consent',
+    );
   });
 
   test('does not request payroll', () => {

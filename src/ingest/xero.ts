@@ -56,17 +56,30 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
  * not ingesting personal pay at all, and the surest way to honour that is to
  * lack the permission rather than to remember to filter.
  */
+/**
+ * PROVEN scopes only. Anything unproven goes through XERO_SCOPES first.
+ *
+ * Two lessons are baked in here, both paid for.
+ *
+ * GRANULAR, not `accounting.reports.read`. The broad reports scope is
+ * unavailable to any app created on or after 2 March 2026, and Xero rejects the
+ * entire authorization with `invalid_scope`. A test already guarded this and it
+ * caught the mistake being made a second time.
+ *
+ * NO `accounting.journals.read`. The general-ledger Journals endpoint is not
+ * available under the granular scope model at all -- there is no granular
+ * equivalent, and asking for it fails consent outright. Connections made before
+ * the cutover keep it; ours cannot have it. That closes the ledger drill-down,
+ * and supplier BILLS are the way to the same answer: a bill carries a supplier,
+ * a description and line items coded to an account, where a journal line
+ * carries only a code.
+ *
+ * Xero names no offending scope when it refuses, so anything new is added ALONE
+ * and via the environment variable, never straight into this list.
+ */
 const DEFAULT_XERO_SCOPES = [
   'offline_access',
-  // GRANULAR, not `accounting.reports.read`. The broad reports scope is
-  // unavailable to any app created on or after 2 March 2026 and Xero rejects
-  // the entire authorization with `invalid_scope`. There is a test guarding
-  // this, and it caught the mistake being made a second time.
   'accounting.reports.profitandloss.read',
-  // Added one at a time on purpose. Xero names no offending scope when it
-  // refuses, so a list that grows by two is a list nobody can debug --
-  // requesting journals and transactions together produced exactly that.
-  'accounting.journals.read',
 ].join(' ');
 
 /**
