@@ -56,12 +56,28 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
  * not ingesting personal pay at all, and the surest way to honour that is to
  * lack the permission rather than to remember to filter.
  */
-export const XERO_SCOPES = [
+const DEFAULT_XERO_SCOPES = [
   'offline_access',
-  'accounting.reports.profitandloss.read',
+  'accounting.reports.read',
   'accounting.journals.read',
   'accounting.transactions.read',
 ].join(' ');
+
+/**
+ * Overridable by XERO_SCOPES, because getting this list wrong is expensive.
+ *
+ * Xero validates scopes at its CONSENT screen and rejects the whole request
+ * with `invalid_scope` -- it does not say which one it disliked. And every
+ * attempt costs a trip through the OAuth flow for each organisation, so
+ * narrowing it down by editing code and redeploying turns a five-minute
+ * question into an afternoon.
+ *
+ * As an environment variable it is one Railway edit and a restart per attempt.
+ * Set it back to unset once a working list is known, so the default in code
+ * stays the documented truth rather than drifting behind a variable nobody
+ * remembers is set.
+ */
+export const XERO_SCOPES = process.env.XERO_SCOPES?.trim() || DEFAULT_XERO_SCOPES;
 
 /** How close to expiry an access token is treated as already expired. */
 const EXPIRY_SKEW_MS = 60_000;

@@ -8,7 +8,7 @@ import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, i
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
 import { summarisePostLockChange } from './ingest/monday.js';
-import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection } from './ingest/xero.js';
+import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection, XERO_SCOPES } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
 import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment, askMetaForValidMetrics } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
@@ -566,6 +566,9 @@ app.get('/xero/connect', async (c) => {
 
   try {
     const state = newState(loadKey(process.env.XERO_TOKEN_KEY), Date.now());
+    // Xero rejects the whole consent request with `invalid_scope` and never
+    // says which scope it disliked, so the list has to be visible somewhere.
+    console.log(`Xero authorize requested with scopes: ${XERO_SCOPES}`);
     return c.json({ url: buildAuthorizeUrl(clientId, xeroRedirectUri(), state) });
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
