@@ -68,6 +68,16 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '013_profit_and_loss.sql',
   },
   {
+    table: 'supplier_bills',
+    columns: ['venue_id', 'tenant_id', 'invoice_id', 'supplier_name', 'bill_date', 'status', 'total'],
+    migration: '022_supplier_bills.sql',
+  },
+  {
+    table: 'supplier_bill_lines',
+    columns: ['bill_id', 'venue_id', 'line_item_id', 'description', 'line_amount', 'account_code', 'account_id'],
+    migration: '022_supplier_bills.sql',
+  },
+  {
     table: 'xero_connections',
     columns: ['tenant_id', 'tenant_name', 'venue_id'],
     migration: '012_xero_connections.sql',
