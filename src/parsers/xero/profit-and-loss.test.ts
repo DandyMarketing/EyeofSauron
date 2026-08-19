@@ -181,3 +181,103 @@ describe('reconcileSections — the gate before a figure is trusted', () => {
     assert.deepEqual(reconcileSections(lines), []);
   });
 });
+
+/**
+ * Neon Pigeon's August 2026 P&L was refused with "Uncategorised: lines sum to
+ * -44,768.62, report says 20,705.02". Both numbers were real and neither had
+ * anything to do with the other.
+ *
+ * Xero leaves several sections UNTITLED -- Gross Profit, Net Profit, spacers --
+ * and the parser called every one of them "Uncategorised", merging them into
+ * one bucket. Reconciliation then took the first summary row it found and
+ * compared it against detail lines from unrelated sections.
+ */
+describe('untitled sections are not the same section', () => {
+  const report = {
+    Reports: [{
+      ReportName: 'Profit and Loss',
+      ReportTitles: ['Profit and Loss', 'Potus Pte Ltd'],
+      Rows: [
+        {
+          RowType: 'Section',
+          Title: 'Income',
+          Rows: [
+            { RowType: 'Row', Cells: [{ Value: 'Food Sales' }, { Value: '60000.00' }] },
+            { RowType: 'Row', Cells: [{ Value: 'Beverage Sales' }, { Value: '40000.00' }] },
+            { RowType: 'SummaryRow', Cells: [{ Value: 'Total Income' }, { Value: '100000.00' }] },
+          ],
+        },
+        {
+          RowType: 'Section',
+          Title: 'Less Cost of Sales',
+          Rows: [
+            { RowType: 'Row', Cells: [{ Value: 'Food Purchases' }, { Value: '30000.00' }] },
+            { RowType: 'SummaryRow', Cells: [{ Value: 'Total Cost of Sales' }, { Value: '30000.00' }] },
+          ],
+        },
+        // Untitled, and a COMPUTED total: nothing beneath it to add up.
+        {
+          RowType: 'Section',
+          Title: '',
+          Rows: [
+            { RowType: 'SummaryRow', Cells: [{ Value: 'Gross Profit' }, { Value: '70000.00' }] },
+          ],
+        },
+        // A second untitled section. Merging this with the one above is the bug.
+        {
+          RowType: 'Section',
+          Title: '',
+          Rows: [
+            { RowType: 'SummaryRow', Cells: [{ Value: 'Net Profit' }, { Value: '20705.02' }] },
+          ],
+        },
+      ],
+    }],
+  };
+
+  test('an untitled section is named by its own summary row', () => {
+    const parsed = parseProfitAndLoss(report);
+    const sections = [...new Set(parsed.lines.map(l => l.section))];
+    assert.ok(sections.includes('Gross Profit'), `got ${sections.join(', ')}`);
+    assert.ok(sections.includes('Net Profit'));
+    assert.ok(!sections.includes('Uncategorised'), 'untitled sections were merged again');
+  });
+
+  test('two untitled sections stay apart', () => {
+    const parsed = parseProfitAndLoss(report);
+    const grossProfit = parsed.lines.filter(l => l.section === 'Gross Profit');
+    const netProfit = parsed.lines.filter(l => l.section === 'Net Profit');
+    assert.equal(grossProfit.length, 1);
+    assert.equal(netProfit.length, 1);
+  });
+
+  test('a computed total is not reconciled against a sum of nothing', () => {
+    // Gross Profit is derived from other sections. Comparing it to the sum of
+    // its own (empty) detail lines compares 70,000 against 0 and refuses every
+    // P&L Xero has ever produced.
+    const checks = reconcileSections(parseProfitAndLoss(report).lines);
+    assert.ok(!checks.some(c => c.section === 'Gross Profit'));
+    assert.ok(!checks.some(c => c.section === 'Net Profit'));
+  });
+
+  test('the real sections still reconcile', () => {
+    const checks = reconcileSections(parseProfitAndLoss(report).lines);
+    assert.equal(checks.length, 2);
+    assert.ok(checks.every(c => c.passed), JSON.stringify(checks));
+  });
+
+  test('an untitled section with no summary row falls back to its position', () => {
+    const odd = {
+      Reports: [{
+        Rows: [{
+          RowType: 'Section',
+          Title: '',
+          Rows: [{ RowType: 'Row', Cells: [{ Value: 'Something' }, { Value: '1.00' }] }],
+        }],
+      }],
+    };
+    // Ugly, but distinct. Two sections that cannot be told apart is worse than
+    // one with an ugly name.
+    assert.equal(parseProfitAndLoss(odd).lines[0].section, 'Section 1');
+  });
+});

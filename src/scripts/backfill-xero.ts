@@ -41,6 +41,21 @@ const months = Math.min(Math.max(arg('months', 24), 1), 120);
 const paceMs = Math.max(arg('pace', 1100), 200);
 const onlySlug = process.argv.find(a => a.startsWith('--venue='))?.split('=')[1];
 const force = process.argv.includes('--force');
+
+/**
+ * One specific month, e.g. --month=2026-06.
+ *
+ * For testing against a CLOSED period. An open month can fail reconciliation
+ * for accounting reasons -- an unposted journal, a bill half entered -- which
+ * looks identical to the parser being wrong. A closed month is settled, so a
+ * failure there is ours and a pass there means the parser reads Xero correctly.
+ */
+const onlyMonth = process.argv.find(a => a.startsWith('--month='))?.split('=')[1];
+
+if (onlyMonth && !/^\d{4}-\d{2}$/.test(onlyMonth)) {
+  console.error(`--month=${onlyMonth} is not a YYYY-MM month.`);
+  process.exit(1);
+}
 const dryRun = process.argv.includes('--dry-run');
 
 console.log(`Xero P&L — ${months} month(s) back, ${paceMs}ms between calls`);
@@ -72,7 +87,17 @@ if (targets.length === 0) {
   process.exit(1);
 }
 
-const periods = monthsBack(months);
+let periods = monthsBack(onlyMonth ? 120 : months);
+
+if (onlyMonth) {
+  periods = periods.filter(p => p.label === onlyMonth);
+  if (periods.length === 0) {
+    console.error(`--month=${onlyMonth} is outside the last 120 months.`);
+    process.exit(1);
+  }
+  // A targeted month is being examined on purpose, so never skip it as final.
+  console.log(`Single month: ${onlyMonth}. Fetched regardless of whether it is already stored.\n`);
+}
 console.log(`${periods[0].label} → ${periods[periods.length - 1].label}, ${targets.length} organisation(s)\n`);
 
 if (dryRun) {
@@ -107,7 +132,7 @@ for (const t of targets as any[]) {
   for (const period of periods) {
     const fetchedAt = heldBy.get(`${period.start}|${period.end}`);
 
-    if (!force && isStoredPeriodFinal(period.end, fetchedAt)) {
+    if (!force && !onlyMonth && isStoredPeriodFinal(period.end, fetchedAt)) {
       skipped++;
       continue;
     }
