@@ -17,7 +17,7 @@
     "features:posts": "NODE_USE_ENV_PROXY=1 tsx src/scripts/recompute-post-features.ts",
     "probe:media": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-media-capabilities.ts",
     "ingest:xero": "NODE_USE_ENV_PROXY=1 tsx src/scripts/backfill-xero.ts",
-    "probe:journals": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-journals.ts"
+    "probe:bills": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-bills.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
