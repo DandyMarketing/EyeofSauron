@@ -79,6 +79,18 @@ describe('buildAuthorizeUrl', () => {
     assert.ok(scopes.includes('offline_access'), 'missing offline_access — the connection would die in 30 minutes');
   });
 
+  test('asks for the journal scope, which the ledger drill-down needs', () => {
+    // The P&L reports an account total. Journals are the postings beneath it,
+    // and the only way to answer "marketing cost 26,034 on what".
+    assert.ok(XERO_SCOPES.includes('accounting.journals.read'));
+  });
+
+  test('does not request payroll', () => {
+    // The security model's strongest protection is not ingesting personal pay
+    // at all, and lacking the permission is surer than remembering to filter.
+    assert.ok(!/payroll/i.test(XERO_SCOPES), 'payroll scope requested');
+  });
+
   test('uses the GRANULAR profit-and-loss report scope', () => {
     // The broad `accounting.reports.read` is unavailable to any app created on
     // or after 2 March 2026, and Xero rejects the whole authorization with
