@@ -172,6 +172,11 @@ for (const t of targets as any[]) {
           if (b.non_spend > 0) {
             findings.push(`${label} ${period.label}: ${b.non_spend} bill(s) voided or deleted — stored, but NOT spend`);
           }
+          // Said out loud every time. An exclusion nobody can see is
+          // indistinguishable from an exclusion that stopped working.
+          if (b.payroll_lines_excluded > 0) {
+            findings.push(`${label} ${period.label}: ${b.payroll_lines_excluded} payroll bill line(s) EXCLUDED — personal pay is never stored`);
+          }
           if (b.unusable > 0) {
             findings.push(`${label} ${period.label}: ${b.unusable} bill(s) had no id or no readable date and were skipped`);
           }
