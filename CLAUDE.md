@@ -74,6 +74,28 @@ consent screen had listed only "View your profit & loss reports", which turned
 out to be literally true rather than a summary. The remaining lead is the app's
 own permitted-scope configuration in the Xero developer portal — unresolved.
 
+**Payroll arrives through supplier BILLS, and had to be excluded at ingest.**
+Not requesting a payroll scope was necessary and not sufficient. This chart of
+accounts posts wages as ACCPAY bills, so the first bill ingestion on 19 Aug 2026
+pulled 168 lines across four payroll accounts for one venue in one month --
+roughly forty people times four accounts, i.e. individual pay. Those rows were
+deleted and `payrollAccountIds()` now drops them before anything is written,
+matching on account NAME from the P&L because a bill line carries only a code
+and a UUID. Aggregate labour cost still reaches the warehouse through the P&L,
+where it is a section total with no names. The exclusion is reported on every
+run: an exclusion nobody can see is indistinguishable from one that stopped
+working.
+
+**Bills do not explain every account, and the tool must say so.** Measured for
+Neon Pigeon, June 2026: bills cover rent, utilities and food purchases at ~100%,
+and Public Relations / Marketing at **26%**, Commissions at 7%, Merchant fees at
+1%, COGS Beverages at 0%. Anything card- or bank-settled is invisible to
+`/Invoices` and needs `accounting.banktransactions.read` (free, already in the
+app's scope list). Four accounts came back ABOVE 100% -- COGS Food at 109% --
+which points at credit notes: ACCPAYCREDIT reduces the ledger and we do not
+ingest it, so bill-derived food cost is currently overstated. Never present a
+supplier breakdown as complete without the coverage percentage beside it.
+
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
 remembering to filter. There is a test asserting it.

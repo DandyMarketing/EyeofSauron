@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getAccessToken } from './xero.js';
 import { toBillRow, toBillLineRows, isSpend } from '../parsers/xero/bills.js';
+import { payrollAccountIds } from '../lib/payroll-accounts.js';
 
 /**
  * Supplier bills from Xero, with their lines.
@@ -33,6 +34,8 @@ export interface BillIngestResult {
   non_spend: number;
   /** Bills Xero returned that could not be stored: no id, or no readable date. */
   unusable: number;
+  /** Bill lines dropped because they carry personal pay. Never stored. */
+  payroll_lines_excluded: number;
   stored: boolean;
 }
 
@@ -63,6 +66,27 @@ export async function ingestSupplierBills(
   }
 
   const venueId = conn.venue_id as string;
+
+  /**
+   * Which accounts hold personal pay, for THIS venue.
+   *
+   * Payroll is posted as supplier bills in this chart of accounts, so pulling
+   * bills pulls individual pay -- 168 lines for one venue in one month, roughly
+   * forty people times four accounts. The security model says not to hold that
+   * at all, and an exclusion at ingest has to be right once where a filter at
+   * read time has to be remembered every time.
+   *
+   * Read from the P&L because that is where account NAMES live: a bill line
+   * carries only a code and a UUID and cannot be judged on its own.
+   */
+  const { data: plAccounts } = await supabase
+    .from('profit_and_loss')
+    .select('account_id, account_name')
+    .eq('venue_id', venueId)
+    .not('account_id', 'is', null);
+
+  const excludedAccounts = payrollAccountIds(plAccounts ?? []);
+
   const accessToken = await getAccessToken(tenantId);
   const where = encodeURIComponent(
     `Type=="ACCPAY" AND Date>=${xeroDate(fromDate)} AND Date<=${xeroDate(toDate)}`,
@@ -73,6 +97,7 @@ export async function ingestSupplierBills(
   let lines = 0;
   let nonSpend = 0;
   let unusable = 0;
+  let payrollExcluded = 0;
 
   for (;;) {
     const res = await fetch(`${XERO_API}/Invoices?where=${where}&page=${page}`, {
@@ -120,7 +145,13 @@ export async function ingestSupplierBills(
         tenant_id: tenantId,
         fetched_at: new Date().toISOString(),
       });
-      linesByInvoice.set(bill.invoice_id, toBillLineRows(invoice));
+      // Dropped BEFORE anything is written. Aggregate labour cost still reaches
+      // the warehouse through the P&L, where it is a section total with no names
+      // and no individual amounts.
+      const allLines = toBillLineRows(invoice);
+      const keep = allLines.filter(l => !(l.account_id && excludedAccounts.has(l.account_id)));
+      payrollExcluded += allLines.length - keep.length;
+      linesByInvoice.set(bill.invoice_id, keep);
     }
 
     if (pageBills.length > 0) {
@@ -178,6 +209,7 @@ export async function ingestSupplierBills(
     lines,
     non_spend: nonSpend,
     unusable,
+    payroll_lines_excluded: payrollExcluded,
     stored: bills > 0,
   };
 }
