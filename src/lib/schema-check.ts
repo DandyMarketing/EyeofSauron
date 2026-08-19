@@ -63,6 +63,16 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '015_note_source_question.sql',
   },
   {
+    table: 'profit_and_loss',
+    columns: ['venue_id', 'tenant_id', 'period_start', 'period_end', 'section', 'amount', 'is_summary'],
+    migration: '013_profit_and_loss.sql',
+  },
+  {
+    table: 'xero_connections',
+    columns: ['tenant_id', 'tenant_name', 'venue_id'],
+    migration: '012_xero_connections.sql',
+  },
+  {
     table: 'daily_operations',
     columns: ['finance_notes'],
     migration: '016_finance_notes.sql',
