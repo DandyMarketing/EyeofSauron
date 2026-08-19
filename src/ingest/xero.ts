@@ -80,6 +80,11 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
 const DEFAULT_XERO_SCOPES = [
   'offline_access',
   'accounting.reports.profitandloss.read',
+  // Supplier bills, which are invoices of type ACCPAY. Accepted by Xero's
+  // consent screen on 19 Aug 2026 -- though the screen listed only the P&L
+  // report, so whether it truly granted is proven by calling the endpoint
+  // rather than by reading the consent text.
+  'accounting.invoices.read',
 ].join(' ');
 
 /**
