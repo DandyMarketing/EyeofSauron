@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { ingestProfitAndLoss } from '../ingest/xero-pl.js';
+import { ingestSupplierBills } from '../ingest/xero-bills.js';
 import { monthsBack, isStoredPeriodFinal } from '../lib/accounting-months.js';
 import { requireSchema } from '../lib/schema-check.js';
 
@@ -58,10 +59,22 @@ if (onlyMonth && !/^\d{4}-\d{2}$/.test(onlyMonth)) {
 }
 const dryRun = process.argv.includes('--dry-run');
 
+/**
+ * Pull supplier bills alongside the P&L.
+ *
+ * Off by default because it is the expensive half: the P&L is one call per
+ * month, bills are one call per hundred bills plus a write per bill. Neon
+ * Pigeon posts about a hundred bills a month, so two years is a different order
+ * of work from the report -- worth running deliberately rather than nightly by
+ * accident.
+ */
+const withBills = process.argv.includes('--bills');
+
 console.log(`Xero P&L — ${months} month(s) back, ${paceMs}ms between calls`);
 console.log(force
   ? 'FORCE — every month re-fetched, including ones already final.\n'
   : 'Months already closed AND fetched since they closed are skipped.\n');
+if (withBills) console.log('Also pulling supplier bills. Paginated — Xero returns 100 per page and says nothing when there are more.\n');
 
 await requireSchema();
 
@@ -110,6 +123,8 @@ if (dryRun) {
 
 let stored = 0;
 let skipped = 0;
+let billLines = 0;
+const findings: string[] = [];
 const refused: string[] = [];
 const errors: string[] = [];
 
@@ -143,6 +158,24 @@ for (const t of targets as any[]) {
       if (r.stored) {
         stored++;
         console.log(`  ${period.label}: ${r.lines} line(s)`);
+
+        if (withBills) {
+          const b = await ingestSupplierBills(t.tenant_id, period.start, period.end, paceMs);
+          billLines += b.lines;
+          console.log(
+            `  ${period.label}: ${b.bills} bill(s), ${b.lines} bill line(s)` +
+            `${b.pages > 1 ? `, ${b.pages} pages` : ''}`,
+          );
+          // Both are findings rather than failures, and both are invisible
+          // unless said: a voided bill is real but is not spend, and a bill
+          // with no readable date is a gap somebody should be able to see.
+          if (b.non_spend > 0) {
+            findings.push(`${label} ${period.label}: ${b.non_spend} bill(s) voided or deleted — stored, but NOT spend`);
+          }
+          if (b.unusable > 0) {
+            findings.push(`${label} ${period.label}: ${b.unusable} bill(s) had no id or no readable date and were skipped`);
+          }
+        }
       } else {
         // Reconciliation refused it. This is a FINDING about the ledger, not a
         // failed run -- and the whole reason the gate exists.
@@ -160,6 +193,12 @@ for (const t of targets as any[]) {
 }
 
 console.log(`\n${stored} period(s) stored, ${skipped} already final and skipped.`);
+if (withBills) console.log(`${billLines} supplier bill line(s) stored.`);
+
+if (findings.length > 0) {
+  console.log(`\nFINDINGS (${findings.length}) — the run worked, these are about the data:`);
+  for (const f of findings) console.log(`  - ${f}`);
+}
 
 if (refused.length > 0) {
   console.log(`\nREFUSED BY RECONCILIATION (${refused.length}) — the run worked, these periods did not add up:`);
