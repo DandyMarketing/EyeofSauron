@@ -84,10 +84,30 @@ export function parseProfitAndLoss(payload: any): PlReport {
   const lines: PlLine[] = [];
   let order = 0;
 
-  for (const section of sections) {
-    // Xero leaves the title empty on some spacer sections; skip them rather
-    // than inventing a heading.
+  sections.forEach((section, index) => {
+    /**
+     * Xero leaves several sections UNTITLED -- Gross Profit, Net Profit, and
+     * spacers -- and they are not the same section as each other.
+     *
+     * The first version called every one of them "Uncategorised", which merged
+     * them into a single bucket. Reconciliation then took the first summary row
+     * it found there and compared it against detail lines from unrelated
+     * sections: Neon Pigeon's August 2026 came back as lines summing to
+     * -44,768.62 against a reported 20,705.02, two numbers that were never
+     * meant to meet. The gate refused the period, correctly, for the wrong
+     * reason.
+     *
+     * An untitled section takes its name from its own summary row instead --
+     * which is where Xero puts "Gross Profit" and "Net Profit" -- and falls
+     * back to its position if it has neither. Never merged: two sections that
+     * cannot be told apart is worse than one with an ugly name.
+     */
     const title = (section.Title ?? '').trim();
+    const summaryLabel = (section.Rows ?? [])
+      .find(r => r.RowType === 'SummaryRow')
+      ?.Cells?.[0]?.Value?.trim();
+    const sectionName = title || summaryLabel || `Section ${index + 1}`;
+
     for (const row of section.Rows ?? []) {
       if (row.RowType !== 'Row' && row.RowType !== 'SummaryRow') continue;
       const cells = row.Cells ?? [];
@@ -96,7 +116,7 @@ export function parseProfitAndLoss(payload: any): PlReport {
       if (!name || amount === null) continue;
 
       lines.push({
-        section: title || 'Uncategorised',
+        section: sectionName,
         account_name: name,
         account_id: accountIdOf(cells[0]),
         amount,
@@ -104,7 +124,7 @@ export function parseProfitAndLoss(payload: any): PlReport {
         sort_order: order++,
       });
     }
-  }
+  });
 
   if (lines.length === 0) {
     throw new Error('Xero P&L report parsed to zero lines — treating as a failed extraction');
@@ -135,6 +155,12 @@ export interface SectionCheck {
  *
  * Sections with no summary row are skipped, not failed: Xero does not give
  * every section a total.
+ *
+ * Sections with a summary row and NO detail lines are skipped too, and that is
+ * not a loophole. Gross Profit and Net Profit are COMPUTED totals -- derived
+ * from other sections, with nothing beneath them to add up. Reconciling one
+ * compares a real figure against a sum of zero, which can never pass and would
+ * refuse every P&L Xero has ever produced.
  */
 export function reconcileSections(lines: PlLine[], tolerance = 0.01): SectionCheck[] {
   const bySection = new Map<string, PlLine[]>();
@@ -149,9 +175,11 @@ export function reconcileSections(lines: PlLine[], tolerance = 0.01): SectionChe
     const summary = sectionLines.find(l => l.is_summary);
     if (!summary) continue;
 
-    const detailTotal = sectionLines
-      .filter(l => !l.is_summary)
-      .reduce((sum, l) => sum + l.amount, 0);
+    const details = sectionLines.filter(l => !l.is_summary);
+    // A total with nothing under it is computed elsewhere, not summed here.
+    if (details.length === 0) continue;
+
+    const detailTotal = details.reduce((sum, l) => sum + l.amount, 0);
 
     const difference = Math.round((detailTotal - summary.amount) * 100) / 100;
     checks.push({
