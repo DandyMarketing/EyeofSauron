@@ -336,6 +336,41 @@ Do not build it without all four guardrails, because the service-role key bypass
 
 The honest trade-off: a tool I wrote is wrong the same way every time, so it gets found once and fixed forever. A query written fresh each time can be wrong a new way each time — harder to spot, harder to trust. That is the reason this is deferred rather than dropped.
 
+### Labour: split BOH from FOH, and never store individual pay
+
+Decided 19 Aug 2026. The split that matters is **back of house versus front of
+house** — the individual means nothing for any question this product answers.
+
+That is fortunate, because it means the useful figure is an aggregate and the
+warehouse never needs a person's salary. Payroll bill lines are summed by
+category **at ingest** and only the totals stored; the per-person lines are
+discarded in memory.
+
+**The role → BOH/FOH mapping belongs in a table, editable in the admin console**,
+not in code. Role names change when the business changes and that must not need
+a deploy. Same shape as `revel_venue_keys`, the social account mapping and the
+Xero tenant mapping — all confirmed by a person, never guessed.
+
+**An unmapped role is flagged, never defaulted.** The Revel venue-key rule
+again. A "Head Barista" added next March that silently lands in "other" makes
+BOH cost drift with no visible cause; an unmapped-roles warning on the admin page
+is fixed in thirty seconds.
+
+Two limits to check before trusting any split:
+
+- **Salaried staff may not be rostered.** Head chef, sous, managers. If they are
+  absent from StaffAny, an hours-based allocation misses precisely the people
+  who cost most, and both sides come out wrong.
+- **Hours are not cost.** A chef and a runner do not cost the same hour, so an
+  hours-weighted split systematically understates BOH by an unknown amount. If
+  StaffAny carries cost per shift it is a measurement; if it carries only hours
+  it is an estimate and must be labelled one. The P&L's `Wages and Salaries`
+  total is the reconciliation check either way.
+
+**StaffAny is per-person data too.** Rosters carry names, so it is not
+automatically safer than payroll bills. Ingest hours aggregated by venue, date
+and role — never by individual.
+
 ## Open decisions (confirm with Khai, don't assume)
 
 StaffAny API grant method · Revel report frequency · Revel venue-key mapping (Khai to gather one filename per venue) · user scale (managers only vs all staff) · exact StaffAny fields to ingest · Telegram allowlist owner · Supabase hosted vs self-hosted.
