@@ -103,13 +103,32 @@ export function parseProfitAndLoss(payload: any): PlReport {
      * cannot be told apart is worse than one with an ugly name.
      */
     const title = (section.Title ?? '').trim();
-    const summaryLabel = (section.Rows ?? [])
-      .find(r => r.RowType === 'SummaryRow')
-      ?.Cells?.[0]?.Value?.trim();
-    const sectionName = title || summaryLabel || `Section ${index + 1}`;
+    const usable = (section.Rows ?? []).filter(
+      r => r.RowType === 'Row' || r.RowType === 'SummaryRow',
+    );
 
-    for (const row of section.Rows ?? []) {
-      if (row.RowType !== 'Row' && row.RowType !== 'SummaryRow') continue;
+    /**
+     * A COMPUTED TOTAL standing on its own.
+     *
+     * Gross Profit, Operating Profit and Net Profit are derived from other
+     * sections, and this chart of accounts delivers them as a plain Row inside
+     * an untitled section -- not as a SummaryRow. So RowType alone calls them
+     * detail lines, and anything summing detail lines to get total costs would
+     * add Gross Profit and Net Profit into the total. Neon Pigeon's June would
+     * have gained 129,086.62 and lost 27,511.66 out of nowhere.
+     *
+     * An untitled section holding exactly one row is that shape. Treating its
+     * row as a total is a heuristic, and it fails safe: a genuine detail line
+     * misread this way is left OUT of a sum, where the opposite error puts a
+     * whole section's total INTO one.
+     */
+    const isLoneComputedTotal = !title && usable.length === 1;
+
+    const summaryLabel = usable.find(r => r.RowType === 'SummaryRow')?.Cells?.[0]?.Value?.trim();
+    const loneLabel = isLoneComputedTotal ? usable[0]?.Cells?.[0]?.Value?.trim() : undefined;
+    const sectionName = title || summaryLabel || loneLabel || `Section ${index + 1}`;
+
+    for (const row of usable) {
       const cells = row.Cells ?? [];
       const name = (cells[0]?.Value ?? '').trim();
       const amount = parseAmount(cells[1]?.Value);
@@ -120,7 +139,7 @@ export function parseProfitAndLoss(payload: any): PlReport {
         account_name: name,
         account_id: accountIdOf(cells[0]),
         amount,
-        is_summary: row.RowType === 'SummaryRow',
+        is_summary: row.RowType === 'SummaryRow' || isLoneComputedTotal,
         sort_order: order++,
       });
     }

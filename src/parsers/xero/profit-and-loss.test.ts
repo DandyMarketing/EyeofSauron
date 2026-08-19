@@ -266,18 +266,81 @@ describe('untitled sections are not the same section', () => {
     assert.ok(checks.every(c => c.passed), JSON.stringify(checks));
   });
 
-  test('an untitled section with no summary row falls back to its position', () => {
+  test('an untitled section with several rows and no total falls back to its position', () => {
+    // Nothing to name it after. Ugly, but DISTINCT -- two sections that cannot
+    // be told apart is worse than one with an ugly name, which is the whole
+    // reason "Uncategorised" broke reconciliation.
     const odd = {
       Reports: [{
         Rows: [{
           RowType: 'Section',
           Title: '',
-          Rows: [{ RowType: 'Row', Cells: [{ Value: 'Something' }, { Value: '1.00' }] }],
+          Rows: [
+            { RowType: 'Row', Cells: [{ Value: 'Something' }, { Value: '1.00' }] },
+            { RowType: 'Row', Cells: [{ Value: 'Something else' }, { Value: '2.00' }] },
+          ],
         }],
       }],
     };
-    // Ugly, but distinct. Two sections that cannot be told apart is worse than
-    // one with an ugly name.
     assert.equal(parseProfitAndLoss(odd).lines[0].section, 'Section 1');
+  });
+});
+
+/**
+ * The Dandy chart of accounts delivers Gross Profit, Operating Profit and Net
+ * Profit as a plain Row inside an untitled section -- not as a SummaryRow. So
+ * RowType alone calls them detail lines, and anything summing detail lines to
+ * get total costs adds them in. Neon Pigeon's June 2026 would have gained
+ * 129,086.62 and lost 27,511.66 out of nowhere.
+ */
+describe('computed totals delivered as plain rows', () => {
+  const section = (title: string, rows: any[]) => ({ RowType: 'Section', Title: title, Rows: rows });
+  const report = {
+    Reports: [{
+      Rows: [
+        section('Income', [
+          { RowType: 'Row', Cells: [{ Value: 'Sales - Food' }, { Value: '95021.99' }] },
+          { RowType: 'SummaryRow', Cells: [{ Value: 'Total Income' }, { Value: '95021.99' }] },
+        ]),
+        // Untitled, one plain Row: a computed total.
+        section('', [{ RowType: 'Row', Cells: [{ Value: 'Gross Profit' }, { Value: '129086.62' }] }]),
+        section('', [{ RowType: 'Row', Cells: [{ Value: 'Net Profit' }, { Value: '-27511.66' }] }]),
+      ],
+    }],
+  };
+
+  test('a lone row in an untitled section is marked as a total, not a detail line', () => {
+    const lines = parseProfitAndLoss(report).lines;
+    const gross = lines.find(l => l.account_name === 'Gross Profit')!;
+    const net = lines.find(l => l.account_name === 'Net Profit')!;
+    assert.equal(gross.is_summary, true);
+    assert.equal(net.is_summary, true);
+  });
+
+  test('and takes its section name from itself rather than its position', () => {
+    const lines = parseProfitAndLoss(report).lines;
+    assert.equal(lines.find(l => l.account_name === 'Gross Profit')!.section, 'Gross Profit');
+    assert.equal(lines.find(l => l.account_name === 'Net Profit')!.section, 'Net Profit');
+  });
+
+  test('summing detail lines no longer picks up a computed total', () => {
+    // The failure this prevents: 95,021.99 of real income becoming 196,596.95.
+    const detail = parseProfitAndLoss(report).lines.filter(l => !l.is_summary);
+    const total = detail.reduce((sum, l) => sum + l.amount, 0);
+    assert.equal(total, 95021.99);
+  });
+
+  test('an untitled section with SEVERAL rows is still treated as detail', () => {
+    // The heuristic is deliberately narrow: only a row standing alone in an
+    // untitled section is a computed total.
+    const many = {
+      Reports: [{
+        Rows: [section('', [
+          { RowType: 'Row', Cells: [{ Value: 'One' }, { Value: '1.00' }] },
+          { RowType: 'Row', Cells: [{ Value: 'Two' }, { Value: '2.00' }] },
+        ])],
+      }],
+    };
+    assert.ok(parseProfitAndLoss(many).lines.every(l => !l.is_summary));
   });
 });
