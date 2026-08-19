@@ -40,9 +40,13 @@ that cannot be worked around:
 - **`accounting.reports.read` does not exist for us.** The granular form is
   `accounting.reports.profitandloss.read`, and asking for the broad one fails the
   whole authorization with `invalid_scope` — not a warning, not a partial grant.
-- **The general-ledger `/Journals` endpoint is unavailable.** There is no
-  granular scope that covers it. Connections made before the cutover keep
-  `accounting.journals.read`; ours can never have it.
+- **The general-ledger `/Journals` endpoint is unavailable, and the reason is
+  commercial.** It sits on Xero's **Advanced tier — US$895 a month** — and
+  additionally requires a Xero security assessment, initially and annually, plus
+  use-case approval. There is also no granular scope for it: connections made
+  before the cutover keep `accounting.journals.read`, ours can never have it.
+  Treat the ledger drill-down as closed. It is not worth $10,740 a year to learn
+  what is inside a cost bucket.
 
 So "marketing cost $26,034 in June — on what?" cannot be answered from the
 ledger. It can be answered from **supplier bills**, which are invoices of type
@@ -55,6 +59,20 @@ environment variable before it goes into the code default.** Xero refuses the
 entire consent and never names the offending scope, so a list that grows by two
 is a list nobody can debug — which is precisely how this cost two rounds of
 reconnecting three organisations.
+
+**API tiers and limits, since they now exist.** Five tiers: Starter (free),
+Core, Plus, Advanced (US$895/mo), Enterprise. We are on **Starter**, which
+allows **5 connections and 1,000 API calls per organisation per day** — ample,
+since the whole two-year P&L backfill is 72 calls. Paid tiers meter data
+*egress* rather than calls, so a future decision to upgrade is about volume
+pulled, not requests made.
+
+**Supplier bills are not tier-gated, but were not granted.** On 19 Aug 2026
+`accounting.invoices.read` was accepted by the consent screen, fresh tokens were
+stored for all three organisations, and `GET /Invoices` still returned 401. The
+consent screen had listed only "View your profit & loss reports", which turned
+out to be literally true rather than a summary. The remaining lead is the app's
+own permitted-scope configuration in the Xero developer portal — unresolved.
 
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
