@@ -34,9 +34,33 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
  * later feature needs it, add the scope and re-authorise rather than asking
  * for access now on the chance it becomes useful.
  */
+/**
+ * What we ask Xero for, and nothing more.
+ *
+ * Scopes are fixed at CONSENT time, not at call time -- so adding one means
+ * every organisation reconnects through the OAuth flow again. That friction is
+ * the reason these are chosen together rather than one at a time, and it is
+ * also the reason not to reach for the wildcard `accounting.transactions` write
+ * scopes: this system reads a ledger and will never post to one.
+ *
+ * `accounting.journals.read` is the general ledger -- every posting, its
+ * account, and the document behind it. It is what turns "marketing cost 26,034"
+ * into "on what".
+ *
+ * `accounting.transactions.read` is the source documents those postings point
+ * at: the supplier bills, with their line items and the contact they came from.
+ * A journal alone gives an account and a reference; this is what makes the
+ * reference a name.
+ *
+ * NOT requested: payroll scopes. The security model's strongest protection is
+ * not ingesting personal pay at all, and the surest way to honour that is to
+ * lack the permission rather than to remember to filter.
+ */
 export const XERO_SCOPES = [
   'offline_access',
   'accounting.reports.profitandloss.read',
+  'accounting.journals.read',
+  'accounting.transactions.read',
 ].join(' ');
 
 /** How close to expiry an access token is treated as already expired. */
