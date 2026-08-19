@@ -29,6 +29,37 @@ I'm Khai — many years in F&B, building this as the company AI. I code alongsid
 
 **Revel ingestion detail:** one Gmail inbox handles all venues because the filename self-identifies. Parse venue + date from the filename. Map the opaque venue key (e.g. `neonpigeon_neonpigeon`) to a `venue_id` via a **lookup table**; an unknown key must be flagged by a watchdog, never guessed. File columns: Row Type (Product/Modifier), Class (Food/Beverage), Name, SKU, Barcode, Category, Subcategory, Qty, Sales (taxable + non-taxable), % Total Sales, COGS. COGS arrives as 0 (food cost comes from Zeemart, not Revel). Flag Modifier rows so they aren't double-counted. Sample verified: Neon Pigeon, 16 Jul 2026 = **$5,974** across 74 products / 283 units; the file's % column reconciles to 100%.
 
+### Xero: the general ledger is closed to us, and bills are the way in
+
+Established 19 Aug 2026, after two rounds of failed consent.
+
+Xero replaced its broad API scopes with **granular** ones for every app created
+on or after **2 March 2026**. Ours is one of them, and that has two consequences
+that cannot be worked around:
+
+- **`accounting.reports.read` does not exist for us.** The granular form is
+  `accounting.reports.profitandloss.read`, and asking for the broad one fails the
+  whole authorization with `invalid_scope` — not a warning, not a partial grant.
+- **The general-ledger `/Journals` endpoint is unavailable.** There is no
+  granular scope that covers it. Connections made before the cutover keep
+  `accounting.journals.read`; ours can never have it.
+
+So "marketing cost $26,034 in June — on what?" cannot be answered from the
+ledger. It can be answered from **supplier bills**, which are invoices of type
+ACCPAY under the `accounting.invoices` scope group, and arguably better: a bill
+carries a supplier, a description and line items coded to an account, where a
+journal line carries only a code.
+
+**When adding a scope, add exactly one, and test it through the `XERO_SCOPES`
+environment variable before it goes into the code default.** Xero refuses the
+entire consent and never names the offending scope, so a list that grows by two
+is a list nobody can debug — which is precisely how this cost two rounds of
+reconnecting three organisations.
+
+**Never request a payroll scope.** The security model's strongest protection is
+not ingesting personal pay at all, and lacking the permission is surer than
+remembering to filter. There is a test asserting it.
+
 ### Google Business Profile: check the licence before building the pipe
 
 **Not blocked, but not cleared either. Do not build ingestion until this is
