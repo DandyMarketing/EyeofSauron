@@ -575,6 +575,47 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   }
   sysSection.appendChild(gapsCard);
 
+  /**
+   * Is the Meta ingest still running?
+   *
+   * Placed second, above the error list, because it is the only card here
+   * watching for the ABSENCE of work. Everything else on this page reports a
+   * fault in something that happened; on 20 Aug 2026 the Ingest-Meta service
+   * crashed on startup, ran nothing for hours, produced no error to list, and
+   * was found by accident. Stories expire in about 24 hours and Meta serves no
+   * history for followers_count, so an outage here destroys data rather than
+   * delaying it.
+   */
+  const socialCard = el('div', 'system-card');
+  socialCard.innerHTML = '<h4>Social Ingest</h4>';
+  const social = system.social;
+  if (!social) {
+    const unknown = el('div', 'gap-item');
+    unknown.textContent = 'Not reported — the server may be running an older build.';
+    socialCard.appendChild(unknown);
+  } else if (social.ok) {
+    const ok = el('div', 'no-gaps');
+    ok.textContent = social.checked === 0
+      ? 'No active social accounts are mapped.'
+      : `All ${social.checked} account(s) written within ${social.max_age_hours}h.`;
+    socialCard.appendChild(ok);
+  } else {
+    for (const s of social.stale) {
+      const row = el('div', 'gap-item');
+      row.textContent = s.hours_stale === null
+        ? `${s.venue} (${s.platform}): NEVER ingested`
+        : `${s.venue} (${s.platform}): last written ${s.hours_stale}h ago`;
+      socialCard.appendChild(row);
+    }
+    // The consequence, not just the fact. "Stale" on its own reads as a delay,
+    // and this is the one job here whose downtime is not recoverable.
+    const why = el('div', 'gap-item');
+    why.style.color = 'var(--text-muted)';
+    why.textContent = 'Stories expire after ~24h and followers_count has no history at Meta — these are lost, not delayed. Check the Ingest-Meta service on Railway.';
+    socialCard.appendChild(why);
+  }
+  sysSection.appendChild(socialCard);
+
   const errCard = el('div', 'system-card');
   errCard.innerHTML = '<h4>Recent Errors</h4>';
   if (system.recent_errors && system.recent_errors.length > 0) {

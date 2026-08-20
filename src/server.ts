@@ -532,7 +532,18 @@ app.get('/admin/api/system', async (c) => {
     .order('created_at', { ascending: false })
     .limit(20);
 
-  return c.json({ ...report, recent_ingestions: recentLogs ?? [] });
+  /**
+   * Whether the Meta ingest has run recently, surfaced where an owner already
+   * looks.
+   *
+   * It also counts toward /watchdog, but nothing polls that endpoint, so on its
+   * own the check was a signal with no receiver -- which is the failure it
+   * exists to prevent, one level up. The admin page is the only place somebody
+   * reliably looks at this system's health.
+   */
+  const social = await socialFreshness();
+
+  return c.json({ ...report, recent_ingestions: recentLogs ?? [], social });
 });
 
 // --- Watchdog (public for monitoring) ---
