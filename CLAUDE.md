@@ -312,7 +312,18 @@ and Brave's free tier ended in Feb 2026 in any case.
 Anthropic, so a runaway loop cannot happen — the Brave alternative was a card
 with no spending cap behind a tool the model can call twelve times a question.
 `user_location` is set to Singapore, without which holidays and local events
-return a different and useless web. The framing text telling the model to name
+return a different and useless web -- but with **no `country` field**, because
+`country: 'SG'` is a valid ISO 3166-1 alpha-2 code that the API rejects
+outright (`Country code SG is not supported`). Anthropic accepts a subset and
+does not publish which, so a valid code is not an accepted one and reading the
+spec cannot tell you. City and timezone carry the localisation instead.
+
+**A rejected tool definition must not take the product down.** That 400 shipped
+on every request, so every question failed -- including ones that never touch
+the web. `isWebSearchConfigError()` now catches a 400 naming web_search, drops
+the tool, retries once and logs loudly. Same principle as `warnSchema` versus
+`requireSchema`: a degraded app beats a dead one, and a misconfigured optional
+tool costs the feature, never the chat. The framing text telling the model to name
 its sources and never mix an external figure into a computed one is a **hint,
 not a control** — the same standing as `KNOWLEDGE_FRAMING`, and it is written
 knowing that. The citations are what let a reader check.

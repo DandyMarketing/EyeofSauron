@@ -63,11 +63,24 @@ export const MAX_SEARCHES_PER_REQUEST = 5;
  *
  * "Public holidays next month", "what is opening nearby", "is there a
  * convention on" all return a different and mostly useless web without this.
+ *
+ * NO `country`, AND THAT IS NOT AN OVERSIGHT. `country: 'SG'` was set first --
+ * the field is documented as an ISO 3166-1 alpha-2 code and SG is a valid one
+ * -- and the API rejected it outright:
+ *
+ *   400 invalid_request_error: tools.12.web_search_20260209:
+ *   Country code SG is not supported.
+ *
+ * Anthropic supports a subset and does not publish which, so a valid code is
+ * not necessarily an accepted one and no amount of reading finds out. The docs
+ * require at least one of city, region, country or timezone, so the other two
+ * carry the localisation on their own.
+ *
+ * Do not add `country` back without testing it against the live API first.
  */
 export const SEARCH_LOCATION = {
   type: 'approximate' as const,
   city: 'Singapore',
-  country: 'SG',
   timezone: 'Asia/Singapore',
 };
 
@@ -88,6 +101,36 @@ export function webSearchTool(): Anthropic.Messages.WebSearchTool20260209 {
     max_uses: MAX_SEARCHES_PER_REQUEST,
     user_location: SEARCH_LOCATION,
   };
+}
+
+/**
+ * Is this the API refusing our web search TOOL DEFINITION, rather than
+ * refusing the question?
+ *
+ * WHY THIS EXISTS. `country: 'SG'` was rejected with a 400, and because the
+ * tool is sent on every request, EVERY question failed -- including "what were
+ * net sales yesterday", which needs no web search at all. The whole chat went
+ * down, in front of a user, over a field that only matters for holidays and
+ * local events.
+ *
+ * That is the wrong failure mode and the codebase already has the right one
+ * written down: warnSchema logs and carries on where requireSchema exits,
+ * because a degraded app beats a dead one. A misconfigured optional tool must
+ * cost the feature, never the product.
+ *
+ * Deliberately narrow -- a 400 that names web_search. A 400 about the messages
+ * array is our bug and should surface, not be quietly retried.
+ */
+export function isWebSearchConfigError(e: any): boolean {
+  const status = e?.status ?? e?.response?.status;
+  if (status !== 400) return false;
+  let detail = '';
+  try {
+    detail = `${e?.message ?? ''} ${JSON.stringify(e?.error ?? {})}`;
+  } catch {
+    detail = String(e?.message ?? '');
+  }
+  return /web_search/i.test(detail);
 }
 
 /** One external source the answer actually cited. */

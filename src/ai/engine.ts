@@ -7,6 +7,7 @@ import {
   extractSources,
   searchErrors,
   searchRequestCount,
+  isWebSearchConfigError,
   EXTERNAL_CONTEXT_FRAMING,
   type WebSource,
 } from './web-search.js';
@@ -144,6 +145,8 @@ export async function askSauron(
 
   const sources: WebSource[] = [];
   let searches = 0;
+  /** Set when the API refuses the search tool, so we stop sending it. */
+  let searchDisabled = false;
 
   /**
    * Every request goes through here so nothing has to remember to account for
@@ -151,14 +154,45 @@ export async function askSauron(
    * in one place and missed in another the first time this was written.
    */
   const send = async (opts: Partial<Anthropic.MessageCreateParamsNonStreaming> = {}) => {
-    const r = await client.messages.create({
-      model: 'claude-sonnet-5',
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      tools,
-      messages,
-      ...opts,
-    });
+    const call = (withTools: Anthropic.Messages.ToolUnion[]) =>
+      client.messages.create({
+        model: 'claude-sonnet-5',
+        max_tokens: MAX_TOKENS,
+        system: systemPrompt,
+        messages,
+        ...opts,
+        tools: withTools,
+      });
+
+    let r: Anthropic.Message;
+    try {
+      r = await call(searchDisabled ? queryTools : (opts.tools as any) ?? tools);
+    } catch (e) {
+      /**
+       * A rejected web search CONFIG must cost the search, not the product.
+       *
+       * `country: 'SG'` was refused with a 400, and since the tool goes out on
+       * every request, every question failed -- including ones that never
+       * touch the web. Dropping the tool and retrying keeps the warehouse
+       * answerable while the config is wrong, and says so loudly enough that
+       * nobody mistakes a degraded system for a healthy one.
+       *
+       * Only on the FIRST failure. If a search has already run, its results
+       * are in `messages` and removing the tool that produced them fails for a
+       * different reason -- so the retry is not a general-purpose rescue.
+       */
+      if (!searchDisabled && isWebSearchConfigError(e)) {
+        searchDisabled = true;
+        console.error(
+          `[engine] WEB SEARCH DISABLED for this request — the API rejected the tool definition: ` +
+          `${String((e as any)?.message ?? e).slice(0, 300)}`,
+        );
+        console.error('[engine] Answering from the warehouse only. Fix the tool config in src/ai/web-search.ts.');
+        r = await call(queryTools);
+      } else {
+        throw e;
+      }
+    }
 
     sources.push(...extractSources(r.content));
     searches += searchRequestCount(r.usage);

@@ -8,6 +8,7 @@ import {
   MAX_SEARCHES_PER_REQUEST,
   WEB_SEARCH_TOOL_TYPE,
   EXTERNAL_CONTEXT_FRAMING,
+  isWebSearchConfigError,
 } from './web-search.js';
 
 /**
@@ -37,7 +38,6 @@ test('the tool is capped and localised to Singapore', () => {
   const tool = webSearchTool();
   assert.equal(tool.type, WEB_SEARCH_TOOL_TYPE);
   assert.equal(tool.max_uses, MAX_SEARCHES_PER_REQUEST);
-  assert.equal(tool.user_location?.country, 'SG');
   assert.equal(tool.user_location?.timezone, 'Asia/Singapore');
 });
 
@@ -158,4 +158,52 @@ test('search count reads what was billed, and is zero when absent', () => {
   assert.equal(searchRequestCount({ server_tool_use: { web_search_requests: 3 } } as any), 3);
   assert.equal(searchRequestCount({} as any), 0);
   assert.equal(searchRequestCount(undefined), 0);
+});
+
+test('a 400 naming web_search is recognised as a tool-config error', () => {
+  // The real one. country: 'SG' is a valid ISO code and was refused anyway,
+  // and because the tool ships on every request it took down every question —
+  // including ones that never touch the web.
+  const err: any = new Error(
+    '400 {"type":"error","error":{"type":"invalid_request_error","message":"tools.12.web_search_20260209: Country code SG is not supported."}}',
+  );
+  err.status = 400;
+  assert.equal(isWebSearchConfigError(err), true);
+});
+
+test('a 400 about our own messages is NOT swallowed as a search problem', () => {
+  // Retrying without the search tool would hide a bug of ours. Narrow on
+  // purpose.
+  const err: any = new Error('400 messages.3: tool_use ids were found without tool_result blocks');
+  err.status = 400;
+  assert.equal(isWebSearchConfigError(err), false);
+});
+
+test('a 500 or a rate limit is not a config error', () => {
+  // Transient. Dropping web search for the rest of the request would turn a
+  // retryable blip into a silently degraded answer.
+  const overloaded: any = new Error('529 overloaded_error web_search');
+  overloaded.status = 529;
+  assert.equal(isWebSearchConfigError(overloaded), false);
+
+  const rate: any = new Error('429 rate_limit_error');
+  rate.status = 429;
+  assert.equal(isWebSearchConfigError(rate), false);
+});
+
+test('the error object is read as well as the message', () => {
+  const err: any = new Error('Request failed');
+  err.status = 400;
+  err.error = { error: { message: 'tools.12.web_search_20260209: Country code XX is not supported.' } };
+  assert.equal(isWebSearchConfigError(err), true);
+});
+
+test('user_location carries no country code', () => {
+  // 'SG' is a valid ISO 3166-1 alpha-2 code and the API refuses it. Anthropic
+  // supports a subset and does not publish which, so this must not be
+  // reintroduced from the spec alone.
+  const loc = webSearchTool().user_location as any;
+  assert.equal(loc.country, undefined);
+  assert.equal(loc.city, 'Singapore');
+  assert.equal(loc.timezone, 'Asia/Singapore');
 });
