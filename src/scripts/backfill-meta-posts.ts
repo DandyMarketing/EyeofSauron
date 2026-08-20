@@ -141,7 +141,7 @@ for (const a of targets as any[]) {
     );
 
     if (r.without_metrics > 0) {
-      findings.push(`${label}: ${r.without_metrics} post(s) stored without metrics — Meta would not report on them`);
+      findings.push(`${label}: ${r.without_metrics} post(s) stored without metrics — Meta said: ${r.metrics_error ?? 'no reason captured'}`);
     }
 
     // Ran out of posts before reaching the cutoff. Normal for a younger

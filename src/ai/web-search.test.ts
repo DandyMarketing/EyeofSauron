@@ -7,6 +7,7 @@ import {
   searchRequestCount,
   MAX_SEARCHES_PER_REQUEST,
   WEB_SEARCH_TOOL_TYPE,
+  EXTERNAL_CONTEXT_FRAMING,
 } from './web-search.js';
 
 /**
@@ -44,6 +45,22 @@ test('allowed_domains is not set — it is the benchmarks guardrail, not this on
   // Setting it here would silently narrow every holiday and local-event
   // search, which is most of what this tool is for.
   assert.equal(webSearchTool().allowed_domains, undefined);
+});
+
+test('the framing REQUIRES a search, it does not merely permit one', () => {
+  // The first version described what web search was for and never said when it
+  // must be used. Asked for Singapore's 2026 public holidays, the model
+  // answered from memory and got the two moon-sighting dates wrong while
+  // citing MOM in prose it had never read. Anthropic's guidance is that search
+  // triggering has to be instructed explicitly on these models.
+  assert.match(EXTERNAL_CONTEXT_FRAMING, /MUST SEARCH THE WEB BEFORE STATING ANY FACT/);
+  assert.match(EXTERNAL_CONTEXT_FRAMING, /not answer such a question from memory/);
+  assert.match(EXTERNAL_CONTEXT_FRAMING, /unverified/);
+});
+
+test('the framing still forbids mixing external and warehouse figures', () => {
+  assert.match(EXTERNAL_CONTEXT_FRAMING, /Never do arithmetic that mixes the two/);
+  assert.match(EXTERNAL_CONTEXT_FRAMING, /EXTERNAL context only/);
 });
 
 test('sources come from citations, with title and quote intact', () => {
