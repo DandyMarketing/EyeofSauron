@@ -5,6 +5,7 @@ import {
   PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS,
 } from '../ingest/meta.js';
 import { requireSchema } from '../lib/schema-check.js';
+import { socialFreshness, describeStale } from '../lib/social-freshness.js';
 
 /**
  * Nightly social ingestion.
@@ -37,6 +38,25 @@ console.log(`Meta social ingestion — ${since} to ${until}\n`);
 // A nightly job that cannot write is a night of stories lost, and stories
 // cannot be re-fetched. Better to fail before making the calls than after.
 await requireSchema();
+
+/**
+ * How long since this job last wrote anything?
+ *
+ * Reported at the START, before any work, because the interesting case is a job
+ * that has just come back from being dead. On 20 Aug 2026 this service crashed
+ * on a missing module and stayed down for hours; when it recovered, its log
+ * looked exactly like a healthy run and said nothing about the gap it had left
+ * behind. Anything missed in that window is unrecoverable -- stories expire in
+ * about 24 hours, and `followers_count` has no history at Meta at all.
+ *
+ * A finding, never a failure: refusing to run because the last run was too long
+ * ago would turn one missed night into two.
+ */
+const freshness = await socialFreshness();
+if (!freshness.ok) {
+  console.warn(describeStale(freshness));
+  console.warn('');
+}
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')
@@ -114,7 +134,7 @@ for (const a of accounts as any[]) {
         const p = await ingestMetaPosts(a.platform, a.account_id);
         console.log(`${label}: ${p.seen} posts seen, ${p.fetched} refreshed, ${p.skipped_already_current} already current`);
         if (p.without_metrics > 0) {
-          dataFindings.push(`${label}: ${p.without_metrics} post(s) stored without metrics — Meta would not report on them`);
+          dataFindings.push(`${label}: ${p.without_metrics} post(s) stored without metrics — Meta said: ${p.metrics_error ?? 'no reason captured'}`);
         }
       } catch (e: any) {
         dataFindings.push(`${label}: posts failed — ${e?.message ?? e}`);
@@ -127,7 +147,11 @@ for (const a of accounts as any[]) {
         const st = await ingestMetaStories(a.platform, a.account_id);
         console.log(`${label}: ${st.seen} stories live`);
         if (st.without_metrics > 0) {
-          dataFindings.push(`${label}: ${st.without_metrics} story/stories stored without metrics — check STORY_METRICS names against what Meta accepts`);
+          // The reason, not a homework assignment. This used to say "check
+          // STORY_METRICS names against what Meta accepts", which asked a human
+          // to guess at something Meta had already explained and mediaMetrics
+          // had thrown away. A story cannot be re-fetched once it expires.
+          dataFindings.push(`${label}: ${st.without_metrics} story/stories stored without metrics — Meta said: ${st.metrics_error ?? 'no reason captured'}`);
         }
       } catch (e: any) {
         dataFindings.push(`${label}: STORIES FAILED — ${e?.message ?? e} (stories expire in ~24h and cannot be recovered)`);

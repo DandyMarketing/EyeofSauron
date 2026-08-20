@@ -189,7 +189,11 @@ export function searchRequestCount(usage: Anthropic.Messages.Usage | undefined):
  * give them the same standing.
  */
 export const EXTERNAL_CONTEXT_FRAMING = `
-Web search is available for EXTERNAL context only: industry benchmarks, Singapore public holidays and local events, F&B trends, weather, competitor news. Never use it for anything about this business — every figure about our own venues comes from a query tool.
+YOU MUST SEARCH THE WEB BEFORE STATING ANY FACT ABOUT THE WORLD OUTSIDE OUR OWN DATA. Holiday dates, school terms, local events, industry benchmarks, competitor news, weather, opening hours, prices — you do not know these reliably. Your knowledge has a cutoff, dates shift, and figures are revised. Search first, then answer from what the search returned.
+
+Do not answer such a question from memory even when you feel certain, and do not treat a date as safe because it is "well known" — asked for Singapore's 2026 public holidays without searching, you would state eleven dates and get the moon-sighting ones wrong while sounding entirely confident. If a search returns nothing usable, say the fact is unverified. Never present a remembered date or figure as established.
+
+Web search is for EXTERNAL context only: industry benchmarks, Singapore public holidays and local events, F&B trends, weather, competitor news. Never use it for anything about this business — every figure about our own venues comes from a query tool.
 
 A number from the web and a number from the warehouse are not the same kind of thing, and must never be presented as though they were:
 - A warehouse figure is OUR data, reconciled. State it plainly.

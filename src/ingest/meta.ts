@@ -825,6 +825,13 @@ export interface PostIngestResult {
   skipped_already_current: number;
   stored: boolean;
   without_metrics: number;
+  /**
+   * What Meta said when a media item returned no metrics at all. Null when
+   * everything worked. Reported by the jobs because a story cannot be
+   * re-fetched once it expires, so an undiagnosed refusal costs data every run
+   * it survives.
+   */
+  metrics_error?: string | null;
   error?: string;
 }
 
@@ -847,26 +854,59 @@ export const POST_REFRESH_DAYS = 14;
  */
 export const STORY_METRICS = ['reach', 'views', 'replies', 'total_interactions', 'navigation'];
 
+export interface MediaMetricsResult {
+  metrics: Record<string, number>;
+  /**
+   * What Meta said, when nothing came back at all. Null whenever any metric was
+   * obtained -- a partial result is the degradation working, not a failure.
+   */
+  error: string | null;
+}
+
+/** Keeps a Meta error readable in a log line without losing which one it was. */
+function briefly(e: unknown): string {
+  return String((e as any)?.message ?? e).replace(/\s+/g, ' ').slice(0, 300);
+}
+
 /**
  * Insights for one media item, degrading one metric at a time.
  *
  * Costs one call when everything works, which is almost always, and N only when
  * Meta has retired a name -- at which point losing the other metrics too would
  * be the worse outcome.
+ *
+ * THE ERROR IS KEPT, and it was not always. Both catches were empty, so when
+ * Fat Prince's stories came back with no metrics on 20 Aug 2026 the job could
+ * only say "check STORY_METRICS names against what Meta accepts" -- asking a
+ * human to guess at something Meta had already explained and we had discarded.
+ * A story cannot be re-fetched once it expires, so a diagnosis that takes days
+ * costs data. Same failure shape as the search key that was never set: the
+ * system knew and did not say.
+ *
+ * The single-metric error is preferred over the combined one because it
+ * isolates: "reach alone was refused" narrows the cause to permissions, account
+ * eligibility or a story too new to have insights, where a refusal of five
+ * names together could be any one of them.
  */
-async function mediaMetrics(mediaId: string, wanted: string[]): Promise<Record<string, number>> {
+async function mediaMetrics(mediaId: string, wanted: string[]): Promise<MediaMetricsResult> {
   try {
-    return metricsFrom(await fetchMediaInsights(mediaId, wanted));
-  } catch {
+    return { metrics: metricsFrom(await fetchMediaInsights(mediaId, wanted)), error: null };
+  } catch (combined) {
     const out: Record<string, number> = {};
+    let isolated: string | null = null;
+
     for (const metric of wanted) {
       try {
         Object.assign(out, metricsFrom(await fetchMediaInsights(mediaId, [metric])));
-      } catch {
+      } catch (e) {
         // This one name is gone. The rest may not be.
+        if (isolated === null) isolated = `${metric}: ${briefly(e)}`;
       }
     }
-    return out;
+
+    // Anything at all means the degradation did its job.
+    if (Object.keys(out).length > 0) return { metrics: out, error: null };
+    return { metrics: out, error: isolated ?? briefly(combined) };
   }
 }
 
@@ -995,10 +1035,11 @@ export async function ingestMetaPosts(
 
   const rows = [];
   let withoutMetrics = 0;
+  let metricsError: string | null = null;
 
   for (const item of wanted) {
-    const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
-    if (Object.keys(metrics).length === 0) withoutMetrics++;
+    const { metrics, error } = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
+    if (error) { withoutMetrics++; if (!metricsError) metricsError = error; }
     const row = toPostRow(item, metrics, true);
     if (row) rows.push({ ...row, content_type: 'post' });
   }
@@ -1010,6 +1051,7 @@ export async function ingestMetaPosts(
     seen: media.length, fetched: wanted.length,
     skipped_already_current: media.length - wanted.length,
     stored: rows.length > 0, without_metrics: withoutMetrics,
+    metrics_error: metricsError,
   };
 }
 
@@ -1167,6 +1209,7 @@ export async function backfillMetaPosts(
   let seen = 0;
   let fetched = 0;
   let withoutMetrics = 0;
+  let metricsError: string | null = null;
   let storedAny = false;
   let oldestSeen: string | null = null;
   let reachedCutoff = false;
@@ -1197,9 +1240,9 @@ export async function backfillMetaPosts(
 
     for (const item of wanted) {
       try {
-        const metrics = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
+        const { metrics, error } = await mediaMetrics(item.id, metricsForMediaType(item?.media_type ?? null));
         fetched++;
-        if (Object.keys(metrics).length === 0) withoutMetrics++;
+        if (error) { withoutMetrics++; if (!metricsError) metricsError = error; }
         const row = toPostRow(item, metrics, true);
         if (row) rows.push({ ...row, content_type: 'post' });
       } catch (e: any) {
@@ -1244,6 +1287,7 @@ export async function backfillMetaPosts(
     venue_id: venueId, account_id: accountId, content_type: 'post',
     seen, fetched, skipped_already_current: seen - fetched,
     stored: storedAny, without_metrics: withoutMetrics,
+    metrics_error: metricsError,
     pages, oldest_seen: oldestSeen, reached_cutoff: reachedCutoff, blocked,
     stop_reason: stopReason,
     auth_failed: stopReason !== null && isMetaAuthError(stopReason),
@@ -1280,11 +1324,12 @@ export async function ingestMetaStories(
   const media = (JSON.parse(text)?.data ?? []) as any[];
   const rows = [];
   let withoutMetrics = 0;
+  let metricsError: string | null = null;
 
   for (const item of media) {
     if (!item?.id || !item?.timestamp) continue;
-    const metrics = await mediaMetrics(item.id, STORY_METRICS);
-    if (Object.keys(metrics).length === 0) withoutMetrics++;
+    const { metrics, error } = await mediaMetrics(item.id, STORY_METRICS);
+    if (error) { withoutMetrics++; if (!metricsError) metricsError = error; }
     const row = toPostRow(item, metrics);
     if (row) rows.push({ ...row, content_type: 'story' });
   }
@@ -1295,6 +1340,7 @@ export async function ingestMetaStories(
     venue_id: venueId, account_id: accountId, content_type: 'story',
     seen: media.length, fetched: media.length, skipped_already_current: 0,
     stored: rows.length > 0, without_metrics: withoutMetrics,
+    metrics_error: metricsError,
   };
 }
 

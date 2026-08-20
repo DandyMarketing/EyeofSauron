@@ -15,6 +15,7 @@ import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
+import { socialFreshness } from './lib/social-freshness.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -973,6 +974,17 @@ app.get('/watchdog', async (c) => {
   // like one nobody has written to yet, so it is checked here rather than
   // left to a log line.
   const knowledge = await knowledgeHealth();
+  /**
+   * Has the Meta ingest been running at all?
+   *
+   * Checked here rather than inside the job because the failure that made this
+   * necessary was the job never starting -- Ingest-Meta crashed on a missing
+   * module for hours on 20 Aug 2026 and nothing said so. Stories expire in ~24h
+   * and followers_count has no history at Meta, so an outage here destroys data
+   * rather than delaying it. This is the only check on this page watching for
+   * ABSENCE of work rather than a fault in work that happened.
+   */
+  const social = await socialFreshness();
   // Open reconciliation alerts count against health -- they are real problems
   // with the numbers. They are resolvable by a human, which is what keeps this
   // from becoming a permanently-red signal nobody reads.
@@ -980,8 +992,9 @@ app.get('/watchdog', async (c) => {
     report.missing.length === 0 &&
     report.recent_errors.length === 0 &&
     report.open_alerts.length === 0 &&
-    knowledge.ok;
-  return c.json({ healthy, knowledge, ...report });
+    knowledge.ok &&
+    social.ok;
+  return c.json({ healthy, knowledge, social, ...report });
 });
 
 // --- Static frontend ---
