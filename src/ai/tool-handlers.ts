@@ -74,8 +74,8 @@ export async function handleToolCall(
       return listAvailableData(input);
     case 'create_chart':
       return createChart(input);
-    case 'web_search':
-      return webSearch(input);
+    // No 'web_search' case: it is Anthropic's server-side tool now and never
+    // reaches this dispatcher. See src/ai/web-search.ts.
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -1247,30 +1247,3 @@ async function queryHourlySales(input: Record<string, any>): Promise<string> {
   });
 }
 
-async function webSearch(input: Record<string, any>): Promise<string> {
-  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
-  if (!apiKey) {
-    return JSON.stringify({ error: 'Web search not configured. Ask admin to add BRAVE_SEARCH_API_KEY.' });
-  }
-
-  const query = input.query;
-  if (!query) return JSON.stringify({ error: 'query is required' });
-
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5`;
-  const res = await fetch(url, {
-    headers: { 'X-Subscription-Token': apiKey, 'Accept': 'application/json' },
-  });
-
-  if (!res.ok) {
-    return JSON.stringify({ error: `Search failed (${res.status})` });
-  }
-
-  const data: any = await res.json();
-  const results = (data.web?.results ?? []).slice(0, 5).map((r: any) => ({
-    title: r.title,
-    url: r.url,
-    snippet: r.description,
-  }));
-
-  return JSON.stringify({ query, results });
-}

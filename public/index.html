@@ -327,6 +327,34 @@
     flex-shrink: 0;
   }
 
+  /* External sources.
+     Deliberately unlike the answer bubble: a figure from the web is somebody
+     else's claim about somebody else's business, and it must not read as though
+     it came from our own reconciled data. The quote is shown, not just the
+     link, so a claim can be checked without leaving the page. */
+  .sources {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--border);
+    background: transparent;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .sources-title {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-size: 10px;
+    margin-bottom: 8px;
+  }
+
+  .source-item { margin-bottom: 8px; line-height: 1.45; }
+  .source-item:last-child { margin-bottom: 0; }
+  .source-item a { color: var(--text-muted); text-decoration: underline; }
+  .source-item a:hover { color: var(--accent); }
+  .source-quote { display: block; opacity: 0.8; font-style: italic; margin-top: 2px; }
+
   #input-area {
     padding: 16px 20px;
     border-top: 1px solid var(--border);
@@ -909,6 +937,30 @@ async function send() {
       ? data.answer
       : '_No response was returned. Please try asking again._';
     const answerBubble = addMessage('assistant', answerText);
+
+    // External sources, attached under the answer they belong to.
+    //
+    // This is the reason web search runs through Anthropic rather than a plain
+    // search API: each citation carries the page AND the sentence the claim was
+    // taken from, so an external figure can be checked rather than trusted. A
+    // warehouse figure has no entry here and needs none — it came from our own
+    // data. href is escaped and forced http(s) because the url is external text.
+    if (data.sources && data.sources.length > 0) {
+      const box = document.createElement('div');
+      box.className = 'sources';
+      const items = data.sources.map(s => {
+        const safeUrl = /^https?:\/\//i.test(s.url || '') ? s.url : '';
+        const label = escapeHtml(s.title || s.url || 'source');
+        const link = safeUrl
+          ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>'
+          : label;
+        return '<div class="source-item">' + link +
+          '<span class="source-quote">“' + escapeHtml(s.quote || '') + '”</span></div>';
+      }).join('');
+      box.innerHTML = '<div class="sources-title">From the web — not our data</div>' + items;
+      answerBubble.appendChild(box);
+    }
+
     addTeachButton(answerBubble, question, answerText);
 
     history.push({ role: 'user', content: question });

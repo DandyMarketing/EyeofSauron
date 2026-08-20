@@ -284,6 +284,67 @@ ever operates two outlets.
 - **Anti-hallucination is non-negotiable**: the LLM never states a number from memory. Every figure comes from a query tool; every suggestion and chart is built on real warehouse data. A reconciliation gate checks figures (line items sum to totals; Revel sales CSV reconciles with revenue CSV) before data is trusted.
 - Postgres is correct at this scale — do NOT over-engineer with a big analytics warehouse.
 
+### Web search: external context, and the provenance problem it creates
+
+Settled 19 Aug 2026. Sauron uses **Anthropic's server-side web search**
+(`web_search_20260209`), not a search API called from our own handler.
+
+The first implementation called Brave from `handleToolCall`. It never ran once:
+`BRAVE_SEARCH_API_KEY` was never set, so every search the model attempted
+returned the string "Web search not configured" and the model wrote its answer
+without it. Nothing reported this, for the entire life of the feature. That is
+the same failure class as the unapplied migrations and the silent reach gaps —
+it worked, it looked fine, it was doing nothing.
+
+**The switch was made for provenance, not for search quality.** The rule is that
+every figure comes from a query tool, and an external number breaks it unless a
+reader can see where it came from. Brave returns a description snippet with no
+link between any particular number and any particular source, so attribution
+would have to be inferred from prose — by us. The server-side tool returns
+**citations**: each cited claim carries the url, the page title, and up to 150
+characters of the sentence it was drawn from. That is the provenance record,
+supplied rather than reconstructed, and the web app renders it under the answer
+in a visibly different style. Cost was not a factor either way (Anthropic $10
+per 1,000 searches, Brave ~$5; at this volume both are a few dollars a month),
+and Brave's free tier ended in Feb 2026 in any case.
+
+**Three controls, only one of which is a prompt.** `max_uses: 5` is enforced by
+Anthropic, so a runaway loop cannot happen — the Brave alternative was a card
+with no spending cap behind a tool the model can call twelve times a question.
+`user_location` is set to Singapore, without which holidays and local events
+return a different and useless web. The framing text telling the model to name
+its sources and never mix an external figure into a computed one is a **hint,
+not a control** — the same standing as `KNOWLEDGE_FRAMING`, and it is written
+knowing that. The citations are what let a reader check.
+
+**`allowed_domains` is the strongest guardrail available and is deliberately
+not set.** Restricting searches to vetted sources would end "a blog said 30%",
+but it is the wrong control for holidays and local events, which is most of
+what this is for. It belongs on the benchmarks path, where an external NUMBER
+is the point.
+
+**Three things about the server-side tool that are not obvious:**
+
+- A failed search returns **HTTP 200** with an error object where the results
+  should be. From outside it is identical to a search that found nothing, so
+  `searchErrors()` pulls it out and logs it. An empty result list is *not* an
+  error.
+- The turn can stop with **`stop_reason: 'pause_turn'`**, resumed by sending the
+  assistant message back unchanged. That is not a tool round and has its own
+  counter. The old loop only handled `tool_use` and would have dropped it.
+- Assistant content must be pushed back **unchanged**: search results carry
+  `encrypted_content` the API decrypts to restore them, and rebuilding the array
+  fails with a 400. Conversation *history* across requests is plain text, so
+  search results do not survive between questions — lossy, but valid.
+
+**Not yet built:** the `benchmarks` table. An external figure worth comparing
+ourselves against should be a warehouse row confirmed by a person — source, url,
+published date, review date — the same shape as `revel_venue_keys` and the Xero
+tenant mapping, and reached through a query tool. A blog post found
+mid-conversation is the least trustworthy input in the system; live search is
+for discovery and qualitative context, and a searched number should never be an
+operand in a comparison the model computes itself.
+
 ## Security model — three dimensions (every door checks all three)
 
 - **WHO** (venue): Row-Level Security at the DB. Users belong to venue(s) + role via a `user_venue_roles` table; each sees only their own venue. HQ sees all.
