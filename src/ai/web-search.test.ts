@@ -9,6 +9,7 @@ import {
   WEB_SEARCH_TOOL_TYPE,
   EXTERNAL_CONTEXT_FRAMING,
   isWebSearchConfigError,
+  joinText,
 } from './web-search.js';
 
 /**
@@ -206,4 +207,37 @@ test('user_location carries no country code', () => {
   assert.equal(loc.country, undefined);
   assert.equal(loc.city, 'Singapore');
   assert.equal(loc.timezone, 'Asia/Singapore');
+});
+
+test('citation-split blocks rejoin into continuous prose', () => {
+  // The real shape. A cited span arrives as its own text block, so one
+  // sentence spans three blocks. Joining with "\n" broke sentences mid-clause
+  // and stranded the punctuation after a citation on its own line.
+  const answer = joinText([
+    { type: 'text', text: 'The one day-specific forecast I found ' },
+    { type: 'text', text: 'put 20 August at a high around 31°C', citations: [] },
+    { type: 'text', text: '. Broader seasonal context follows.' },
+  ] as any);
+
+  assert.equal(answer, 'The one day-specific forecast I found put 20 August at a high around 31°C. Broader seasonal context follows.');
+  assert.ok(!answer.includes('\n. '), 'punctuation must not be stranded on its own line');
+});
+
+test('the model\'s own newlines survive', () => {
+  // Blocks are fragments of one message; any real paragraph break is already
+  // inside the text.
+  assert.equal(
+    joinText([{ type: 'text', text: 'Line one.\n\nLine two.' }] as any),
+    'Line one.\n\nLine two.',
+  );
+});
+
+test('non-text blocks are dropped from the answer', () => {
+  assert.equal(
+    joinText([
+      { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: {} },
+      { type: 'text', text: 'Answer.' },
+    ] as any),
+    'Answer.',
+  );
 });

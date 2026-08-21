@@ -8,6 +8,7 @@ import {
   searchErrors,
   searchRequestCount,
   isWebSearchConfigError,
+  joinText,
   EXTERNAL_CONTEXT_FRAMING,
   type WebSource,
 } from './web-search.js';
@@ -280,10 +281,7 @@ export async function askSauron(
     response = await send();
   }
 
-  let answer = response.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as Anthropic.TextBlock).text)
-    .join('\n');
+  let answer = joinText(response.content);
 
   // An empty answer is never acceptable -- it renders as a blank bubble with no
   // clue what went wrong. Recover by asking for a reply from the data already
@@ -314,10 +312,7 @@ export async function askSauron(
         tools: [webSearchTool()],
         system: `${systemPrompt}\n\n${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
       });
-      answer = recovery.content
-        .filter(b => b.type === 'text')
-        .map(b => (b as Anthropic.TextBlock).text)
-        .join('\n');
+      answer = joinText(recovery.content);
     } catch (e: any) {
       // Was swallowed entirely, which left the user with "could not compose a
       // reply" and left us with nothing to look at. The likely causes -- the
@@ -351,6 +346,12 @@ export async function askSauron(
    */
   if (searches > 0) {
     console.log(`[engine] ${searches} web search(es), ${sources.length} cited source(s)`);
+    // Searching and citing nothing is the state worth noticing: the answer
+    // leans on the web and the reader has no way to check it, which is the
+    // exact thing the switch away from Brave was meant to buy.
+    if (sources.length === 0) {
+      console.warn('[engine] searched but returned NO citations — external claims in this answer are unverifiable by the reader.');
+    }
   }
 
   // Deduplicated across the whole turn: `extractSources` dedupes within one

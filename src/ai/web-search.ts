@@ -133,6 +133,31 @@ export function isWebSearchConfigError(e: any): boolean {
   return /web_search/i.test(detail);
 }
 
+/**
+ * The answer's text, reassembled from its blocks.
+ *
+ * JOINED WITH NOTHING, and the separator is the entire point. Without
+ * citations a reply arrives as a single text block, so joining with "\n" was
+ * invisible for months. Citations split the message: a cited span becomes its
+ * own block, so one paragraph arrives as three or four. Joining those with a
+ * newline breaks sentences mid-clause and strands the punctuation that followed
+ * a citation on a line of its own --
+ *
+ *   The one day-specific forecast I found
+ *   put 20 August at a high around 31°C
+ *   . Broader seasonal context:
+ *
+ * -- which is what the first cited answer actually looked like. The blocks are
+ * fragments of one continuous message, not paragraphs, and the model's own
+ * newlines are already inside them.
+ */
+export function joinText(content: Anthropic.Messages.ContentBlock[]): string {
+  return content
+    .filter(b => b.type === 'text')
+    .map(b => (b as Anthropic.Messages.TextBlock).text)
+    .join('');
+}
+
 /** One external source the answer actually cited. */
 export interface WebSource {
   url: string;
