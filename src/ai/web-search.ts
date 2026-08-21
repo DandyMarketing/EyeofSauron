@@ -158,12 +158,41 @@ export function joinText(content: Anthropic.Messages.ContentBlock[]): string {
     .join('');
 }
 
-/** One external source the answer actually cited. */
+/** One external page the answer actually cited, with every passage it used. */
 export interface WebSource {
   url: string;
   title: string | null;
-  /** The sentence the claim was drawn from, up to 150 characters. */
-  quote: string;
+  /**
+   * Each distinct passage drawn from this page, up to 150 characters apiece.
+   *
+   * A LIST, not one string, and grouped by page rather than one entry per
+   * quote. The first version emitted a row per citation, so an answer built on
+   * a single government forecast rendered the same link seven times -- the
+   * noise this was meant to avoid, in a new place. Merging the QUOTES too would
+   * be worse: it would leave one passage standing behind a claim it does not
+   * support. So the link collapses and the evidence does not.
+   */
+  quotes: string[];
+}
+
+/** Fold sources for the same url together, preserving quote order. */
+export function mergeSources(sources: WebSource[]): WebSource[] {
+  const byUrl = new Map<string, WebSource>();
+
+  for (const source of sources) {
+    const existing = byUrl.get(source.url);
+    if (!existing) {
+      byUrl.set(source.url, { ...source, quotes: [...source.quotes] });
+      continue;
+    }
+    // A page cited once with a title and once without keeps the title.
+    if (!existing.title && source.title) existing.title = source.title;
+    for (const quote of source.quotes) {
+      if (!existing.quotes.includes(quote)) existing.quotes.push(quote);
+    }
+  }
+
+  return [...byUrl.values()];
 }
 
 /**
@@ -180,25 +209,24 @@ export interface WebSource {
  * than once in a paragraph and a list of six identical links is noise.
  */
 export function extractSources(content: Anthropic.Messages.ContentBlock[]): WebSource[] {
-  const seen = new Set<string>();
   const sources: WebSource[] = [];
 
   for (const block of content) {
     if (block.type !== 'text') continue;
     for (const citation of block.citations ?? []) {
       if (citation.type !== 'web_search_result_location') continue;
-      const key = `${citation.url}|${citation.cited_text}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       sources.push({
         url: citation.url,
         title: citation.title,
-        quote: citation.cited_text,
+        quotes: [citation.cited_text],
       });
     }
   }
 
-  return sources;
+  // Grouping and de-duplication both live in mergeSources, so one page cited
+  // twice in a paragraph and one page cited across two responses collapse the
+  // same way.
+  return mergeSources(sources);
 }
 
 /**

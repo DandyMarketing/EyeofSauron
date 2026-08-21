@@ -9,6 +9,7 @@ import {
   searchRequestCount,
   isWebSearchConfigError,
   joinText,
+  mergeSources,
   EXTERNAL_CONTEXT_FRAMING,
   type WebSource,
 } from './web-search.js';
@@ -51,6 +52,7 @@ When answering:
 - Always query the data first. Never state a number from memory.
 - If data isn't available for the requested date/venue, say so clearly.
 - Format currency as SGD with $ prefix.
+- Use METRIC units, always — °C, km, kg, litres, m². Singapore is metric, as is most of the world. If an external source reports imperial, convert it and lead with the metric figure; give the original in brackets only when the source's exact wording matters.
 - Use brief bullet points for recommendations.`;
 
 export interface ChatMessage {
@@ -354,15 +356,7 @@ export async function askSauron(
     }
   }
 
-  // Deduplicated across the whole turn: `extractSources` dedupes within one
-  // response, and the same page is commonly cited in several of them.
-  const seen = new Set<string>();
-  const uniqueSources = sources.filter(s => {
-    const key = `${s.url}|${s.quote}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  return { answer, toolCalls, charts, sources: uniqueSources };
+  // Folded across the whole turn: `extractSources` groups within one response,
+  // and the same page is commonly cited in several of them.
+  return { answer, toolCalls, charts, sources: mergeSources(sources) };
 }

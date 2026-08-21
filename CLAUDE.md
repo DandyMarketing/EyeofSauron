@@ -348,6 +348,15 @@ is the point.
   fails with a 400. Conversation *history* across requests is plain text, so
   search results do not survive between questions — lossy, but valid.
 
+**Supplier bills are reachable now.** `query_supplier_bills` answers "$26,034 on
+marketing -- on what?" from the bills beneath a P&L account. Its coverage
+percentage is COMPUTED, in `coverageByAccount()`, and returned with every
+response rather than left to the model to remember: a list of four suppliers
+totalling $6,800 presented as the breakdown of a $26,034 account is a true list
+and a wrong answer, and nothing else in the reply tells the reader which they
+are looking at. Under 80% it says so; over 100% it names credit notes as the
+reason and calls the figure overstated.
+
 **Not yet built:** the `benchmarks` table. An external figure worth comparing
 ourselves against should be a warehouse row confirmed by a person — source, url,
 published date, review date — the same shape as `revel_venue_keys` and the Xero

@@ -954,8 +954,12 @@ async function send() {
         const link = safeUrl
           ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>'
           : label;
-        return '<div class="source-item">' + link +
-          '<span class="source-quote">“' + escapeHtml(s.quote || '') + '”</span></div>';
+        // One entry per PAGE, with every passage under it. Emitting a row per
+        // citation rendered the same government forecast seven times.
+        const quotes = (s.quotes || []).map(function (q) {
+          return '<span class="source-quote">“' + escapeHtml(q) + '”</span>';
+        }).join('');
+        return '<div class="source-item">' + link + quotes + '</div>';
       }).join('');
       box.innerHTML = '<div class="sources-title">From the web — not our data</div>' + items;
       answerBubble.appendChild(box);

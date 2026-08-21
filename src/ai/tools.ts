@@ -143,6 +143,45 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_supplier_bills',
+    description:
+      'Break a Xero P&L cost line down into the actual supplier bills behind it — who was paid, for what, and how much. This is the drill-down for "we spent $26,034 on marketing in June, on what?". Returns bill lines with supplier name, description and amount, grouped by ledger account, for one venue and period. ' +
+      'ALWAYS REPORT THE COVERAGE PERCENTAGE that comes back with the answer, and never present a breakdown as the complete story without it. Bills explain rent, utilities and food purchases almost entirely, but only a fraction of card- and bank-settled spend: measured at Neon Pigeon for June 2026, marketing was 26% covered, commissions 7%, merchant fees 1%, and beverage COGS 0%. A confident-looking list of suppliers that accounts for a quarter of the account is the most misleading answer this tool can give. Say "these bills account for X% of the $Y in that account" every time. ' +
+      'Coverage above 100% means credit notes. We do not ingest ACCPAYCREDIT, so refunds and returns are not deducted and the bill-derived figure is OVERSTATED — food cost has measured 109%. Say so rather than presenting the higher number as the truth. ' +
+      'PAYROLL IS NOT HERE AND NEVER WILL BE. Wages are posted as supplier bills in this chart of accounts, so payroll lines are excluded at ingestion and individual pay is never stored. Aggregate labour cost is available from query_profit_and_loss as a section total. If asked about someone\'s pay, say the system does not hold it. ' +
+      'The P&L account total is the authority; these bills are the explanation beneath it, not a replacement for it.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of the period (inclusive) in YYYY-MM-DD format. Use the same period as the P&L you are explaining.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the period (inclusive) in YYYY-MM-DD format.',
+        },
+        account_name: {
+          type: 'string',
+          description: 'Optional. The P&L account to explain, e.g. "Public Relations / Marketing" — matched loosely, so a fragment works. Omit to see every account with bills in the period.',
+        },
+        supplier: {
+          type: 'string',
+          description: 'Optional. Filter to one supplier, matched loosely. Use for "how much did we pay X this year".',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum bill lines to return (default 100, max 500). Totals and coverage are computed over EVERYTHING in the period, not just the lines returned.',
+        },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_product_mix',
     description: 'Query product-level sales data for a venue on a given date or date range. Returns item names, quantities sold, sales amounts, categories, and percentage of total sales. Use this to answer questions about what sold, top/bottom sellers, food vs beverage breakdown, category performance, and modifier usage. For date ranges, results are aggregated across all dates.',
     input_schema: {

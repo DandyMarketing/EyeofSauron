@@ -10,6 +10,7 @@ import {
   EXTERNAL_CONTEXT_FRAMING,
   isWebSearchConfigError,
   joinText,
+  mergeSources,
 } from './web-search.js';
 
 /**
@@ -72,7 +73,7 @@ test('sources come from citations, with title and quote intact', () => {
   assert.deepEqual(sources, [{
     url: 'https://example.com/a',
     title: 'Survey 2026',
-    quote: 'food cost averaged 30.1%',
+    quotes: ['food cost averaged 30.1%'],
   }]);
 });
 
@@ -86,11 +87,14 @@ test('the same passage cited twice yields one source', () => {
   ] as any);
 
   assert.equal(sources.length, 1);
+  assert.deepEqual(sources[0].quotes, ['averaged 30.1%']);
 });
 
-test('two quotes from one page are two sources', () => {
-  // Same url, different claim. Collapsing these would attach one quote to a
-  // second claim it does not support, which is worse than showing both.
+test('two quotes from one page are ONE source with two quotes', () => {
+  // The link collapses, the evidence does not. A weather answer cited the same
+  // government forecast seven times and rendered the link seven times -- but
+  // merging the quotes as well would leave one passage standing behind a claim
+  // it does not support.
   const sources = extractSources([
     textWithCitations([
       webCite('https://example.com/a', 'Survey', 'food cost averaged 30.1%'),
@@ -98,7 +102,37 @@ test('two quotes from one page are two sources', () => {
     ]),
   ] as any);
 
+  assert.equal(sources.length, 1);
+  assert.deepEqual(sources[0].quotes, ['food cost averaged 30.1%', 'labour cost averaged 28.4%']);
+});
+
+test('two different pages stay two sources', () => {
+  const sources = extractSources([
+    textWithCitations([
+      webCite('https://example.com/a', 'A', 'one'),
+      webCite('https://example.com/b', 'B', 'two'),
+    ]),
+  ] as any);
   assert.equal(sources.length, 2);
+});
+
+test('mergeSources folds the same page across separate responses', () => {
+  // Each tool round is its own response, and the model commonly cites the same
+  // page in several of them.
+  const merged = mergeSources([
+    { url: 'https://example.com/a', title: 'A', quotes: ['one'] },
+    { url: 'https://example.com/a', title: 'A', quotes: ['two', 'one'] },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].quotes, ['one', 'two']);
+});
+
+test('a page cited once without a title keeps the title it had elsewhere', () => {
+  const merged = mergeSources([
+    { url: 'https://example.com/a', title: null, quotes: ['one'] },
+    { url: 'https://example.com/a', title: 'The Real Title', quotes: ['two'] },
+  ]);
+  assert.equal(merged[0].title, 'The Real Title');
 });
 
 test('non-web citations are ignored', () => {

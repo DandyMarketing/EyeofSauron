@@ -3,6 +3,8 @@ import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
+import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
+import { coverageByAccount } from '../lib/bill-coverage.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
@@ -58,6 +60,8 @@ export async function handleToolCall(
       return queryPostPatterns(input);
     case 'query_profit_and_loss':
       return queryProfitAndLoss(input);
+    case 'query_supplier_bills':
+      return querySupplierBills(input);
     case 'query_product_mix':
       return queryProductMix(input);
     case 'query_daily_operations':
@@ -397,6 +401,146 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
     convention: 'Costs are positive under sections named "Less ...". Rows with is_summary=true are section totals — do not add them to the detail lines beneath them.',
     source: 'Xero accounting ledger (not the POS — figures will not tie exactly to Revel sales)',
     rows: data,
+  });
+}
+
+/**
+ * What a P&L cost line was actually spent on.
+ *
+ * The general ledger would have answered this and is closed to us -- /Journals
+ * is Advanced-tier only. Bills answer it better anyway: a bill carries a
+ * supplier, a description and a line coded to an account, where a journal line
+ * carries only a code.
+ *
+ * COVERAGE IS COMPUTED HERE, NOT LEFT TO THE PROMPT, and that is the whole
+ * design of this tool. Bills explain rent and food purchases almost completely
+ * and marketing about a quarter, so a list of suppliers is a true answer to a
+ * question nobody asked -- "who did we pay" instead of "where did the money
+ * go". Every response carries the percentage of the ledger account these bills
+ * account for, because a breakdown covering 26% presented as a breakdown is the
+ * confident wrong answer this codebase keeps finding.
+ *
+ * The join to profit_and_loss is on account_id, the Xero UUID both tables hold.
+ * That was discovered by probing rather than assumed, and it is what removed
+ * the need for a chart-of-accounts scope.
+ */
+async function querySupplierBills(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required' });
+  }
+  const limit = Math.min(Math.max(Number(input.limit) || 100, 1), 500);
+
+  /**
+   * Bills first, lines second, and NEVER one joined query summing bill.total:
+   * a three-line bill would count its total three times. Migration 022 splits
+   * the tables so that mistake is unavailable, and this keeps it that way.
+   */
+  const { data: bills, error: billError } = await supabase
+    .from('supplier_bills')
+    .select('id, invoice_number, supplier_name, bill_date, status, total')
+    .eq('venue_id', venueId)
+    .gte('bill_date', input.start_date)
+    .lte('bill_date', input.end_date);
+
+  if (billError) return JSON.stringify({ error: billError.message });
+
+  // VOIDED and DELETED bills are stored so a figure that changed can be
+  // explained, but they are not spend.
+  const spendBills = (bills ?? []).filter(
+    b => !NON_SPEND_STATUSES.has(String(b.status ?? '').toUpperCase()),
+  );
+  const billById = new Map(spendBills.map(b => [b.id, b]));
+
+  if (billById.size === 0) {
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      lines: [],
+      note: 'No supplier bills have been ingested for this venue and period. This does NOT mean nothing was spent — say the detail is not available and quote the P&L account total instead.',
+    });
+  }
+
+  const { data: lines, error: lineError } = await supabase
+    .from('supplier_bill_lines')
+    .select('bill_id, description, quantity, unit_amount, line_amount, account_code, account_id')
+    .eq('venue_id', venueId)
+    .in('bill_id', [...billById.keys()]);
+
+  if (lineError) return JSON.stringify({ error: lineError.message });
+
+  // Account NAMES live only in the P&L; a bill line carries a code and a UUID.
+  // This is also the denominator for coverage.
+  const { data: plRows } = await supabase
+    .from('profit_and_loss')
+    .select('account_id, account_name, amount, is_summary')
+    .eq('venue_id', venueId)
+    .gte('period_start', input.start_date)
+    .lte('period_end', input.end_date)
+    .not('account_id', 'is', null);
+
+  const accountName = new Map<string, string>();
+  const ledgerTotal = new Map<string, number>();
+  for (const row of plRows ?? []) {
+    if (row.is_summary) continue;  // section totals would double the denominator
+    if (!row.account_id) continue;
+    accountName.set(row.account_id, row.account_name ?? row.account_id);
+    ledgerTotal.set(row.account_id, (ledgerTotal.get(row.account_id) ?? 0) + Number(row.amount ?? 0));
+  }
+
+  const wantAccount = String(input.account_name ?? '').trim().toLowerCase();
+  const wantSupplier = String(input.supplier ?? '').trim().toLowerCase();
+
+  const matched = [];
+  for (const line of lines ?? []) {
+    const bill = billById.get(line.bill_id);
+    if (!bill) continue;
+
+    const name = line.account_id ? accountName.get(line.account_id) ?? null : null;
+    if (wantAccount && !(name ?? '').toLowerCase().includes(wantAccount)) continue;
+    if (wantSupplier && !String(bill.supplier_name ?? '').toLowerCase().includes(wantSupplier)) continue;
+
+    matched.push({
+      account: name,
+      account_code: line.account_code,
+      account_id: line.account_id,
+      supplier: bill.supplier_name,
+      bill_date: bill.bill_date,
+      invoice_number: bill.invoice_number,
+      description: line.description,
+      amount: Number(line.line_amount ?? 0),
+    });
+  }
+
+  // Totals over EVERYTHING matched, before the limit is applied. A total that
+  // silently described only the first hundred rows would be worse than no
+  // total at all.
+  //
+  // The arithmetic lives in coverageByAccount so it can be tested without a
+  // database. It is the part of this tool that decides whether an answer is
+  // honest, so it is not left inline and unexercised.
+  const coverage = coverageByAccount(
+    matched.map(m => ({ account_id: m.account_id, account: m.account, amount: m.amount })),
+    ledgerTotal,
+  );
+
+  const returned = matched
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit);
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    source: 'Xero supplier bills (ACCPAY). The P&L account total is the authority; these explain what sits beneath it.',
+    coverage_by_account: coverage,
+    reporting_rule: 'State the coverage percentage alongside any supplier breakdown. A list covering a quarter of an account, presented as the breakdown, is a wrong answer.',
+    payroll: 'Payroll bill lines are excluded at ingestion and individual pay is never stored. Aggregate labour cost comes from query_profit_and_loss.',
+    lines_returned: returned.length,
+    lines_matched: matched.length,
+    truncated: matched.length > returned.length
+      ? `Showing the ${returned.length} largest of ${matched.length} lines. Totals and coverage above cover ALL of them.`
+      : null,
+    lines: returned,
   });
 }
 

@@ -24,6 +24,8 @@ if (result.sources.length > 0) {
   for (const s of result.sources) {
     console.log(`  ${s.title ?? s.url}`);
     console.log(`    ${s.url}`);
-    console.log(`    "${s.quote}"`);
+    // Every passage under one heading: a page cited seven times is one source
+    // with seven quotes, not seven sources.
+    for (const quote of s.quotes) console.log(`    "${quote}"`);
   }
 }
