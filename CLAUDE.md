@@ -293,6 +293,49 @@ more than them, and does their audience respond harder per follower" and not
 and is solid; competitor benchmarking is directional. Sauron must say which of
 the two it is using.
 
+### Layer 2: what a post is ABOUT, and why visualisation is a rule
+
+Built 23 Aug 2026. The taxonomy had been agreed and written into
+`src/ai/post-taxonomy.ts` -- nine categories in Khai's own words -- and nothing
+consumed it. No columns, no classifier, no query dimension.
+
+Layer 1 is what a post IS: media type, hashtags, caption length, posting hour.
+It answers "reels beat images", which nobody can act on. Layer 2 is what it is
+ABOUT -- dish, drink, room, lifestyle, team, promotion, activation, news, brand
+-- and "dish out-reaches lifestyle two to one at Fat Prince" is a plan.
+
+**Category and flags are different shapes on purpose.** A post has exactly one
+subject and any number of attributes. A trending-audio reel of a cocktail is a
+Drink post wearing a trend format; making "trend" a tenth category would delete
+it from the subject analysis and destroy the only question worth asking --
+whether trend formats beat straight ones with the subject held constant.
+
+**The image is sent, not just the caption.** Dish vs Drink vs Room vs Lifestyle
+is a distinction about what is in the picture, and a cocktail post captioned
+"Friday." is unclassifiable from text. `classified_from` records which was used
+because a caption-only pass and a caption+image pass are not comparable.
+
+**`is_trend` is low confidence and says so everywhere.** Trends live largely in
+audio the classifier cannot hear, and one that ran after the training cutoff
+cannot be recognised at all -- so the true count is probably higher than the
+number. Report it as an indication, never as a fact.
+
+**NULL is not a category and not a false.** An unclassified post has not been
+judged; grouping it would put the classifier's backlog on the same footing as a
+real subject. Same for every flag: judged-absent and never-judged are different,
+and collapsing them makes a flag a majority-false column that means nothing --
+the `collaborator_count` mistake, one table over.
+
+**Show the data, do not narrate it.** A paragraph containing six figures is the
+hardest possible way to read six figures, and this is for operators on a phone
+between services. The system prompt now requires a table for anything past
+about three numbers or any comparison, and `create_chart` whenever the metric is
+one it supports. Being honest about the boundary matters: create_chart covers
+sales, covers, spend per head, walk-ins, no-shows and Instagram only -- P&L
+lines, supplier bills, product mix and post categories have to be markdown
+tables, and the prompt says so rather than letting the model promise a chart it
+cannot draw.
+
 ## Company structure (Singapore incorporation)
 
 Each venue is its own private limited company, under an umbrella that operates

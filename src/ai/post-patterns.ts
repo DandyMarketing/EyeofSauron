@@ -12,13 +12,39 @@
  * to lean on.
  */
 
+
+/**
+ * A flag's bucket, or nothing at all.
+ *
+ * Null means the post was never judged -- a different thing from judged-absent,
+ * and the distinction the collaborator_count fix had to learn the hard way.
+ */
+function flagBucket(value: boolean | null | undefined, whenTrue: string, whenFalse: string): string[] {
+  if (value === null || value === undefined) return [];
+  return [value ? whenTrue : whenFalse];
+}
+
 export type Dimension =
   | 'hashtag' | 'mention' | 'media_type' | 'media_product_type' | 'weekday'
-  | 'time_of_day' | 'caption_length' | 'has_question' | 'is_collab';
+  | 'time_of_day' | 'caption_length' | 'has_question' | 'is_collab'
+  /**
+   * What the post is ABOUT, not what it is. Layer 1 answers "reels beat
+   * images" and cannot answer what to post next; this is the axis marketing
+   * actually plans on.
+   */
+  | 'category'
+  /** Flags cut ACROSS category — a trend-format reel of a cocktail is both. */
+  | 'shows_people' | 'has_call_to_action' | 'is_repost' | 'is_trend';
 
 export interface PostLike {
   business_date: string;
   media_type: string | null;
+  /** Null means NOT YET CLASSIFIED — never a group of its own. */
+  category?: string | null;
+  shows_people?: boolean | null;
+  has_call_to_action?: boolean | null;
+  is_repost?: boolean | null;
+  is_trend?: boolean | null;
   hashtags: string[] | null;
   mentions: string[] | null;
   caption_length: number | null;
@@ -123,6 +149,24 @@ function groupsFor(post: PostLike, dimension: Dimension): string[] {
       return post.collaborator_count === null || post.collaborator_count === undefined
         ? []
         : [post.collaborator_count > 0 ? 'published with a collaborator' : 'solo'];
+    /**
+     * Null is NOT a category. An unclassified post has not been judged, and
+     * grouping it as "unknown" would put the classifier's backlog on the same
+     * footing as a real subject and drag every average toward it.
+     */
+    case 'category':
+      return post.category ? [post.category] : [];
+    // Same rule for every flag: null means never judged, false means judged
+    // absent. Collapsing them would make a flag a majority-false column that
+    // means nothing.
+    case 'shows_people':
+      return flagBucket(post.shows_people, 'shows people', 'no people');
+    case 'has_call_to_action':
+      return flagBucket(post.has_call_to_action, 'asks for something', 'no ask');
+    case 'is_repost':
+      return flagBucket(post.is_repost, 'reposted', 'made by the venue');
+    case 'is_trend':
+      return flagBucket(post.is_trend, 'trend format', 'straight post');
     case 'weekday': {
       const d = new Date(`${post.business_date}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? [] : [WEEKDAYS[d.getUTCDay()]];

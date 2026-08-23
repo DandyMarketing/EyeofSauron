@@ -73,6 +73,11 @@ export const queryTools: Tool[] = [
   {
     name: 'query_post_patterns',
     description:
+      'CATEGORY IS THE DIMENSION MARKETING PLANS ON. Every other dimension describes what a post IS — a reel, a carousel, posted at 7pm. Only "category" says what it is ABOUT: dish, drink, room, lifestyle, team, promotion, activation, news, brand. "Reels beat images" cannot be acted on; "dish posts out-reach lifestyle posts two to one at Fat Prince" can. Reach for it first on any question about what to post. ' +
+      'Posts that have not been classified are EXCLUDED from a category breakdown rather than grouped as unknown — an unclassified post has not been judged, and counting it as a subject would drag every average toward the classifier backlog. If the counts look small for the period, say that classification may be incomplete rather than treating what came back as the whole picture. ' +
+      'shows_people, has_call_to_action, is_repost and is_trend are FLAGS that cut across category — a trend-format reel of a cocktail is category "drink" with is_trend true. That is what makes "do trend formats work" answerable with the subject held constant. ' +
+      'is_trend IS LOW CONFIDENCE and must be reported as an indication, never as a fact. Trends live largely in audio the classifier cannot hear, and a trend that ran after its training cutoff cannot be recognised at all — so a false negative is likely and the true number of trend posts is probably higher than the count. ' +
+      'Classification came from reading the caption and looking at the image. It is a judgement, not a measurement: say "classified as" rather than asserting what a post was. ' +
       'What KIND of Instagram post performs, rather than which individual post won. Groups a venue\'s posts by a feature — hashtag, media type, weekday, time of day, caption length, whether it asks a question, who it mentions — and reports how each group performed. This is the tool for "what should we post more of", "does posting at 6pm work better", "which hashtags actually help", "do reels beat photos", and any attempt to repeat a success. ' +
       'SAMPLE SIZE IS THE WHOLE STORY HERE. Each group carries a post count and a "thin" flag. A venue posts roughly thirty times a month, so splitting a single month ten ways leaves three posts a group — and three posts will show a 40% difference from pure noise. Never recommend an action off a thin group; say it is a hint worth watching and ask for a longer period. Widen the date range before drawing a conclusion. ' +
       'Groups are ranked by MEDIAN, not mean, so one viral post cannot carry a group to the top. Both are returned: a large gap between them means that group rests on a single post, and saying so is more useful than the ranking. ' +
@@ -94,7 +99,7 @@ export const queryTools: Tool[] = [
         end_date: { type: 'string', description: 'End of range (inclusive), YYYY-MM-DD.' },
         dimension: {
           type: 'string',
-          enum: ['hashtag', 'mention', 'media_type', 'media_product_type', 'weekday', 'time_of_day', 'caption_length', 'has_question', 'is_collab'],
+          enum: ['hashtag', 'mention', 'media_type', 'media_product_type', 'weekday', 'time_of_day', 'caption_length', 'has_question', 'is_collab', 'category', 'shows_people', 'has_call_to_action', 'is_repost', 'is_trend'],
           description:
             'What to group by. Default media_type. Use media_product_type rather than media_type for "do reels work": media_type reports VIDEO for both a feed video and a reel, which are distributed nothing alike. is_collab separates posts published WITH another account — those reach the collaborator\'s audience too, so a collab breakout is about distribution, not content. weekday uses the TRADING date (3am-to-3am, matching sales) so it lines up with the night a post belongs to; time_of_day uses the real Singapore clock hour it was published, which for a 2am post is a different answer — both are correct and they answer different questions.',
         },

@@ -58,6 +58,11 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '021_post_distribution.sql',
   },
   {
+    table: 'social_posts',
+    columns: ['category', 'category_confidence', 'shows_people', 'has_call_to_action', 'is_repost', 'is_trend', 'classified_at', 'classifier_model', 'classified_from'],
+    migration: '025_post_classification.sql',
+  },
+  {
     table: 'venue_notes',
     columns: ['source_question'],
     migration: '015_note_source_question.sql',

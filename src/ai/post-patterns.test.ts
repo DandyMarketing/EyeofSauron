@@ -283,3 +283,99 @@ describe('reach_multiple — finding a post that escaped the follower base', () 
     assert.ok(caveat!.includes('never quote a mean') || caveat!.includes('never average'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Layer 2: what a post is ABOUT
+// ---------------------------------------------------------------------------
+
+/**
+ * Every other dimension describes what a post IS. Only category says what it is
+ * about, and that is the axis marketing plans on — "reels beat images" cannot
+ * be acted on, "dish out-reaches lifestyle two to one" can.
+ */
+
+const classified = (over: any = {}) => ({
+  business_date: '2026-08-01',
+  media_type: 'IMAGE',
+  hashtags: [],
+  mentions: [],
+  caption_length: 40,
+  has_question: false,
+  posted_hour: 19,
+  metrics: { reach: 1000, total_interactions: 100 },
+  ...over,
+});
+
+test('posts group by what they are about', () => {
+  const result = groupPosts(
+    [
+      classified({ category: 'dish' }),
+      classified({ category: 'dish' }),
+      classified({ category: 'lifestyle' }),
+    ] as any,
+    'category',
+    'reach',
+  );
+  assert.deepEqual(result.groups.map(g => g.group).sort(), ['dish', 'lifestyle']);
+  assert.equal(result.groups.find(g => g.group === 'dish')!.posts, 2);
+});
+
+test('an UNCLASSIFIED post is excluded, never grouped as unknown', () => {
+  // A null category means nobody has judged it. Grouping it would put the
+  // classifier's backlog on the same footing as a real subject and drag every
+  // average toward it.
+  const result = groupPosts(
+    [classified({ category: 'dish' }), classified({ category: null })] as any,
+    'category',
+    'reach',
+  );
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].group, 'dish');
+  // Counted as excluded rather than vanishing, so a mostly-unclassified period
+  // is visible instead of looking like a small sample.
+  assert.equal(result.posts_excluded_no_feature, 1);
+});
+
+test('a flag splits into two named buckets', () => {
+  const result = groupPosts(
+    [
+      classified({ is_trend: true }),
+      classified({ is_trend: false }),
+      classified({ is_trend: false }),
+    ] as any,
+    'is_trend',
+    'reach',
+  );
+  const byGroup = Object.fromEntries(result.groups.map(g => [g.group, g.posts]));
+  assert.equal(byGroup['trend format'], 1);
+  assert.equal(byGroup['straight post'], 2);
+});
+
+test('a flag that was never judged is excluded, not counted as false', () => {
+  // "Judged absent" and "never judged" are different. Collapsing them turns a
+  // flag into a majority-false column that means nothing — the same mistake
+  // collaborator_count made with solo posts.
+  const result = groupPosts(
+    [classified({ shows_people: true }), classified({ shows_people: null })] as any,
+    'shows_people',
+    'reach',
+  );
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].group, 'shows people');
+  assert.equal(result.posts_excluded_no_feature, 1);
+});
+
+test('flags cut across category rather than replacing it', () => {
+  // A trending-audio reel of a cocktail is a drink post wearing a trend format.
+  // Grouping the same posts two ways must give two different, valid answers —
+  // which is what makes "do trend formats work" answerable with the subject
+  // held constant.
+  const posts = [
+    classified({ category: 'drink', is_trend: true }),
+    classified({ category: 'drink', is_trend: false }),
+    classified({ category: 'dish', is_trend: true }),
+  ] as any;
+
+  assert.equal(groupPosts(posts, 'category', 'reach').groups.length, 2);
+  assert.equal(groupPosts(posts, 'is_trend', 'reach').groups.length, 2);
+});

@@ -332,7 +332,7 @@ async function queryPostPatterns(input: Record<string, any>): Promise<string> {
   // so grouping them beside posts would compare content against audience.
   const { data, error } = await supabase
     .from('social_posts')
-    .select('business_date, media_type, hashtags, mentions, caption_length, has_question, posted_hour, metrics')
+    .select('business_date, media_type, media_product_type, collaborator_count, hashtags, mentions, caption_length, has_question, posted_hour, metrics, category, shows_people, has_call_to_action, is_repost, is_trend')
     .eq('venue_id', venueId)
     .eq('content_type', 'post')
     .gte('business_date', input.start_date)
