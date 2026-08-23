@@ -310,6 +310,13 @@ Drink post wearing a trend format; making "trend" a tenth category would delete
 it from the subject analysis and destroy the only question worth asking --
 whether trend formats beat straight ones with the subject held constant.
 
+**The image is UPLOADED, not linked.** Passing Instagram's CDN url to the API
+fails every time with `This URL is disallowed by the website's robots.txt file`
+-- Anthropic's image fetcher obeys robots.txt and Instagram disallows crawlers,
+so no Instagram media can ever reach the API by link. The bytes are fetched by
+us and sent as base64. A failed image degrades that ONE post to caption-only
+rather than skipping it, and the count is reported so a weak pass is visible.
+
 **The image is sent, not just the caption.** Dish vs Drink vs Room vs Lifestyle
 is a distinction about what is in the picture, and a cocktail post captioned
 "Friday." is unclassifiable from text. `classified_from` records which was used

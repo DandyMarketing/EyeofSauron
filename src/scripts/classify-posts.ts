@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js';
 import { requireSchema } from '../lib/schema-check.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { classifierPrompt, classificationTool, parseClassification } from '../ai/post-classifier.js';
+import { fetchImageAsBase64 } from '../lib/image-fetch.js';
 
 /**
  * Classify posts by what they are ABOUT.
@@ -120,6 +121,12 @@ const TOOL = classificationTool();
 
 let classified = 0;
 let skipped = 0;
+/**
+ * Posts that fell back to caption-only. Counted rather than only listed: the
+ * first three are enough to diagnose the cause, and the total is what says how
+ * much of the pass is weaker than it should be.
+ */
+let imageFailures = 0;
 const problems: string[] = [];
 const categoryCounts = new Map<string, number>();
 
@@ -141,11 +148,36 @@ for (let i = 0; i < posts.length; i += batchSize) {
 
   for (const post of batch) {
     const imageUrl = thumbnails[post.post_id];
-    const usedImage = Boolean(imageUrl);
 
+    /**
+     * The BYTES, not the link.
+     *
+     * Passing the CDN url straight to the API fails every time with "This URL
+     * is disallowed by the website's robots.txt file" -- Anthropic's fetcher
+     * obeys robots.txt and Instagram's CDN disallows crawlers. No Instagram
+     * media can reach the API by link, so we fetch it here and upload it.
+     *
+     * A failed image degrades this ONE post to caption-only rather than
+     * skipping it; classified_from records which it was, so the two passes are
+     * never averaged together.
+     */
     const content: any[] = [];
-    if (usedImage) {
-      content.push({ type: 'image', source: { type: 'url', url: imageUrl } });
+    let usedImage = false;
+
+    if (imageUrl) {
+      const fetched = await fetchImageAsBase64(imageUrl);
+      if (fetched.ok) {
+        usedImage = true;
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: fetched.image.media_type, data: fetched.image.data },
+        });
+      } else {
+        imageFailures++;
+        if (imageFailures <= 3) {
+          problems.push(`${post.permalink ?? post.post_id}: no image (${fetched.reason}) — classified from the caption alone`);
+        }
+      }
     }
     content.push({
       type: 'text',
@@ -206,6 +238,14 @@ for (let i = 0; i < posts.length; i += batchSize) {
 }
 
 console.log(`\n${classified} post(s) classified, ${skipped} skipped.`);
+
+if (imageFailures > 0) {
+  console.log(
+    `${imageFailures} classified from the CAPTION ALONE — no usable image. ` +
+    `Subject is largely invisible in a caption, so treat those as weaker; ` +
+    `classified_from records which pass each post had.`,
+  );
+}
 
 if (categoryCounts.size > 0) {
   console.log('\nDistribution:');
