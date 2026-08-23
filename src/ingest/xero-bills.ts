@@ -39,6 +39,78 @@ export interface BillIngestResult {
   stored: boolean;
 }
 
+/**
+ * How many rows PostgREST returns before it stops without saying so.
+ *
+ * Supabase caps a request at 1,000 rows and reports nothing when it truncates.
+ * That has cost this project data four times already, which is why every read
+ * that can exceed it pages instead of hoping.
+ */
+const PG_PAGE = 1000;
+
+export interface PlAccountRow {
+  account_id: string | null;
+  account_name: string | null;
+}
+
+/** One page of P&L account rows, or an error message. Injectable for tests. */
+export type PlAccountPage = (
+  venueId: string,
+  from: number,
+  to: number,
+) => Promise<{ rows: PlAccountRow[] | null; error: string | null }>;
+
+const fetchPlAccountPage: PlAccountPage = async (venueId, from, to) => {
+  const { data, error } = await supabase
+    .from('profit_and_loss')
+    .select('account_id, account_name')
+    .eq('venue_id', venueId)
+    .not('account_id', 'is', null)
+    // Ordered so the pages are stable. Without it Postgres may return rows in
+    // a different order per request and a page boundary can drop rows.
+    .order('account_id', { ascending: true })
+    .range(from, to);
+  return { rows: data ?? null, error: error ? error.message : null };
+};
+
+/**
+ * EVERY P&L account row for a venue, paged.
+ *
+ * This feeds the payroll exclusion, so a truncated read is not a smaller
+ * answer -- it is personal pay reaching the warehouse. Two years of P&L is
+ * roughly 43 to 55 lines a month, so 24 months is about 1,030 to 1,090 rows
+ * per venue: just over the cap, unordered, with no error. The exclusion would
+ * have kept working by luck, because the same four payroll accounts repeat in
+ * every month and would almost certainly survive any 1,000-row slice. "Almost
+ * certainly" is the wrong standard for the one filter standing between
+ * somebody's salary and a queryable table.
+ */
+export async function allPlAccounts(
+  venueId: string,
+  fetchPage: PlAccountPage = fetchPlAccountPage,
+  pageSize: number = PG_PAGE,
+): Promise<PlAccountRow[]> {
+  const rows: PlAccountRow[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { rows: page, error } = await fetchPage(venueId, from, from + pageSize - 1);
+
+    // A failed read must not look like "this venue has no payroll accounts",
+    // which would silently disable the exclusion for the whole run.
+    if (error) {
+      throw new Error(
+        `Could not read P&L accounts for the payroll exclusion (${error}). ` +
+        `Refusing to ingest bills: without this list, payroll lines would be stored.`,
+      );
+    }
+
+    rows.push(...(page ?? []));
+    if (!page || page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
 /** Xero's `where` syntax wants DateTime(y,m,d), not an ISO string. */
 function xeroDate(iso: string): string {
   const [y, m, d] = iso.split('-');
@@ -79,13 +151,7 @@ export async function ingestSupplierBills(
    * Read from the P&L because that is where account NAMES live: a bill line
    * carries only a code and a UUID and cannot be judged on its own.
    */
-  const { data: plAccounts } = await supabase
-    .from('profit_and_loss')
-    .select('account_id, account_name')
-    .eq('venue_id', venueId)
-    .not('account_id', 'is', null);
-
-  const excludedAccounts = payrollAccountIds(plAccounts ?? []);
+  const excludedAccounts = payrollAccountIds(await allPlAccounts(venueId));
 
   const accessToken = await getAccessToken(tenantId);
   const where = encodeURIComponent(

@@ -124,6 +124,8 @@ if (dryRun) {
 let stored = 0;
 let skipped = 0;
 let billLines = 0;
+/** Periods whose P&L was already final but whose bills had never been fetched. */
+let billsBackfilled = 0;
 const findings: string[] = [];
 const refused: string[] = [];
 const errors: string[] = [];
@@ -146,42 +148,80 @@ for (const t of targets as any[]) {
 
   for (const period of periods) {
     const fetchedAt = heldBy.get(`${period.start}|${period.end}`);
+    const plFinal = !force && !onlyMonth && isStoredPeriodFinal(period.end, fetchedAt);
 
-    if (!force && !onlyMonth && isStoredPeriodFinal(period.end, fetchedAt)) {
+    /**
+     * Bills get their own verdict, because the P&L's says nothing about them.
+     *
+     * The skip used to be decided entirely on whether the P&L was final and
+     * then `continue`d past the bill fetch. So on 23 Aug 2026 a run asked for
+     * `--months=24 --bills` and pulled bills for FOUR months: the other sixty
+     * venue-months had a stored P&L from an earlier run, were skipped whole,
+     * and had never had a bill fetched in their lives. The run reported
+     * success. Same shape as the reach windows -- a skip condition inherited
+     * from something it does not actually describe.
+     *
+     * Checked only when the P&L would otherwise be skipped, so the common path
+     * costs nothing.
+     */
+    let billsMissing = false;
+    if (withBills && plFinal) {
+      const { count, error: countError } = await supabase
+        .from('supplier_bills')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', t.venue_id)
+        .gte('bill_date', period.start)
+        .lte('bill_date', period.end);
+
+      // Unknown is treated as missing. Assuming "already have them" on a failed
+      // read is how a gap becomes permanent.
+      billsMissing = countError ? true : (count ?? 0) === 0;
+    }
+
+    if (plFinal && !billsMissing) {
       skipped++;
       continue;
     }
 
     try {
-      const r = await ingestProfitAndLoss(t.tenant_id, period.start, period.end);
+      /**
+       * A final P&L is not re-fetched just because its bills are missing --
+       * that would spend a call rewriting rows that cannot have changed.
+       */
+      const r = plFinal
+        ? { stored: false, lines: 0, error: undefined as string | undefined }
+        : await ingestProfitAndLoss(t.tenant_id, period.start, period.end);
 
       if (r.stored) {
         stored++;
         console.log(`  ${period.label}: ${r.lines} line(s)`);
+      }
 
-        if (withBills) {
-          const b = await ingestSupplierBills(t.tenant_id, period.start, period.end, paceMs);
-          billLines += b.lines;
-          console.log(
-            `  ${period.label}: ${b.bills} bill(s), ${b.lines} bill line(s)` +
-            `${b.pages > 1 ? `, ${b.pages} pages` : ''}`,
-          );
-          // Both are findings rather than failures, and both are invisible
-          // unless said: a voided bill is real but is not spend, and a bill
-          // with no readable date is a gap somebody should be able to see.
-          if (b.non_spend > 0) {
-            findings.push(`${label} ${period.label}: ${b.non_spend} bill(s) voided or deleted — stored, but NOT spend`);
-          }
-          // Said out loud every time. An exclusion nobody can see is
-          // indistinguishable from an exclusion that stopped working.
-          if (b.payroll_lines_excluded > 0) {
-            findings.push(`${label} ${period.label}: ${b.payroll_lines_excluded} payroll bill line(s) EXCLUDED — personal pay is never stored`);
-          }
-          if (b.unusable > 0) {
-            findings.push(`${label} ${period.label}: ${b.unusable} bill(s) had no id or no readable date and were skipped`);
-          }
+      if (withBills && (r.stored || billsMissing)) {
+        const b = await ingestSupplierBills(t.tenant_id, period.start, period.end, paceMs);
+        if (plFinal) billsBackfilled++;
+        billLines += b.lines;
+        console.log(
+          `  ${period.label}: ${b.bills} bill(s), ${b.lines} bill line(s)` +
+          `${b.pages > 1 ? `, ${b.pages} pages` : ''}`,
+        );
+        // Both are findings rather than failures, and both are invisible
+        // unless said: a voided bill is real but is not spend, and a bill
+        // with no readable date is a gap somebody should be able to see.
+        if (b.non_spend > 0) {
+          findings.push(`${label} ${period.label}: ${b.non_spend} bill(s) voided or deleted — stored, but NOT spend`);
         }
-      } else {
+        // Said out loud every time. An exclusion nobody can see is
+        // indistinguishable from an exclusion that stopped working.
+        if (b.payroll_lines_excluded > 0) {
+          findings.push(`${label} ${period.label}: ${b.payroll_lines_excluded} payroll bill line(s) EXCLUDED — personal pay is never stored`);
+        }
+        if (b.unusable > 0) {
+          findings.push(`${label} ${period.label}: ${b.unusable} bill(s) had no id or no readable date and were skipped`);
+        }
+      }
+
+      if (!plFinal && !r.stored) {
         // Reconciliation refused it. This is a FINDING about the ledger, not a
         // failed run -- and the whole reason the gate exists.
         console.log(`  ${period.label}: REFUSED — ${r.error ?? 'did not reconcile'}`);
@@ -198,7 +238,14 @@ for (const t of targets as any[]) {
 }
 
 console.log(`\n${stored} period(s) stored, ${skipped} already final and skipped.`);
-if (withBills) console.log(`${billLines} supplier bill line(s) stored.`);
+if (withBills) {
+  console.log(`${billLines} supplier bill line(s) stored.`);
+  // Reported because it is the number that was silently zero before: months
+  // whose P&L was already final and whose bills had never been fetched.
+  if (billsBackfilled > 0) {
+    console.log(`${billsBackfilled} period(s) had a final P&L but NO bills — bills fetched for them now.`);
+  }
+}
 
 if (findings.length > 0) {
   console.log(`\nFINDINGS (${findings.length}) — the run worked, these are about the data:`);
@@ -226,7 +273,9 @@ if (errors.length > 0) {
  * Storing NOTHING at all is different, and is a failure however politely it was
  * reported.
  */
-const storedNothing = stored === 0 && skipped === 0;
+// billsBackfilled counts too: a run where every P&L was already final and the
+// only work was filling in missing bills is a successful run, not an empty one.
+const storedNothing = stored === 0 && skipped === 0 && billsBackfilled === 0;
 if (storedNothing) {
   console.error('\nNothing was stored and nothing was skipped — no period succeeded. Treating as a failed run.');
 }
