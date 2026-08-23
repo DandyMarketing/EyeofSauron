@@ -114,7 +114,10 @@ export const queryTools: Tool[] = [
       'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +
       'IMPORTANT: figures come from the accounting ledger, not the POS, so they will not match Revel sales exactly — the ledger is on a different basis and includes items the POS never sees. Say which source a figure came from when both are in play. ' +
       'Costs are POSITIVE numbers under sections named "Less ..." — that is Xero\'s convention, not an error. Detail lines and section totals are both returned; use the is_summary flag rather than adding everything up, or every section is counted twice. ' +
-      'Only periods that have been ingested are available; if a period is missing, say so rather than estimating it from revenue.',
+      'Only periods that have been ingested are available; if a period is missing, say so rather than estimating it from revenue. ' +
+      'COMPARE VENUES ON canonical_account, NEVER ON account_name. The three ledgers spell the same cost differently — Fat Prince writes "Public Relations / Marketing costs" where the others write "fees" — so comparing raw names splits one cost across two buckets that never add up, and the answer looks complete. canonical_account is the shared name; account_name is kept beside it so you can say what was rolled together. ' +
+      'Any account listed in unmapped_accounts has no entry in the account map and resolves to its own name, so it may not match the equivalent account elsewhere. Say so when comparing venues. ' +
+      'business_line separates sub-businesses that still belong in the venue P&L — Neon Pigeon sells sushi and merchandise inside Potus Pte Ltd. Left unfiltered you get the entity\'s true profitability, which is almost always what is wanted; filter only when asked about that business on its own.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -137,6 +140,10 @@ export const queryTools: Tool[] = [
         summary_only: {
           type: 'boolean',
           description: 'True returns only section totals (Total Income, Total Cost of Sales). Use for headline profit questions; omit to see the account lines behind them.',
+        },
+        business_line: {
+          type: 'string',
+          description: 'Optional. Isolate a sub-business: "sushi" or "merchandise" at Neon Pigeon, "main" for the rest. OMIT IT for any question about the venue\'s or the company\'s profitability — a sub-business belongs INSIDE the entity P&L, and Neon Pigeon\'s sushi exists precisely to improve Potus Pte Ltd\'s bottom line. Use it only when asked about that business specifically.',
         },
       },
       required: ['venue_slug', 'start_date', 'end_date'],

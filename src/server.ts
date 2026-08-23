@@ -519,6 +519,82 @@ app.get('/admin/api/venues', async (c) => {
   return c.json({ venues: data ?? [] });
 });
 
+/**
+ * The account map: what each venue's ledger name means everywhere else.
+ *
+ * Returns the mapping AND the accounts that have no row in it. The second list
+ * is the point -- an unmapped account resolves to its own name, which merges
+ * nothing and moves no figure, but it also will not match the equivalent
+ * account at another venue. That is invisible in an answer, so it has to be
+ * visible here.
+ */
+app.get('/admin/api/account-map', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const [{ data: mappings }, { data: venues }] = await Promise.all([
+    supabaseAdmin
+      .from('account_map')
+      .select('id, venue_id, account_name, canonical_account, business_line, notes, confirmed_at')
+      .order('account_name', { ascending: true }),
+    supabaseAdmin.from('venues').select('id, name, slug'),
+  ]);
+
+  // Every account the ledger actually holds, so "missing from the map" can be
+  // computed rather than assumed.
+  const { data: ledger } = await supabaseAdmin
+    .from('profit_and_loss')
+    .select('venue_id, account_name')
+    .eq('is_summary', false);
+
+  const mapped = new Set((mappings ?? []).map(m => `${m.venue_id}|${m.account_name}`));
+  const unmapped: Array<{ venue_id: string; account_name: string }> = [];
+  const seen = new Set<string>();
+  for (const row of ledger ?? []) {
+    const key = `${row.venue_id}|${row.account_name}`;
+    if (mapped.has(key) || seen.has(key) || !row.account_name) continue;
+    seen.add(key);
+    unmapped.push({ venue_id: row.venue_id, account_name: row.account_name });
+  }
+
+  return c.json({ mappings: mappings ?? [], venues: venues ?? [], unmapped });
+});
+
+app.put('/admin/api/account-map', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const body = await c.req.json<{
+    venue_id: string;
+    account_name: string;
+    canonical_account: string;
+    business_line?: string;
+    notes?: string;
+  }>();
+
+  if (!body.venue_id || !body.account_name || !body.canonical_account) {
+    return c.json({ error: 'venue_id, account_name and canonical_account are required' }, 400);
+  }
+
+  // Stamped with who decided. Every mapping table in this system carries its
+  // provenance, because a mapping nobody can trace is one nobody can question.
+  const { error } = await supabaseAdmin
+    .from('account_map')
+    .upsert({
+      venue_id: body.venue_id,
+      account_name: body.account_name,
+      canonical_account: body.canonical_account,
+      business_line: body.business_line?.trim() || 'main',
+      notes: body.notes ?? null,
+      confirmed_by: user.id,
+      confirmed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'venue_id,account_name' });
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
+});
+
 app.get('/admin/api/system', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);

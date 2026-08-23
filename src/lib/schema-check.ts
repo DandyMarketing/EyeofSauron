@@ -86,6 +86,11 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '023_pl_unique_without_is_summary.sql',
   },
   {
+    table: 'account_map',
+    columns: ['venue_id', 'account_name', 'canonical_account', 'business_line'],
+    migration: '024_account_map.sql',
+  },
+  {
     table: 'xero_connections',
     columns: ['tenant_id', 'tenant_name', 'venue_id'],
     migration: '012_xero_connections.sql',

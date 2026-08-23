@@ -460,6 +460,76 @@ function fmtTime(iso) {
   return d.toLocaleString('en-SG', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+
+async function loadAccountMap() {
+  const body = document.getElementById('map-body');
+  if (!body) return;
+
+  const data = await api('GET', '/admin/api/account-map');
+  if (data.error) { body.innerHTML = '<div class="error-msg">' + esc(data.error) + '</div>'; return; }
+
+  const venueName = {};
+  for (const v of data.venues || []) venueName[v.id] = v.name;
+
+  let html = '';
+
+  // Unmapped first. This is the queue, not a footnote.
+  if ((data.unmapped || []).length > 0) {
+    html += '<div class="system-card"><h4>Unmapped accounts (' + data.unmapped.length + ')</h4>' +
+      '<div style="color:var(--text-muted);font-size:12px;margin-bottom:8px">' +
+      'These appeared in a ledger after anyone last looked. They resolve to their own names — nothing is merged wrongly — but they will not match the equivalent account at another venue.' +
+      '</div>';
+    for (const u of data.unmapped) {
+      html += '<div class="gap-item">' + esc(venueName[u.venue_id] || u.venue_id) + ' — ' + esc(u.account_name) +
+        ' <button class="btn btn-small map-add" data-venue="' + esc(u.venue_id) + '" data-account="' + esc(u.account_name) + '">Map it</button></div>';
+    }
+    html += '</div>';
+  }
+
+  // Rows where the shared name DIFFERS from the ledger name are the decisions
+  // somebody made; identity mappings are noise and are collapsed away.
+  const decisions = (data.mappings || []).filter(function (m) {
+    return m.canonical_account !== m.account_name || (m.business_line && m.business_line !== 'main');
+  });
+
+  html += '<div class="system-card"><h4>Mappings that change something (' + decisions.length + ' of ' + (data.mappings || []).length + ')</h4>' +
+    '<table style="width:100%;font-size:13px;border-collapse:collapse">' +
+    '<thead><tr><th>Venue</th><th>Ledger name</th><th>Rolls up to</th><th>Business line</th><th></th></tr></thead><tbody>';
+  for (const m of decisions) {
+    html += '<tr>' +
+      '<td>' + esc(venueName[m.venue_id] || '') + '</td>' +
+      '<td>' + esc(m.account_name) + '</td>' +
+      '<td><strong>' + esc(m.canonical_account) + '</strong></td>' +
+      '<td>' + esc(m.business_line || 'main') + '</td>' +
+      '<td><button class="btn btn-small btn-outline map-add" data-venue="' + esc(m.venue_id) + '" data-account="' + esc(m.account_name) +
+      '" data-canonical="' + esc(m.canonical_account) + '" data-line="' + esc(m.business_line || 'main') + '">Edit</button></td>' +
+      '</tr>';
+  }
+  html += '</tbody></table></div>';
+
+  body.innerHTML = html;
+
+  body.querySelectorAll('.map-add').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const account = btn.dataset.account;
+      const canonical = prompt('What shared name should "' + account + '" roll up to?\n\nUse the name the OTHER venues already use — a name somebody recognises is easier to check than a new one.', btn.dataset.canonical || account);
+      if (canonical === null) return;
+      const line = prompt('Business line for "' + account + '"?\n\n"main" for ordinary accounts. "sushi" or "merchandise" for a sub-business that still belongs in this venue\'s P&L.', btn.dataset.line || 'main');
+      if (line === null) return;
+
+      api('PUT', '/admin/api/account-map', {
+        venue_id: btn.dataset.venue,
+        account_name: account,
+        canonical_account: canonical.trim() || account,
+        business_line: (line || 'main').trim(),
+      }).then(function (r) {
+        if (r.error) { alert('Could not save: ' + r.error); return; }
+        loadAccountMap();
+      });
+    });
+  });
+}
+
 async function loadAll() {
   const [usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData] = await Promise.all([
     api('GET', '/admin/api/users'),
@@ -819,6 +889,24 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       await loadAll();
     });
   }
+
+  /**
+   * Account map. The three ledgers spell the same cost differently, so this is
+   * what makes a cross-venue comparison mean anything.
+   *
+   * Unmapped accounts are shown FIRST and in the error colour. An unmapped
+   * account is not broken -- it resolves to its own name, merges nothing and
+   * moves no figure -- but it will not match the equivalent account at another
+   * venue, and that is invisible in an answer. So it is visible here.
+   */
+  const mapSection = el('div', 'section');
+  mapSection.innerHTML = '<h2>Account Map</h2>' +
+    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">' +
+    'Each venue\'s ledger name, and the shared name it rolls up to. Sauron compares venues on the shared name — Fat Prince writes "Public Relations / Marketing costs" where the others write "fees", and without this they never add up. ' +
+    'Business line separates a sub-business that still belongs in the venue\'s P&amp;L: Neon Pigeon\'s sushi rolls into Potus Pte Ltd and can also be reported on its own.' +
+    '</p><div id="map-body">Loading…</div>';
+  app.appendChild(mapSection);
+  loadAccountMap();
 
   // Meta. Not loaded with the page -- it is several Graph calls plus a probe
   // per Instagram account, and the answer only changes while someone is

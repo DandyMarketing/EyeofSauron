@@ -5,6 +5,7 @@ import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
+import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
@@ -394,13 +395,44 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
 
   const periods = [...new Set(data.map(r => `${r.period_start}..${r.period_end}`))];
 
+  /**
+   * Relabel each row onto its shared name and business line.
+   *
+   * The three ledgers spell the same cost differently -- Fat Prince is the
+   * outlier on all nine variants -- so a cross-venue comparison built on raw
+   * account_name splits marketing across two buckets that never add up, in an
+   * answer that looks complete. The original name is kept beside the canonical
+   * one: rolling up must never hide what was rolled.
+   */
+  const accountMap = await fetchAccountMap(venueId);
+  let rows = data.map(row => {
+    const { canonical_account, business_line } = resolveAccount(row.account_name, accountMap);
+    return { ...row, canonical_account, business_line };
+  });
+
+  // Sub-businesses roll INTO the venue P&L by default -- Neon Pigeon's sushi
+  // exists to improve Potus Pte Ltd's profitability, so excluding it silently
+  // would answer a different question than the one asked.
+  if (typeof input.business_line === 'string' && input.business_line.trim() !== '') {
+    rows = rows.filter(r => r.business_line === input.business_line.trim());
+  }
+
+  const unmapped = unmappedAccounts(data.map(r => r.account_name), accountMap);
+
   return JSON.stringify({
     venue: input.venue_slug,
     requested: `${input.start_date} to ${input.end_date}`,
     periods_returned: periods,
     convention: 'Costs are positive under sections named "Less ...". Rows with is_summary=true are section totals — do not add them to the detail lines beneath them.',
     source: 'Xero accounting ledger (not the POS — figures will not tie exactly to Revel sales)',
-    rows: data,
+    naming: 'canonical_account is the SHARED name across venues — always compare on it, never on account_name, which differs per ledger. business_line separates sub-businesses (sushi, merchandise) that still belong in this venue\'s P&L.',
+    business_lines_present: [...new Set(rows.map(r => r.business_line))],
+    business_line_filter: input.business_line ?? 'none — all lines included, which is the venue\'s true P&L',
+    unmapped_accounts: unmapped.length > 0 ? unmapped : undefined,
+    unmapped_note: unmapped.length > 0
+      ? 'These accounts have no entry in the account map, so they resolve to their own names and may not match the equivalent account at another venue. Say so if comparing venues.'
+      : undefined,
+    rows,
   });
 }
 
@@ -479,12 +511,15 @@ async function querySupplierBills(input: Record<string, any>): Promise<string> {
     .lte('period_end', input.end_date)
     .not('account_id', 'is', null);
 
+  // Canonical names here too, so a marketing breakdown at Fat Prince and one at
+  // Neon Pigeon carry the same label and can be compared.
+  const accountMap = await fetchAccountMap(venueId);
   const accountName = new Map<string, string>();
   const ledgerTotal = new Map<string, number>();
   for (const row of plRows ?? []) {
     if (row.is_summary) continue;  // section totals would double the denominator
     if (!row.account_id) continue;
-    accountName.set(row.account_id, row.account_name ?? row.account_id);
+    accountName.set(row.account_id, resolveAccount(row.account_name, accountMap).canonical_account || row.account_id);
     ledgerTotal.set(row.account_id, (ledgerTotal.get(row.account_id) ?? 0) + Number(row.amount ?? 0));
   }
 
@@ -534,6 +569,8 @@ async function querySupplierBills(input: Record<string, any>): Promise<string> {
     source: 'Xero supplier bills (ACCPAY). The P&L account total is the authority; these explain what sits beneath it.',
     coverage_by_account: coverage,
     reporting_rule: 'State the coverage percentage alongside any supplier breakdown. A list covering a quarter of an account, presented as the breakdown, is a wrong answer.',
+    naming: 'Account names here are CANONICAL — the shared name across venues, not the raw ledger spelling. That is what makes a breakdown comparable between venues.',
+    inventory_caveat: 'Some venues code food and drink purchases to an inventory account and expense them to COGS by journal later. Where that happens the bills never touch the COGS account, so coverage reads near 0% — which is the accounting working, not data missing. Say that rather than reporting a gap.',
     payroll: 'Payroll bill lines are excluded at ingestion and individual pay is never stored. Aggregate labour cost comes from query_profit_and_loss.',
     lines_returned: returned.length,
     lines_matched: matched.length,

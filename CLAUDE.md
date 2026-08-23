@@ -140,6 +140,31 @@ how much the first would have missed. Bill lines coded to an account the P&L
 does not report are also counted now: usually balance-sheet and harmless, but
 that is exactly the condition that hid the salary accounts.
 
+**The three ledgers name the same cost differently, and it is mapped rather
+than renamed.** Measured 23 Aug 2026: Firangi Superstar and Neon Pigeon agree,
+and Fat Prince is the outlier on all nine variants -- "Public Relations /
+Marketing costs" against "fees", "Merchant Fees" against "merchant fees",
+"Recruitment expeses" (their typo) against "Recruitment / Visa expenses".
+Cross-venue benchmarking is the product's edge and only holds if the same cost
+carries the same label, so comparing raw account names splits marketing across
+two buckets that never add up, in an answer that looks complete.
+
+Renaming in Xero would fix our three ledgers once. It was rejected because the
+stated goal is selling this to other operators, and **you cannot ask a customer
+to rename their chart of accounts** -- a mapping layer is a product requirement,
+not a workaround. `account_map` (migration 024) holds two independent axes:
+`canonical_account` unifies naming so venues can be COMPARED, `business_line`
+separates sub-businesses so they can be ISOLATED. Neon Pigeon's sushi rolls into
+Potus Pte Ltd's P&L -- improving it was the point of launching it -- while
+staying reportable alone.
+
+**An unmapped account defaults to ITSELF, deliberately unlike the BOH/FOH role
+mapping where defaulting is forbidden.** The difference is what the default
+does: falling into a bucket makes a category drift with no visible cause;
+falling back to your own name merges nothing and moves no figure, and the only
+cost is that unification has not happened yet. It is listed in the admin console
+so somebody decides, rather than flagged as a fault.
+
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
 remembering to filter. There is a test asserting it.
