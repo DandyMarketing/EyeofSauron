@@ -1,44 +1,56 @@
--- Take is_summary out of the profit_and_loss unique key.
+-- Key profit_and_loss on the LINE, not on how the parser happened to describe it.
 --
--- WHY. Migration 013 keyed the table on
+-- Migration 013 keyed the table on
 --   (venue_id, period_start, period_end, section, account_name, is_summary)
--- which makes the FLAG part of a row's identity. It is not: whether a line is
--- a section total is a property OF the line, not a different line.
+-- Two of those six columns are the parser's OPINION about a row rather than
+-- part of its identity, and both were rewritten by a single bug fix.
 --
--- The consequence was found on 23 Aug 2026. The parser was corrected to mark
--- Gross Profit, Operating Profit and Net Profit as totals rather than detail
--- lines, every period was re-ingested, and the upsert -- seeing a different
--- is_summary -- INSERTED rather than updated. Every one of those lines then
--- existed twice: 213 duplicate rows across three venues and two years, one
--- copy correctly flagged and one still claiming to be a detail line.
+-- WHAT HAPPENED, 23 Aug 2026. The parser was corrected so that Gross Profit,
+-- Operating Profit and Net Profit are marked as computed totals rather than
+-- detail lines, and so that an untitled section takes its name from its own
+-- content instead of its position in the report. Every period was re-ingested.
+-- Because both `is_summary` AND `section` had changed, the upsert matched
+-- nothing and INSERTED: 213 duplicate rows across three venues and two years,
+-- each line present once correctly flagged under its own name and once still
+-- claiming to be a detail line under a positional label.
 --
--- That is worse than the original bug it was fixing. query_profit_and_loss
--- tells the model to use is_summary instead of adding everything up, so a
--- "what were our total costs" question would sweep three computed totals into
--- the cost base -- and the duplicate is invisible, because both rows are real
--- and carry the same amount.
+--   Gross Profit      stale: "Section 3"                  correct: "Gross Profit"
+--   Net Profit        stale: "Section 9/11/12"            correct: "Net Profit"
+--   Operating Profit  stale: "Section 9/10"               correct: "Operating Profit"
 --
--- The general lesson, worth stating because it will come up again: a column
--- that a bug fix might CHANGE must never be part of the key. Otherwise
--- correcting it silently forks the row instead of repairing it.
+-- The positional names even drift month to month, because the report's shape
+-- changes -- which is exactly why they were never identity in the first place.
 --
--- RUN THE DELETE FIRST. This constraint cannot be created while duplicates
--- exist:
+-- Both copies were real, both carried the same amount, and nothing in an answer
+-- would have hinted at it. query_profit_and_loss tells the model to trust
+-- `is_summary` instead of adding everything up, so a "what were our total
+-- costs" question would have swept three computed totals into the cost base.
+--
+-- THE RULE, worth stating because it will come up again: a column a bug fix
+-- might CHANGE must never be part of a unique key. Otherwise the fix forks the
+-- row instead of repairing it, and the wrong version survives alongside the
+-- right one looking equally legitimate.
+--
+-- Verified before applying: no venue-period holds the same account_name twice,
+-- so this key loses nothing.
+--
+-- RUN THE CLEANUP FIRST -- this constraint cannot be created while the
+-- duplicates exist:
 --
 --   delete from public.profit_and_loss p
 --   where p.is_summary = false
+--     and p.section ~ '^Section [0-9]+$'
 --     and exists (
 --       select 1 from public.profit_and_loss q
 --       where q.venue_id = p.venue_id
 --         and q.period_start = p.period_start
 --         and q.period_end = p.period_end
---         and q.section = p.section
 --         and q.account_name = p.account_name
 --         and q.is_summary = true
 --     );
 
--- The 013 constraint was unnamed, so Postgres generated one. Find it by its
--- definition rather than guessing at a truncated auto-generated name.
+-- The 013 constraint was unnamed, so Postgres generated one. Found by its
+-- definition rather than by guessing at a truncated auto-generated name.
 do $$
 declare
   target text;
@@ -54,11 +66,11 @@ begin
   end if;
 end $$;
 
--- One row per account, per section, per period, per venue. The flag rides
--- along and can now be corrected in place.
+-- One row per account, per period, per venue. `section` and `is_summary` ride
+-- along as attributes and can now be corrected in place.
 alter table public.profit_and_loss
   add constraint profit_and_loss_period_account_key
-  unique (venue_id, period_start, period_end, section, account_name);
+  unique (venue_id, period_start, period_end, account_name);
 
 comment on constraint profit_and_loss_period_account_key on public.profit_and_loss is
-  'is_summary is deliberately NOT in this key. It is a property of the row, and a parser fix that changes it must update the row rather than fork it — see 023.';
+  'section and is_summary are deliberately NOT in this key. Both are the parser''s description of a row, not its identity, and a fix that changes either must update the row rather than fork it — see migration 023.';

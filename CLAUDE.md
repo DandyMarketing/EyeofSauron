@@ -113,15 +113,19 @@ token has different ciphertext in every row and the columns cannot be matched
 directly.
 
 **A column a bug fix might CHANGE must never be part of a unique key.** The
-`profit_and_loss` key included `is_summary`, so when the parser was corrected
-to mark Gross Profit, Operating Profit and Net Profit as totals rather than
-detail lines, the upsert saw a different flag and INSERTED instead of updating
--- 213 duplicate rows across three venues and two years, each line present once
-correctly flagged and once still claiming to be a detail line. Both rows real,
-both the same amount, and invisible unless somebody counted. Worse than the bug
-being fixed, because `query_profit_and_loss` tells the model to trust
-`is_summary` instead of adding everything up, so a "total costs" question would
-have swept three computed totals into the cost base. Fixed in migration 023.
+`profit_and_loss` key included both `section` and `is_summary` -- the parser's
+DESCRIPTION of a row rather than its identity. One fix rewrote both at once:
+Gross Profit, Operating Profit and Net Profit went from detail lines under
+positional labels ("Section 3", "Section 9/10/11/12", which drifted month to
+month because they came from the report's shape) to totals under their own
+names. The upsert matched nothing and INSERTED -- 213 duplicate rows across
+three venues and two years, each line present once correctly and once still
+claiming to be a detail line. Both real, both the same amount, invisible unless
+somebody counted. Worse than the bug being fixed, because
+`query_profit_and_loss` tells the model to trust `is_summary` instead of adding
+everything up, so a "total costs" question would have swept three computed
+totals into the cost base. Migration 023 keys on
+`(venue_id, period_start, period_end, account_name)` and nothing else.
 
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
