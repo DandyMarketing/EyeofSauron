@@ -21,6 +21,52 @@
     --error: #e84040;
   }
 
+  /* --- Weekly briefing ------------------------------------------------- */
+
+  #briefing { text-align: left; margin: 28px 0 8px; }
+
+  #briefing h3 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-muted); font-weight: 600; margin-bottom: 12px;
+  }
+
+  .rec {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .rec.dismissed { opacity: .45; border-left-color: var(--border); }
+
+  .rec-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .rec-headline { font-weight: 600; font-size: 15px; flex: 1; min-width: 240px; }
+
+  .rec-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .rec-tag {
+    background: var(--user-bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; text-transform: uppercase;
+    letter-spacing: .04em; font-size: 10px;
+  }
+
+  /* Confidence is shown, never hidden. An engine that presents a hunch and an
+     eight-week trend identically teaches people to discount both. */
+  .rec-confidence { font-variant-numeric: tabular-nums; }
+
+  .rec-body { font-size: 14px; line-height: 1.6; margin-top: 10px; color: var(--text); }
+  .rec-body table { border-collapse: collapse; margin: 10px 0; font-size: 13px; width: 100%; }
+  .rec-body th, .rec-body td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  .rec-body th { background: var(--user-bg); }
+  .rec-body svg { max-width: 100%; height: auto; }
+
+  .rec-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .rec-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .rec-btn:hover { background: var(--surface-hover); color: var(--text); }
+  .rec-btn.on { border-color: var(--accent); color: var(--accent); }
+  .rec-note { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
@@ -502,6 +548,15 @@
       <div class="logo-big"></div>
       <h2>Ask Sauron</h2>
       <p>I can answer questions about your venue performance, product mix, revenue trends, and more. All answers come from your real operational data.</p>
+      <!--
+        The briefing sits ABOVE the suggestions on purpose. CLAUDE.md is
+        explicit that the analytics are table stakes and the recommendations
+        are the product; putting prompts to ask a question first would say the
+        opposite. Hidden entirely until something has been generated, because
+        an empty "This week" heading week after week is worse than no heading.
+      -->
+      <div id="briefing" style="display:none"></div>
+
       <div class="suggestions">
         <div class="suggestion" onclick="askSuggestion(this)">How did Neon Pigeon do yesterday?</div>
         <div class="suggestion" onclick="askSuggestion(this)">Compare all venues for the last week</div>
@@ -588,7 +643,93 @@ let myVenues = [];
     await supabaseClient.auth.signOut();
     window.location.href = '/login.html';
   });
+
+  loadBriefing();
 })();
+
+/**
+ * This week's advice, shown before anybody asks anything.
+ *
+ * A failure here is SILENT on purpose -- if the briefing cannot load, the chat
+ * must still work. The panel is an addition to the product, not a gate on it.
+ */
+async function loadBriefing() {
+  let recs = [];
+  try {
+    const res = await fetch('/api/recommendations', { headers: { Authorization: 'Bearer ' + authToken } });
+    if (!res.ok) return;
+    recs = (await res.json()).recommendations || [];
+  } catch (e) {
+    return;
+  }
+
+  if (recs.length === 0) return;
+
+  // Only the most recent run. Older advice is history, and stacking four
+  // weeks of it into one panel is how a briefing becomes a backlog.
+  const latestRun = recs[0].period_end;
+  const current = recs.filter(r => r.period_end === latestRun);
+
+  const panel = document.getElementById('briefing');
+  const period = current[0].period_start + ' to ' + current[0].period_end;
+  const venues = [...new Set(current.map(r => r.venue))];
+
+  panel.innerHTML =
+    '<h3>This week &middot; ' + escapeHtml(period) + (venues.length > 1 ? ' &middot; ' + venues.length + ' venues' : '') + '</h3>' +
+    current.map(renderRecommendation).join('');
+  panel.style.display = '';
+}
+
+function renderRecommendation(r) {
+  const charts = (r.charts || []).map(c => '<div>' + c.svg + '</div>').join('');
+  return '' +
+    '<div class="rec' + (r.status === 'dismissed' ? ' dismissed' : '') + '" id="rec-' + r.id + '">' +
+      '<div class="rec-head">' +
+        '<div class="rec-headline">' + escapeHtml(r.headline) + '</div>' +
+        '<div class="rec-meta">' +
+          '<span class="rec-tag">' + escapeHtml(r.domain) + '</span>' +
+          (venuesShown() ? '<span class="rec-tag">' + escapeHtml(r.venue) + '</span>' : '') +
+          '<span class="rec-confidence">confidence ' + Number(r.confidence).toFixed(2) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="rec-body">' + renderMarkdown(r.body) + charts + '</div>' +
+      '<div class="rec-actions">' +
+        '<button class="rec-btn' + (r.status === 'acted_on' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {status:\'acted_on\'}, this)">Acted on</button>' +
+        '<button class="rec-btn' + (r.rating === 'useful' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'useful\'}, this)">Useful</button>' +
+        '<button class="rec-btn' + (r.rating === 'not_useful' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'not_useful\'}, this)">Not useful</button>' +
+        '<button class="rec-btn' + (r.rating === 'wrong' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'wrong\', status:\'dismissed\'}, this)">Wrong</button>' +
+        '<span class="rec-note">' + (r.evidence || []).length + ' quer' + ((r.evidence || []).length === 1 ? 'y' : 'ies') + ' behind this</span>' +
+      '</div>' +
+    '</div>';
+}
+
+/** Only label the venue when the reader can see more than one. */
+function venuesShown() {
+  return myVenues.length !== 1;
+}
+
+async function rateRec(id, patch, btn) {
+  // Marked immediately. A rating button that waits on a round trip gets
+  // pressed twice, and the second press is the one nobody meant.
+  const row = btn.closest('.rec');
+  if (patch.rating) {
+    row.querySelectorAll('.rec-btn').forEach(b => {
+      if (b.textContent !== 'Acted on') b.classList.remove('on');
+    });
+  }
+  btn.classList.add('on');
+  if (patch.status === 'dismissed') row.classList.add('dismissed');
+
+  try {
+    await fetch('/api/recommendations/' + id + '/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    // Nothing to roll back to that would be clearer than the state shown.
+  }
+}
 
 function autoResize() {
   input.style.height = 'auto';

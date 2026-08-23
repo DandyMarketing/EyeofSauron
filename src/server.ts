@@ -469,6 +469,98 @@ app.post('/api/notes/capture', async (c) => {
   return c.json({ note: data, message: 'Captured — an owner will review it before Sauron uses it.' });
 });
 
+/**
+ * This week's advice, for the venues the caller can see.
+ *
+ * SCOPED HERE AND NOT ONLY BY RLS. The route reads through the service role,
+ * which bypasses row-level security -- the same hole enforceVenueScope() had to
+ * plug for the query tools. The filter below is the control; the policy on the
+ * table is what protects anything reading with a user token.
+ */
+app.get('/api/recommendations', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  let query = supabaseAdmin
+    .from('recommendations')
+    .select('id, venue_id, period_start, period_end, headline, body, domain, confidence, charts, evidence, generated_at, model, status, rating, feedback, venues(name)')
+    .order('generated_at', { ascending: false })
+    .order('confidence', { ascending: false })
+    .limit(60);
+
+  if (!user.isOwner) {
+    const venueIds = user.venues.map(v => v.venue_id);
+    // An empty list must mean NO venues, never "no restriction" — the same
+    // trap the system prompt's venue paragraph had to be written around.
+    if (venueIds.length === 0) return c.json({ recommendations: [] });
+    query = query.in('venue_id', venueIds);
+  }
+
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 400);
+
+  return c.json({
+    recommendations: (data ?? []).map((r: any) => ({
+      ...r,
+      venue: r.venues?.name ?? 'Unknown venue',
+      /**
+       * The QUERIES behind the claim, not the rows they returned. Re-runnable
+       * rather than reproduced — say which, so a reader knows what they are
+       * looking at.
+       */
+      evidence_note: 'The queries this rests on. Re-run them to check the figures.',
+    })),
+  });
+});
+
+/**
+ * What happened to a recommendation, and whether it was any good.
+ *
+ * TWO INDEPENDENT FIELDS. "I did it" and "this was worth reading" are different
+ * facts: advice can be acted on and turn out wrong, and good advice can be
+ * right and impractical this month. Collapsing them would make the only measure
+ * of whether this feature works unreadable.
+ */
+app.post('/api/recommendations/:id/rate', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const { status, rating, feedback } = await c.req.json().catch(() => ({}));
+
+  if (status !== undefined && !['new', 'acted_on', 'dismissed'].includes(status)) {
+    return c.json({ error: 'status must be new, acted_on or dismissed' }, 400);
+  }
+  if (rating !== undefined && rating !== null && !['useful', 'not_useful', 'wrong'].includes(rating)) {
+    return c.json({ error: 'rating must be useful, not_useful or wrong' }, 400);
+  }
+
+  // Which venue is this, and may they touch it. Checked before the write
+  // rather than trusted to the id in the URL.
+  const { data: row } = await supabaseAdmin
+    .from('recommendations')
+    .select('venue_id')
+    .eq('id', c.req.param('id'))
+    .maybeSingle();
+
+  if (!row) return c.json({ error: 'No such recommendation.' }, 404);
+  if (!user.isOwner && !user.venues.some(v => v.venue_id === (row as any).venue_id)) {
+    return c.json({ error: 'You do not have access to that venue.' }, 403);
+  }
+
+  const patch: Record<string, any> = { rated_by: user.id, rated_at: new Date().toISOString() };
+  if (status !== undefined) patch.status = status;
+  if (rating !== undefined) patch.rating = rating;
+  if (typeof feedback === 'string') patch.feedback = feedback.slice(0, 2000);
+
+  const { error } = await supabaseAdmin
+    .from('recommendations')
+    .update(patch)
+    .eq('id', c.req.param('id'));
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ ok: true });
+});
+
 /** Approve, reject, or retire a note. Owner only. */
 app.post('/admin/api/notes/:noteId/review', async (c) => {
   const user = await requireOwner(c);

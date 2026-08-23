@@ -68,6 +68,11 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '015_note_source_question.sql',
   },
   {
+    table: 'recommendations',
+    columns: ['venue_id', 'run_id', 'period_start', 'period_end', 'headline', 'body', 'domain', 'confidence', 'evidence', 'charts', 'model', 'fingerprint', 'status', 'rating'],
+    migration: '027_recommendations.sql',
+  },
+  {
     table: 'profit_and_loss',
     columns: ['venue_id', 'tenant_id', 'period_start', 'period_end', 'section', 'amount', 'is_summary'],
     migration: '013_profit_and_loss.sql',

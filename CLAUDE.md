@@ -560,6 +560,64 @@ operand in a comparison the model computes itself.
 - **Charts:** the engine emits a chart *spec* filled with real warehouse data; the web app renders it live, Telegram gets a rendered **PNG**. Charts are always from real queried data.
 - **Model tiering:** Opus for deep reasoning/suggestions; a faster/cheaper model for routine lookups & routing.
 
+### The proactive half, built 23 Aug 2026
+
+Until now the engine only ever answered questions somebody thought to ask, and
+`recommendation` — the Opus/xhigh purpose in `model-policy.ts` — had never been
+called once. A venue leader who does not know to ask why their beverage margin
+is drifting never finds out, which is the whole difference between a dashboard
+and an advisor.
+
+**The failure mode is not a wrong recommendation, it is a boring one.** A wrong
+one gets argued with. Three obvious observations every Monday — "covers were
+down on Tuesday", "food cost rose slightly" — teach a manager this thing has
+nothing to tell them, and they stop reading inside a month. Four decisions all
+point at that:
+
+- **Weekly, not nightly.** A Tuesday dip is a Tuesday. Only a quiet *week* is
+  news, and the week is the unit an operator already thinks in.
+  `lastCompleteWeek()` always returns a full Monday–Sunday: reviewing "the last
+  seven days" on a Wednesday compares four trading days against seven and
+  reports a collapse in covers every single time.
+- **Permission to say nothing.** An empty result is VALID and is reported as a
+  quiet week, not a failure. An engine that always has something to say is one
+  nobody believes, and a cap of three forces a ranking decision instead of a
+  list whose best item is seventh.
+- **Repeats are suppressed on the SUBJECT, not the sentence.** `fingerprint()`
+  strips numbers deliberately: "margin down 4 points" and "margin down 6 points"
+  are the same advice with a refreshed figure, and a fingerprint including the
+  number would say it again next week. The brief also lists what was already
+  said — that half is a hint, `suppressRepeats()` is the control.
+- **Evidence is stored with the conclusion.** In a chat the user watches the
+  reasoning happen; here nobody is watching. What is stored is the QUERIES, not
+  the rows they returned — re-runnable rather than reproduced, and the
+  difference is stated rather than glossed.
+
+**Cross-venue comparison is comparative-only, and that is enforced in code.**
+The analysis runs UNSCOPED, because a single-venue scope makes benchmarking
+impossible — the tool layer refuses every comparison. So the guard moved to the
+output: `namesOtherVenues()` withholds any recommendation naming another venue
+or its legal entity, before anything is written. "Your food cost is four points
+above the group average" ships; "Fat Prince runs 28%" does not. It matches
+NAMES, so "the venue on Craig Road" would pass — a narrower guarantee than RLS,
+and every withholding is counted on the run so a brief being ignored is visible.
+
+This implements the resolution CLAUDE.md guesses at above and does not settle
+it: **whether a restaurant manager sees another venue's raw figures is still
+Khai's decision.** Comparative-only is the safe direction to be wrong in, since
+loosening it later is a config change and a figure already shown cannot be
+withdrawn.
+
+**Two passes, because prose and rows are different jobs.** Opus writes the
+analysis naturally with the full tool set; a cheap Sonnet call with a forced
+tool splits it into records. Asking the analyst to end with JSON was the
+alternative, and it is the pattern the post classifier already rejected.
+
+**Status and rating are separate columns on purpose.** "I did it" and "this was
+worth reading" are different facts — advice can be acted on and turn out wrong.
+Collapsing them would make the only measure of whether this feature works
+unreadable.
+
 ## Data model (starting sketch)
 
 - `venues` (id, name, ...)
