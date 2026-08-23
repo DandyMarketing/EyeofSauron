@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
 import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
+import { modelFor, isModelFeatureError, usageLine, type Purpose } from './model-policy.js';
 import {
   webSearchTool,
   extractSources,
@@ -100,23 +101,81 @@ const MAX_TOOL_ROUNDS = 12;
  */
 const MAX_PAUSE_CONTINUATIONS = 4;
 
+
+/**
+ * Strip the conversation cache marker from wherever it currently sits.
+ *
+ * A request allows four cache_control breakpoints; an agentic loop would want
+ * one per round. So exactly one travels with the conversation's tail.
+ */
+function moveCacheBreakpoint(messages: Anthropic.MessageParam[]): void {
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content as any[]) {
+      if (block && typeof block === 'object' && 'cache_control' in block) {
+        delete block.cache_control;
+      }
+    }
+  }
+}
+
+/** Put the marker on the last content block of the newest message. */
+function markLastBlockForCaching(messages: Anthropic.MessageParam[]): void {
+  const last = messages[messages.length - 1];
+  if (!last || !Array.isArray(last.content) || last.content.length === 0) return;
+  const block = last.content[last.content.length - 1] as any;
+  if (block && typeof block === 'object') {
+    block.cache_control = { type: 'ephemeral' };
+  }
+}
+
 export async function askSauron(
   question: string,
   history: ChatMessage[] = [],
   venueFilter?: string[],
+  purpose: Purpose = 'chat',
 ): Promise<QueryResult> {
+  /**
+   * Chosen ONCE, before the first call, and used for every turn.
+   *
+   * Not tidiness: prompt caches are model-scoped, so switching model
+   * mid-conversation discards the whole cached prefix. It is also the only
+   * honest split available -- the tool loop's first round is routing and its
+   * last is analysis, through the same call site.
+   */
+  const choice = modelFor(purpose);
   const toolCalls: QueryResult['toolCalls'] = [];
   const charts: QueryResult['charts'] = [];
 
   const today = getSingaporeDate();
-  let systemPrompt = `${SYSTEM_PROMPT_BASE}\n\nToday's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
+
+  /**
+   * TWO SYSTEM BLOCKS, ordered by how often they change. This is the whole of
+   * the caching design; the marker is the easy part.
+   *
+   * A prompt cache is a PREFIX match, and the request renders tools -> system
+   * -> messages. So a breakpoint on the first system block caches every tool
+   * definition and the standing instructions together -- and that prefix is
+   * identical for every user, every venue and every question.
+   *
+   * It was previously one string built by concatenation: base prompt, then
+   * today's date, then a conditional venue paragraph, then the notes. Every one
+   * of those is a documented cache-killer, and the venue paragraph is the worst
+   * -- it made the prefix per-user, so no two people could ever share an entry.
+   * Sorting the volatile parts BELOW the breakpoint is what makes caching work
+   * at all.
+   */
+  const stableSystem = `${SYSTEM_PROMPT_BASE}\n${EXTERNAL_CONTEXT_FRAMING}`;
+
+  let volatileSystem = `Today's date is ${today}. When a user says "yesterday", they mean ${new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0]}. When a user says "July 23" without a year, assume the current year.`;
+
   // The tool layer is the actual control; this only keeps the model from
   // promising data it will then be refused. An empty list means no venues at
   // all, which must not read as "no restriction".
   if (venueFilter && venueFilter.length > 0) {
-    systemPrompt += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
+    volatileSystem += `\n\nIMPORTANT: This user only has access to these venues: ${venueFilter.join(', ')}. Only query and discuss data for these venues. If asked about other venues, say you don't have access.`;
   } else if (venueFilter) {
-    systemPrompt += `\n\nIMPORTANT: This user has not been assigned to any venue, so no venue data is available to them. Do not attempt to query venue data. Tell them their account has no venue access yet and to contact HQ.`;
+    volatileSystem += `\n\nIMPORTANT: This user has not been assigned to any venue, so no venue data is available to them. Do not attempt to query venue data. Tell them their account has no venue access yet and to contact HQ.`;
   }
 
   // Notes are scoped to the caller's venues. They used to be selected
@@ -126,10 +185,13 @@ export async function askSauron(
   const notes = await fetchNotes(venueFilter ?? null);
   const notesText = formatNotes(notes, today);
   if (notesText) {
-    systemPrompt += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;
+    volatileSystem += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;
   }
 
-  systemPrompt += `\n${EXTERNAL_CONTEXT_FRAMING}`;
+  const systemBlocks = (extra?: string): Anthropic.Messages.TextBlockParam[] => [
+    { type: 'text', text: stableSystem, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: extra ? `${volatileSystem}\n\n${extra}` : volatileSystem },
+  ];
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -156,42 +218,86 @@ export async function askSauron(
    * a response. Sources, search count and search failures were being collected
    * in one place and missed in another the first time this was written.
    */
-  const send = async (opts: Partial<Anthropic.MessageCreateParamsNonStreaming> = {}) => {
-    const call = (withTools: Anthropic.Messages.ToolUnion[]) =>
-      client.messages.create({
-        model: 'claude-sonnet-5',
+  /**
+   * Set when the API refuses `thinking` or `output_config`, so we stop sending
+   * them. Both are documented for these models and neither can be verified
+   * without calling the API; if one is refused the answer should get shallower,
+   * not stop. Same rule as the web search tool.
+   */
+  let featuresDisabled = false;
+
+  /**
+   * Every request goes through here, so nothing has to remember to account for
+   * a response. Sources, search count, search failures and token usage were
+   * being collected in one place and missed in another the first time this was
+   * written.
+   */
+  const send = async (
+    opts: { tools?: Anthropic.Messages.ToolUnion[]; extraSystem?: string } = {},
+  ): Promise<Anthropic.Message> => {
+    const build = (withTools: Anthropic.Messages.ToolUnion[]) => {
+      const params: any = {
+        model: choice.model,
         max_tokens: MAX_TOKENS,
-        system: systemPrompt,
+        system: systemBlocks(opts.extraSystem),
         messages,
-        ...opts,
         tools: withTools,
-      });
+      };
+
+      if (!featuresDisabled) {
+        /**
+         * Adaptive, NEVER budget_tokens. The older
+         * `{type:'enabled', budget_tokens}` form is rejected with a 400 on
+         * Opus 5 and Sonnet 5 -- a stale prior that would take the chat down
+         * rather than degrade it.
+         *
+         * Toggling thinking does not invalidate the tools+system cache, so
+         * this costs nothing at the prefix.
+         */
+        if (choice.thinking) params.thinking = { type: 'adaptive' };
+        if (choice.effort) params.output_config = { effort: choice.effort };
+      }
+
+      return params;
+    };
+
+    const activeTools = () =>
+      opts.tools ?? (searchDisabled ? queryTools : tools);
 
     let r: Anthropic.Message;
     try {
-      r = await call(searchDisabled ? queryTools : (opts.tools as any) ?? tools);
+      r = await client.messages.create(build(activeTools()));
     } catch (e) {
       /**
-       * A rejected web search CONFIG must cost the search, not the product.
+       * Two optional enrichments, two fallbacks, one rule: a feature that is
+       * refused must cost the feature and never the product.
        *
-       * `country: 'SG'` was refused with a 400, and since the tool goes out on
-       * every request, every question failed -- including ones that never
-       * touch the web. Dropping the tool and retrying keeps the warehouse
-       * answerable while the config is wrong, and says so loudly enough that
-       * nobody mistakes a degraded system for a healthy one.
-       *
-       * Only on the FIRST failure. If a search has already run, its results
-       * are in `messages` and removing the tool that produced them fails for a
-       * different reason -- so the retry is not a general-purpose rescue.
+       * `country: 'SG'` was a valid ISO code the API rejected, and because the
+       * web search tool ships on every request it failed EVERY question --
+       * including ones that never touch the web. `thinking` and
+       * `output_config` are the same shape: documented, unverifiable without
+       * calling the API, sent every time.
        */
-      if (!searchDisabled && isWebSearchConfigError(e)) {
+      if (!featuresDisabled && isModelFeatureError(e)) {
+        featuresDisabled = true;
+        console.error(
+          `[model] ${choice.model} refused thinking/effort — retrying without them, answers will be shallower: ` +
+          `${String((e as any)?.message ?? e).slice(0, 300)}`,
+        );
+        r = await client.messages.create(build(activeTools()));
+      } else if (!searchDisabled && !opts.tools && isWebSearchConfigError(e)) {
+        /**
+         * Only on the FIRST failure, and never when the caller pinned the tool
+         * list. Once a search has run its results are in `messages`, and
+         * removing the tool that produced them fails for a different reason.
+         */
         searchDisabled = true;
         console.error(
           `[engine] WEB SEARCH DISABLED for this request — the API rejected the tool definition: ` +
           `${String((e as any)?.message ?? e).slice(0, 300)}`,
         );
         console.error('[engine] Answering from the warehouse only. Fix the tool config in src/ai/web-search.ts.');
-        r = await call(queryTools);
+        r = await client.messages.create(build(queryTools));
       } else {
         throw e;
       }
@@ -199,17 +305,19 @@ export async function askSauron(
 
     sources.push(...extractSources(r.content));
     searches += searchRequestCount(r.usage);
+    // Logged on every call, because a cache that silently stopped working
+    // shows up as a bill months later and nothing else.
+    console.log(usageLine(choice.model, r.usage));
 
     // A failed search returns HTTP 200 with an error object where the results
-    // should be, so it is invisible unless it is said out loud. The model
-    // carries on and writes an answer with no external context in it, which
-    // reads exactly like an answer that did not need any.
+    // should be, so it is invisible unless it is said out loud.
     for (const code of searchErrors(r.content)) {
       console.warn(`[engine] web search failed: ${code}`);
     }
 
     return r;
   };
+
 
   let response = await send();
 
@@ -278,7 +386,25 @@ export async function askSauron(
       }
     }
 
+    /**
+     * Cache the conversation as it grows, by MOVING one breakpoint rather than
+     * adding one per round.
+     *
+     * By round twelve the accumulated tool results dwarf the system prompt, so
+     * this is the larger half of the saving. But a request allows at most FOUR
+     * cache_control markers, and a twelve-round loop would want twelve -- so
+     * the marker is stripped from wherever it was and set on the newest block.
+     * Earlier positions stay readable as cache entries; only the write point
+     * moves.
+     *
+     * KNOWN LIMIT: a breakpoint looks back at most 20 content blocks for a
+     * prior entry. A single round with more than 20 tool_use/tool_result blocks
+     * would miss and silently pay full price -- visible as cache_hit dropping
+     * in the usage line, which is why that is logged on every call.
+     */
+    moveCacheBreakpoint(messages);
     messages.push({ role: 'user', content: toolResults });
+    markLastBlockForCaching(messages);
 
     response = await send();
   }
@@ -312,7 +438,9 @@ export async function askSauron(
        */
       const recovery = await send({
         tools: [webSearchTool()],
-        system: `${systemPrompt}\n\n${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
+        // Appended BELOW the cache breakpoint, so rescuing a turn does not
+        // rebuild the whole cached prefix.
+        extraSystem: `${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
       });
       answer = joinText(recovery.content);
     } catch (e: any) {

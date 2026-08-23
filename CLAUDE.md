@@ -353,6 +353,55 @@ ever operates two outlets.
 - **Anti-hallucination is non-negotiable**: the LLM never states a number from memory. Every figure comes from a query tool; every suggestion and chart is built on real warehouse data. A reconciliation gate checks figures (line items sum to totals; Revel sales CSV reconciles with revenue CSV) before data is trusted.
 - Postgres is correct at this scale — do NOT over-engineer with a big analytics warehouse.
 
+### Model tiering, thinking and caching: settled 23 Aug 2026
+
+Until now `claude-sonnet-5` was hardcoded in three places in `engine.ts`, there
+was no tiering at all, and **no `thinking` parameter existed anywhere in the
+codebase** -- every answer, including the analytical ones, was written straight
+through. The brief had specified "Opus for deep reasoning/suggestions; a
+faster/cheaper model for routine lookups & routing" and it had never been built.
+
+`src/ai/model-policy.ts` maps a PURPOSE to a model, and the purpose is chosen
+once per request rather than per turn. That is forced rather than tidy: prompt
+caches are **model-scoped**, so switching mid-conversation discards the entire
+cached prefix. It is also the only honest split -- the tool loop's first round
+is routing and its last is analysis, through the same call site.
+
+| Purpose | Model | Thinking | Why |
+|---|---|---|---|
+| `chat` | Opus 5 | adaptive, high | Where the product's value is delivered |
+| `recommendation` | Opus 5 | adaptive, xhigh | Nobody waiting; a weak proactive suggestion teaches people to ignore the feature |
+| `lookup` | Sonnet 5 | none | A date and a number. Latency beats depth |
+| `recovery` | Sonnet 5 | none | Restating data already gathered, after something already failed |
+
+**Thinking is `{type: 'adaptive'}` and never `budget_tokens`** -- the older form
+is rejected with a 400 on Opus 5 and Sonnet 5, so a stale prior there takes the
+chat down rather than degrading it. Per-purpose env overrides
+(`SAURON_MODEL_CHAT` and friends) change the MODEL only; thinking and effort
+describe the job, not the engine.
+
+**Caching is a prefix match, so the ordering IS the design.** The system prompt
+was one concatenated string -- base prompt, then today's date, then a
+conditional venue paragraph, then the notes -- and every one of those is a
+documented cache-killer. The venue paragraph was the worst: it made the prefix
+per-user, so no two people could ever share an entry. It is now two blocks, the
+frozen half first with the breakpoint on it, so tools and standing instructions
+cache together across every user and question. A second breakpoint MOVES along
+the conversation's tail rather than accumulating, because a request allows only
+four and a twelve-round loop would want twelve.
+
+**Every response logs `cache_read`, `cache_write` and a hit rate.** A cache that
+silently stops working otherwise appears as a bill months later and nothing
+else. Known limit worth watching there: a breakpoint looks back at most 20
+content blocks, so one round with more than 20 tool_use/tool_result blocks
+misses and pays full price -- visible as the hit rate dropping.
+
+**A refused optional feature costs the feature, never the product.**
+`isModelFeatureError()` catches a 400 naming thinking or output_config, retries
+without them and says so loudly -- the same rule as `isWebSearchConfigError()`,
+learned from `country: 'SG'` taking down every question including ones that
+never touched the web.
+
 ### Web search: external context, and the provenance problem it creates
 
 Settled 19 Aug 2026. Sauron uses **Anthropic's server-side web search**
