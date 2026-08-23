@@ -49,6 +49,64 @@ export function isPayrollAccount(accountName: string | null | undefined): boolea
 }
 
 /**
+ * The second guard, which does not depend on the P&L at all.
+ *
+ * WHY IT EXISTS. `payrollAccountIds` learns which accounts hold personal pay by
+ * reading account NAMES out of the P&L. On 23 Aug 2026 an audit found bill
+ * lines carrying named individuals' net salaries and SDL, with Ministry of
+ * Manpower as the supplier, that the exclusion never had a chance of catching
+ * -- because those accounts have NO P&L ROW. An account the report never
+ * mentions has no name to match, so a name-based filter is blind to it by
+ * construction. Two salary accounts at one venue, plus dividends and a
+ * director loan repayment at the other two, all listing people.
+ *
+ * So this reads the LINE instead. A description saying "Net Salaries" is
+ * personal pay whatever account it was coded to, and no chart of accounts has
+ * to cooperate for it to be caught.
+ *
+ * DELIBERATELY BROAD, on the same reasoning as the account patterns: a false
+ * positive drops one aggregate cost line, which is recoverable and still in the
+ * P&L. A false negative puts somebody's salary in a queryable table.
+ */
+export const PERSONAL_PAY_DESCRIPTION_PATTERNS = [
+  'net salar',
+  'salaries',
+  'salary',
+  'payroll',
+  'cpf',
+  'sdl',
+  'levy',
+  'dividend',
+  'loan repayment',
+  'director fee',
+  'staff advance',
+];
+
+/** Suppliers that only ever appear on payments to people. */
+export const PERSONAL_PAY_SUPPLIER_PATTERNS = [
+  'ministry of manpower',
+  'dividends',
+  'loan repayment',
+];
+
+/**
+ * Does this bill line look like a payment to a person?
+ *
+ * Checked on every line regardless of its account, because the account-based
+ * exclusion cannot see an account the P&L never reported.
+ */
+export function looksLikePersonalPay(
+  description: string | null | undefined,
+  supplierName: string | null | undefined,
+): boolean {
+  const text = (description ?? '').toLowerCase();
+  if (PERSONAL_PAY_DESCRIPTION_PATTERNS.some(p => text.includes(p))) return true;
+
+  const supplier = (supplierName ?? '').toLowerCase();
+  return PERSONAL_PAY_SUPPLIER_PATTERNS.some(p => supplier.includes(p));
+}
+
+/**
  * Split account ids into the ones bills may carry and the ones they may not.
  *
  * Takes the P&L rows already in the warehouse, because that is where account

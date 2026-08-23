@@ -216,6 +216,16 @@ for (const t of targets as any[]) {
         if (b.payroll_lines_excluded > 0) {
           findings.push(`${label} ${period.label}: ${b.payroll_lines_excluded} payroll bill line(s) EXCLUDED — personal pay is never stored`);
         }
+        // Reported APART from the total, because it measures the blind spot.
+        // These lines sit in accounts the P&L never reports, so the
+        // account-name exclusion cannot judge them and would have stored them.
+        // That is how named salaries reached the warehouse before 23 Aug 2026.
+        if (b.personal_pay_caught_by_description > 0) {
+          findings.push(`${label} ${period.label}: ${b.personal_pay_caught_by_description} of those were caught by the LINE, not its account — the account-name filter alone would have stored them`);
+        }
+        if (b.unmapped_account_lines > 0) {
+          findings.push(`${label} ${period.label}: ${b.unmapped_account_lines} line(s) coded to an account with no P&L row — usually balance-sheet, but this is the condition that hid two salary accounts`);
+        }
         if (b.unusable > 0) {
           findings.push(`${label} ${period.label}: ${b.unusable} bill(s) had no id or no readable date and were skipped`);
         }

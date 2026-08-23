@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getAccessToken } from './xero.js';
 import { toBillRow, toBillLineRows, isSpend } from '../parsers/xero/bills.js';
-import { payrollAccountIds } from '../lib/payroll-accounts.js';
+import { payrollAccountIds, looksLikePersonalPay } from '../lib/payroll-accounts.js';
 
 /**
  * Supplier bills from Xero, with their lines.
@@ -36,6 +36,22 @@ export interface BillIngestResult {
   unusable: number;
   /** Bill lines dropped because they carry personal pay. Never stored. */
   payroll_lines_excluded: number;
+  /**
+   * Of those, the ones caught by reading the LINE rather than its account.
+   *
+   * Reported separately because it measures the blind spot: an account the P&L
+   * never reports has no name for payrollAccountIds() to match, so anything
+   * counted here would have reached the warehouse under the old filter alone.
+   */
+  personal_pay_caught_by_description: number;
+  /**
+   * Lines coded to an account with no P&L row.
+   *
+   * Not an error -- balance-sheet accounts legitimately never appear in a P&L
+   * -- but it is exactly the condition that hid two salary accounts, so it is
+   * counted and surfaced rather than left to an audit somebody happens to run.
+   */
+  unmapped_account_lines: number;
   stored: boolean;
 }
 
@@ -151,7 +167,11 @@ export async function ingestSupplierBills(
    * Read from the P&L because that is where account NAMES live: a bill line
    * carries only a code and a UUID and cannot be judged on its own.
    */
-  const excludedAccounts = payrollAccountIds(await allPlAccounts(venueId));
+  const plAccounts = await allPlAccounts(venueId);
+  const excludedAccounts = payrollAccountIds(plAccounts);
+  // Which accounts the P&L knows about at all. A line coded outside this set is
+  // one the account-name exclusion is structurally unable to judge.
+  const knownAccounts = new Set(plAccounts.map(a => a.account_id).filter(Boolean) as string[]);
 
   const accessToken = await getAccessToken(tenantId);
   const where = encodeURIComponent(
@@ -164,6 +184,8 @@ export async function ingestSupplierBills(
   let nonSpend = 0;
   let unusable = 0;
   let payrollExcluded = 0;
+  let caughtByDescription = 0;
+  let unmappedAccountLines = 0;
 
   for (;;) {
     const res = await fetch(`${XERO_API}/Invoices?where=${where}&page=${page}`, {
@@ -215,8 +237,26 @@ export async function ingestSupplierBills(
       // the warehouse through the P&L, where it is a section total with no names
       // and no individual amounts.
       const allLines = toBillLineRows(invoice);
-      const keep = allLines.filter(l => !(l.account_id && excludedAccounts.has(l.account_id)));
-      payrollExcluded += allLines.length - keep.length;
+      const keep = allLines.filter(line => {
+        // Guard one: the account is known to hold personal pay.
+        if (line.account_id && excludedAccounts.has(line.account_id)) {
+          payrollExcluded++;
+          return false;
+        }
+        /**
+         * Guard two: the LINE looks like a payment to a person, whatever
+         * account it was coded to. This is the one that catches an account the
+         * P&L never reported -- the hole that let named salaries through until
+         * 23 Aug 2026.
+         */
+        if (looksLikePersonalPay(line.description, bill.supplier_name)) {
+          payrollExcluded++;
+          caughtByDescription++;
+          return false;
+        }
+        if (line.account_id && !knownAccounts.has(line.account_id)) unmappedAccountLines++;
+        return true;
+      });
       linesByInvoice.set(bill.invoice_id, keep);
     }
 
@@ -276,6 +316,8 @@ export async function ingestSupplierBills(
     non_spend: nonSpend,
     unusable,
     payroll_lines_excluded: payrollExcluded,
+    personal_pay_caught_by_description: caughtByDescription,
+    unmapped_account_lines: unmappedAccountLines,
     stored: bills > 0,
   };
 }

@@ -127,6 +127,19 @@ everything up, so a "total costs" question would have swept three computed
 totals into the cost base. Migration 023 keys on
 `(venue_id, period_start, period_end, account_name)` and nothing else.
 
+**The account-name exclusion has a blind spot, and a second guard now covers
+it.** `payrollAccountIds()` learns which accounts hold personal pay by reading
+account NAMES out of the P&L -- so it is structurally blind to an account the
+P&L never reports. An audit on 23 Aug 2026 found 46 bill lines carrying named
+individuals' net salaries and SDL (supplier: Ministry of Manpower), plus
+dividends and a director loan repayment, all coded to accounts with no P&L row.
+They were deleted, and `looksLikePersonalPay()` now reads the LINE itself --
+description and supplier -- on every row regardless of its account. The two
+counts are reported separately on every run, because the second one measures
+how much the first would have missed. Bill lines coded to an account the P&L
+does not report are also counted now: usually balance-sheet and harmless, but
+that is exactly the condition that hid the salary accounts.
+
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
 remembering to filter. There is a test asserting it.

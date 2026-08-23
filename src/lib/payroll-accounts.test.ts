@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isPayrollAccount, payrollAccountIds } from './payroll-accounts.js';
+import { isPayrollAccount, payrollAccountIds, looksLikePersonalPay } from './payroll-accounts.js';
 
 /**
  * Neon Pigeon's June 2026 came back with 168 bill lines across four payroll
@@ -66,4 +66,49 @@ describe('payrollAccountIds', () => {
     const ids = payrollAccountIds([{ account_id: null, account_name: 'Total Staff Costs' }]);
     assert.equal(ids.size, 0);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The second guard: reading the LINE, not its account
+// ---------------------------------------------------------------------------
+
+/**
+ * payrollAccountIds() learns payroll accounts from P&L account NAMES, so it is
+ * blind to an account the P&L never reports. On 23 Aug 2026 an audit found bill
+ * lines carrying named individuals' net salaries and SDL under exactly such
+ * accounts — 46 lines across three venues, including dividends and a director
+ * loan repayment. None of them could have been caught by name.
+ */
+
+test('a net-salary line is personal pay whatever account it was coded to', () => {
+  assert.equal(looksLikePersonalPay('Leon K Net Salaries', 'Printmate (S) Pte Ltd'), true);
+  assert.equal(looksLikePersonalPay('Varshni N SDL', 'Ministry of Manpower'), true);
+});
+
+test('Ministry of Manpower is payroll on the supplier alone', () => {
+  // The description on these lines is sometimes just a person's name, which no
+  // pattern can safely match. The supplier is the reliable signal.
+  assert.equal(looksLikePersonalPay('Some Person', 'Ministry of Manpower'), true);
+});
+
+test('dividends and director loan repayments are personal too', () => {
+  // Not payroll, but named individuals' financial affairs — same wall.
+  assert.equal(looksLikePersonalPay('A Shareholder', 'Dividends'), true);
+  assert.equal(looksLikePersonalPay('A Director', 'Loan Repayment'), true);
+});
+
+test('ordinary supplier lines pass through', () => {
+  assert.equal(looksLikePersonalPay('FRUIT HOKKAIDO APPLE WINE 500ml / 12bot', 'Angra Wine & Spirit Importers'), false);
+  assert.equal(looksLikePersonalPay('Chemical Wash - Ceiling Cassette', 'Air-Tech Conditioning'), false);
+  assert.equal(looksLikePersonalPay(null, null), false);
+});
+
+test('the levy pattern catches FWL lines however they are worded', () => {
+  assert.equal(looksLikePersonalPay('Foreign Worker Levy - Aug', 'Ministry of Manpower'), true);
+  assert.equal(looksLikePersonalPay('LEVY', null), true);
+});
+
+test('matching is case-insensitive', () => {
+  assert.equal(looksLikePersonalPay('NET SALARIES', null), true);
+  assert.equal(looksLikePersonalPay('Payroll run', null), true);
 });
