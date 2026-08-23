@@ -5,6 +5,7 @@ import { requireSchema } from '../lib/schema-check.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { classifierPrompt, classificationTool, parseClassification } from '../ai/post-classifier.js';
 import { fetchImageAsBase64 } from '../lib/image-fetch.js';
+import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
 
 /**
  * Classify posts by what they are ABOUT.
@@ -129,6 +130,11 @@ let skipped = 0;
 let imageFailures = 0;
 const problems: string[] = [];
 const categoryCounts = new Map<string, number>();
+/**
+ * Set when the ACCOUNT fails rather than a post. Stops the run instead of
+ * counting the same cause once per remaining post — see lib/api-fatal.ts.
+ */
+let fatal: string | null = null;
 
 for (let i = 0; i < posts.length; i += batchSize) {
   const batch = (posts as any[]).slice(i, i + batchSize);
@@ -229,12 +235,25 @@ for (let i = 0; i < posts.length; i += batchSize) {
       classified++;
       categoryCounts.set(parsed.value.category, (categoryCounts.get(parsed.value.category) ?? 0) + 1);
     } catch (e: any) {
+      /**
+       * An account problem is not this post's problem, and calling the API
+       * again for every post that follows produces one identical line each and
+       * a run that has to be read to the bottom to understand.
+       */
+      fatal = fatalApiReason(e);
+      if (fatal) break;
+
       skipped++;
       problems.push(`${post.permalink ?? post.post_id}: ${String(e?.message ?? e).slice(0, 160)}`);
     }
   }
 
-  console.log(`  ${Math.min(i + batchSize, posts.length)}/${posts.length} — ${classified} classified, ${skipped} skipped`);
+  // On an abort the batch did not finish, so the batch boundary would overstate
+  // how far the run actually got. Report what was really attempted.
+  const reached = fatal ? classified + skipped : Math.min(i + batchSize, posts.length);
+  console.log(`  ${reached}/${posts.length} — ${classified} classified, ${skipped} skipped`);
+
+  if (fatal) break;
 }
 
 console.log(`\n${classified} post(s) classified, ${skipped} skipped.`);
@@ -263,6 +282,19 @@ if (problems.length > 0) {
   console.log(`\nPROBLEMS (${problems.length}):`);
   for (const p of problems.slice(0, 25)) console.log(`  - ${p}`);
   if (problems.length > 25) console.log(`  ... and ${problems.length - 25} more`);
+}
+
+if (fatal) {
+  // Last, so it is the thing still on screen. The distribution above is real
+  // work that was completed and should not be buried by the failure.
+  const args = process.argv.slice(2).join(' ');
+  console.log(fatalRunSummary(
+    fatal,
+    classified,
+    posts.length - classified - skipped,
+    `npm run classify:posts --${args ? ` ${args}` : ''}`,
+  ));
+  process.exit(1);
 }
 
 // Skipping everything is a failure however politely it was reported.
