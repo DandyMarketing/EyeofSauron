@@ -2,7 +2,7 @@ import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { newState, signState, verifyState, buildAuthorizeUrl, isExpired, XERO_SCOPES } from './xero.js';
+import { newState, signState, verifyState, buildAuthorizeUrl, isExpired, XERO_SCOPES, sharedAuthorizationTenants } from './xero.js';
 
 const KEY = randomBytes(32);
 const NOW = Date.parse('2026-08-14T12:00:00Z');
@@ -145,4 +145,67 @@ describe('isExpired', () => {
     assert.equal(isExpired(null, NOW), true);
     assert.equal(isExpired(undefined, NOW), true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Refresh-token rotation across organisations
+// ---------------------------------------------------------------------------
+
+/**
+ * One Xero authorization covers every organisation the user approved, and Xero
+ * issues ONE token pair for it. A refresh rotates that pair and consumes the
+ * old one immediately — so writing the new token to only the tenant being
+ * refreshed leaves its siblings holding a dead token.
+ *
+ * That is not hypothetical. On 23 Aug 2026 the 24-month backfill stored four
+ * months and 3,702 bill lines for Neon Pigeon while Fat Prince and Firangi
+ * Superstar failed on EVERY month with "Refresh token has been consumed", and
+ * reconnecting would have fixed it only until the next refresh.
+ */
+
+const plain = (s: string) => `enc(${s})`;
+const unplain = (s: string) => {
+  const m = /^enc\((.*)\)$/.exec(s);
+  if (!m) throw new Error('not decryptable');
+  return m[1];
+};
+
+test('a rotated token reaches every organisation sharing the authorization', () => {
+  const rows = [
+    { tenant_id: 'fat-prince', refresh_token_encrypted: plain('R0') },
+    { tenant_id: 'firangi', refresh_token_encrypted: plain('R0') },
+    { tenant_id: 'potus', refresh_token_encrypted: plain('R0') },
+  ];
+  const shared = sharedAuthorizationTenants(rows, 'R0', unplain, 'potus');
+  assert.deepEqual(shared.sort(), ['fat-prince', 'firangi', 'potus']);
+});
+
+test('a separate authorization is left alone', () => {
+  // Matching on the token rather than updating every row is what keeps two
+  // independent connections from overwriting each other.
+  const rows = [
+    { tenant_id: 'potus', refresh_token_encrypted: plain('R0') },
+    { tenant_id: 'other-client', refresh_token_encrypted: plain('DIFFERENT') },
+  ];
+  assert.deepEqual(sharedAuthorizationTenants(rows, 'R0', unplain, 'potus'), ['potus']);
+});
+
+test('the tenant being refreshed is always written, even if its own row is unreadable', () => {
+  // Otherwise the new token goes nowhere and the run reports success, leaving
+  // the connection permanently unauthorised.
+  const rows = [{ tenant_id: 'potus', refresh_token_encrypted: 'corrupt-ciphertext' }];
+  assert.deepEqual(sharedAuthorizationTenants(rows, 'R0', unplain, 'potus'), ['potus']);
+});
+
+test('rows with no stored refresh token are skipped', () => {
+  const rows = [
+    { tenant_id: 'potus', refresh_token_encrypted: plain('R0') },
+    { tenant_id: 'never-connected', refresh_token_encrypted: null },
+  ];
+  assert.deepEqual(sharedAuthorizationTenants(rows, 'R0', unplain, 'potus').sort(), ['potus']);
+});
+
+test('no duplicates when the current tenant also matches', () => {
+  const rows = [{ tenant_id: 'potus', refresh_token_encrypted: plain('R0') }];
+  assert.deepEqual(sharedAuthorizationTenants(rows, 'R0', unplain, 'potus'), ['potus']);
 });

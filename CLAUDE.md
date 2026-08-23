@@ -96,6 +96,22 @@ which points at credit notes: ACCPAYCREDIT reduces the ledger and we do not
 ingest it, so bill-derived food cost is currently overstated. Never present a
 supplier breakdown as complete without the coverage percentage beside it.
 
+**One authorization, one refresh token, three organisations — and rotation
+breaks all but one of them if you let it.** Xero issues a SINGLE token pair for
+an authorization covering every organisation approved, and a refresh CONSUMES
+the old refresh token the instant the new one is issued. `storeConnection`
+writes that shared token to all three rows correctly; the refresh originally
+wrote the rotated one back to only the tenant it was refreshing, leaving the
+other two holding a token Xero had just destroyed. On 23 Aug 2026 the 24-month
+backfill stored four months and 3,702 bill lines for Neon Pigeon while Fat
+Prince and Firangi Superstar failed on EVERY month with `invalid_grant:
+Refresh token has been consumed`. Reconnecting fixes it only until the next
+refresh, which is why it looked intermittent. `sharedAuthorizationTenants()`
+now writes the rotated pair to every row holding the token that was just used,
+found by DECRYPTING and comparing — `encrypt()` uses a random IV, so the same
+token has different ciphertext in every row and the columns cannot be matched
+directly.
+
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
 remembering to filter. There is a test asserting it.

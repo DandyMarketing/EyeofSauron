@@ -278,6 +278,38 @@ export async function storeConnection(tenants: XeroTenant[], tokens: XeroTokens)
 }
 
 /**
+ * Every tenant whose stored refresh token is the one just rotated.
+ *
+ * Pure and injectable so the sharing rule can be tested without a database or
+ * a key: what matters is that a rotated token reaches all its siblings, and
+ * that a row we cannot read never silently drops out.
+ *
+ * `current` is always included. If its own ciphertext were unreadable we would
+ * otherwise write the new token nowhere and report success, leaving the
+ * connection permanently unauthorised — the failure this function exists to
+ * prevent, one level down.
+ */
+export function sharedAuthorizationTenants(
+  rows: Array<{ tenant_id: string; refresh_token_encrypted: string | null }>,
+  refreshToken: string,
+  decryptOne: (ciphertext: string) => string,
+  current: string,
+): string[] {
+  const tenants = new Set<string>([current]);
+
+  for (const row of rows) {
+    if (!row.refresh_token_encrypted) continue;
+    try {
+      if (decryptOne(row.refresh_token_encrypted) === refreshToken) tenants.add(row.tenant_id);
+    } catch {
+      // A row encrypted under a different key, or corrupt. Not ours to rotate.
+    }
+  }
+
+  return [...tenants];
+}
+
+/**
  * A usable access token for this tenant, refreshing if needed.
  *
  * The ordering below is the whole point. Xero invalidates the old refresh
@@ -318,6 +350,40 @@ export async function getAccessToken(tenantId: string): Promise<string> {
     throw e;
   }
 
+  /**
+   * Write the new pair to EVERY organisation sharing this authorization, not
+   * just the one being refreshed.
+   *
+   * WHY. One Xero authorization covers every organisation the user approved,
+   * and Xero issues ONE token pair for it -- `storeConnection` writes that same
+   * refresh token to all three rows, correctly. But a refresh ROTATES it: the
+   * moment Xero issues a new pair, the old refresh token is consumed and dead.
+   *
+   * Updating only `.eq('tenant_id', tenantId)` therefore left the other two
+   * rows holding a token that had just been destroyed. The next tenant to
+   * refresh got `invalid_grant: Refresh token has been consumed`, for ever, and
+   * a reconnect fixed it only until the first refresh broke it again. That is
+   * exactly what the 24-month backfill hit on 23 Aug 2026: Neon Pigeon stored
+   * four months and 3,702 bill lines while Fat Prince and Firangi Superstar
+   * failed on every single month.
+   *
+   * Siblings are found by DECRYPTING and comparing, because the ciphertext
+   * cannot be compared -- encrypt() uses a random IV, so the same token
+   * encrypts differently in every row. Matching on the token itself also keeps
+   * two genuinely separate authorizations apart, which matching on "all rows"
+   * would not.
+   */
+  const { data: allConnections } = await supabase
+    .from('xero_connections')
+    .select('tenant_id, refresh_token_encrypted');
+
+  const sharing = sharedAuthorizationTenants(
+    allConnections ?? [],
+    refreshToken,
+    ciphertext => decrypt(ciphertext, key),
+    tenantId,
+  );
+
   const { error: writeError } = await supabase
     .from('xero_connections')
     .update({
@@ -328,7 +394,7 @@ export async function getAccessToken(tenantId: string): Promise<string> {
       updated_at: new Date().toISOString(),
       last_error: null,
     })
-    .eq('tenant_id', tenantId);
+    .in('tenant_id', sharing);
 
   if (writeError) {
     // Xero has already rotated. The token in hand works, but the one we can
