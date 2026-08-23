@@ -45,6 +45,27 @@ const dryRun = process.argv.includes('--dry-run');
  */
 const MODEL = process.env.SAURON_MODEL_CLASSIFY?.trim() || 'claude-sonnet-5';
 
+/**
+ * Fail before doing any work, not fifty posts in.
+ *
+ * The first real run was on a service that has Meta and Supabase credentials
+ * but no ANTHROPIC_API_KEY, and it reported fifty identical "Could not resolve
+ * authentication method" failures -- one per post, each looking like a problem
+ * with that post. The cause was one missing variable, and the run had to be
+ * read to the bottom to see that every single line said the same thing.
+ *
+ * Same rule as requireSchema(): a job that cannot possibly succeed should say
+ * so before it starts, and name the fix.
+ */
+if (!process.env.ANTHROPIC_API_KEY?.trim()) {
+  console.error('ANTHROPIC_API_KEY is not set on this service.');
+  console.error('');
+  console.error('The classifier needs BOTH: Meta credentials for the images and an Anthropic');
+  console.error('key for the judgement. Add ANTHROPIC_API_KEY to this service\'s variables —');
+  console.error('the same value the web service uses — and run it again.');
+  process.exit(1);
+}
+
 console.log(`Post classification — up to ${limit} post(s), ${MODEL}`);
 console.log(captionOnly
   ? 'CAPTION ONLY. Subject is largely invisible in a caption; expect lower confidence and do not mix these with an image pass.\n'
