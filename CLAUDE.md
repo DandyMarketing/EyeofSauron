@@ -112,6 +112,17 @@ found by DECRYPTING and comparing — `encrypt()` uses a random IV, so the same
 token has different ciphertext in every row and the columns cannot be matched
 directly.
 
+**A column a bug fix might CHANGE must never be part of a unique key.** The
+`profit_and_loss` key included `is_summary`, so when the parser was corrected
+to mark Gross Profit, Operating Profit and Net Profit as totals rather than
+detail lines, the upsert saw a different flag and INSERTED instead of updating
+-- 213 duplicate rows across three venues and two years, each line present once
+correctly flagged and once still claiming to be a detail line. Both rows real,
+both the same amount, and invisible unless somebody counted. Worse than the bug
+being fixed, because `query_profit_and_loss` tells the model to trust
+`is_summary` instead of adding everything up, so a "total costs" question would
+have swept three computed totals into the cost base. Fixed in migration 023.
+
 **Never request a payroll scope.** The security model's strongest protection is
 not ingesting personal pay at all, and lacking the permission is surer than
 remembering to filter. There is a test asserting it.

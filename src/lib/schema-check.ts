@@ -78,6 +78,14 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '022_supplier_bills.sql',
   },
   {
+    // The constraint, not a column -- but this manifest is what a job checks
+    // before it writes, and an upsert naming a key that does not exist fails
+    // at write time with a confusing PostgREST error rather than here.
+    table: 'profit_and_loss',
+    columns: ['account_id', 'account_name', 'is_summary'],
+    migration: '023_pl_unique_without_is_summary.sql',
+  },
+  {
     table: 'xero_connections',
     columns: ['tenant_id', 'tenant_name', 'venue_id'],
     migration: '012_xero_connections.sql',

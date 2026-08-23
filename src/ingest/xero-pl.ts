@@ -112,7 +112,21 @@ export async function ingestProfitAndLoss(
 
   const { error } = await supabase
     .from('profit_and_loss')
-    .upsert(rows, { onConflict: 'venue_id,period_start,period_end,section,account_name,is_summary' });
+    /**
+     * is_summary is deliberately NOT in this key -- see migration 023.
+     *
+     * It was, and that made the FLAG part of a row's identity. When the parser
+     * was corrected to mark Gross Profit, Operating Profit and Net Profit as
+     * totals rather than detail lines, the upsert saw a different is_summary
+     * and INSERTED instead of updating: 213 duplicate rows across three venues
+     * and two years, each line present once correctly flagged and once still
+     * claiming to be a detail line. Both real, both the same amount, and
+     * invisible unless somebody went looking.
+     *
+     * A column a bug fix might change must never be part of the key, or the
+     * fix forks the row instead of repairing it.
+     */
+    .upsert(rows, { onConflict: 'venue_id,period_start,period_end,section,account_name' });
 
   if (error) throw new Error(`P&L upsert failed: ${error.message}`);
 
