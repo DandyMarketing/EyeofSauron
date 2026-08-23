@@ -379,3 +379,35 @@ test('flags cut across category rather than replacing it', () => {
   assert.equal(groupPosts(posts, 'category', 'reach').groups.length, 2);
   assert.equal(groupPosts(posts, 'is_trend', 'reach').groups.length, 2);
 });
+
+test('a making video and a plated shot are both dish, and separable', () => {
+  // Khai spotted this at fifty posts: the team presenting or building a dish is
+  // correctly category "dish" by the taxonomy's own rule — the food is the
+  // subject — which left a build and a finished plate indistinguishable. As a
+  // FLAG the subject is held constant and the format becomes the variable.
+  const posts = [
+    classified({ category: 'dish', shows_process: true, metrics: { reach: 4000 } }),
+    classified({ category: 'dish', shows_process: false, metrics: { reach: 1000 } }),
+  ] as any;
+
+  assert.equal(groupPosts(posts, 'category', 'reach').groups.length, 1);
+
+  const byFormat = groupPosts(posts, 'shows_process', 'reach');
+  assert.equal(byFormat.groups.length, 2);
+  assert.equal(byFormat.groups.find(g => g.group === 'shows it being made')!.median, 4000);
+});
+
+test('shows_process is not shows_people — a guest eating shows one and not the other', () => {
+  const posts = [classified({ category: 'dish', shows_people: true, shows_process: false })] as any;
+  assert.equal(groupPosts(posts, 'shows_people', 'reach').groups[0].group, 'shows people');
+  assert.equal(groupPosts(posts, 'shows_process', 'reach').groups[0].group, 'shows the finished thing');
+});
+
+test('posts classified before the flag existed are excluded from it', () => {
+  // The first fifty were judged against a taxonomy without this flag. Null
+  // means never judged, and counting them as false would say every one of them
+  // showed a finished plate.
+  const result = groupPosts([classified({ shows_process: null })] as any, 'shows_process', 'reach');
+  assert.equal(result.groups.length, 0);
+  assert.equal(result.posts_excluded_no_feature, 1);
+});

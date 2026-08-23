@@ -34,7 +34,7 @@ export type Dimension =
    */
   | 'category'
   /** Flags cut ACROSS category — a trend-format reel of a cocktail is both. */
-  | 'shows_people' | 'has_call_to_action' | 'is_repost' | 'is_trend';
+  | 'shows_people' | 'has_call_to_action' | 'is_repost' | 'is_trend' | 'shows_process';
 
 export interface PostLike {
   business_date: string;
@@ -45,6 +45,7 @@ export interface PostLike {
   has_call_to_action?: boolean | null;
   is_repost?: boolean | null;
   is_trend?: boolean | null;
+  shows_process?: boolean | null;
   hashtags: string[] | null;
   mentions: string[] | null;
   caption_length: number | null;
@@ -167,6 +168,10 @@ function groupsFor(post: PostLike, dimension: Dimension): string[] {
       return flagBucket(post.is_repost, 'reposted', 'made by the venue');
     case 'is_trend':
       return flagBucket(post.is_trend, 'trend format', 'straight post');
+    // The one that separates a making-video from a plated shot, with the
+    // subject held constant.
+    case 'shows_process':
+      return flagBucket(post.shows_process, 'shows it being made', 'shows the finished thing');
     case 'weekday': {
       const d = new Date(`${post.business_date}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? [] : [WEEKDAYS[d.getUTCDay()]];

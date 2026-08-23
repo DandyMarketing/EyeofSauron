@@ -59,8 +59,8 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
   },
   {
     table: 'social_posts',
-    columns: ['category', 'category_confidence', 'shows_people', 'has_call_to_action', 'is_repost', 'is_trend', 'classified_at', 'classifier_model', 'classified_from'],
-    migration: '025_post_classification.sql',
+    columns: ['category', 'category_confidence', 'shows_people', 'has_call_to_action', 'is_repost', 'is_trend', 'shows_process', 'classified_at', 'classifier_model', 'classified_from'],
+    migration: '026_post_shows_process.sql',
   },
   {
     table: 'venue_notes',

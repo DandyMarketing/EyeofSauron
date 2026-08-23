@@ -322,6 +322,18 @@ is a distinction about what is in the picture, and a cocktail post captioned
 "Friday." is unclassifiable from text. `classified_from` records which was used
 because a caption-only pass and a caption+image pass are not comparable.
 
+**A making video and a plated shot are both Dish, and `shows_process`
+separates them.** Spotted at fifty posts: a good number are the team presenting
+or building a dish, which the taxonomy's own rule correctly sends to Dish
+because the food is the subject -- leaving a build and a finished plate
+indistinguishable in the data. Made a FLAG rather than a tenth category, on the
+same argument as `is_trend`: format cuts across subject, and a tenth category
+would have removed those posts from the subject analysis and destroyed the only
+question worth asking -- does a dish shown being MADE beat a dish shown
+finished, with the subject held constant. Not the same as `shows_people`: a
+guest eating a finished plate shows people and no process. Added at fifty posts
+deliberately, because a taxonomy change costs whatever is already classified.
+
 **`is_trend` is low confidence and says so everywhere.** Trends live largely in
 audio the classifier cannot hear, and one that ran after the training cutoff
 cannot be recognised at all -- so the true count is probably higher than the

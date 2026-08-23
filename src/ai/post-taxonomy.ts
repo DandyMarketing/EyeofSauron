@@ -125,6 +125,15 @@ export const POST_FLAGS: Flag[] = [
     confidence: 'reliable',
   },
   {
+    key: 'shows_process',
+    label: 'Shows it being made',
+    definition:
+      'The food or drink being MADE, prepared, plated, poured, torched, or presented by a person — a "making" video, a build, a pour, hands finishing a plate, a chef handing something over. ' +
+      'This is about PROCESS being shown, not about who is in frame: a guest eating a finished dish shows people but no process, and a plated shot with a hand resting beside it is not a build. ' +
+      'It cuts across the subject deliberately. A chef making a dish is category "dish" (the food is the subject, per that definition) AND shows_process true — which is the only way to ask whether a dish shown being made beats a dish shown finished.',
+    confidence: 'reliable',
+  },
+  {
     key: 'is_trend',
     label: 'Follows a trend format',
     definition:

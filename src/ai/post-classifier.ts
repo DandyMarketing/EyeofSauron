@@ -23,6 +23,7 @@ export interface Classification {
   has_call_to_action: boolean;
   is_repost: boolean;
   is_trend: boolean;
+  shows_process: boolean;
 }
 
 /**
@@ -108,6 +109,7 @@ export function parseClassification(
       has_call_to_action: flags.has_call_to_action,
       is_repost: flags.is_repost,
       is_trend: flags.is_trend,
+      shows_process: flags.shows_process,
     },
   };
 }
