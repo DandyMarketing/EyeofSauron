@@ -60,7 +60,7 @@ comment on column public.social_posts.classified_from is
 -- Partial index: the classifier job asks for unclassified posts every run, and
 -- that is the only query that scans on this column.
 create index if not exists social_posts_unclassified_idx
-  on public.social_posts (venue_id, timestamp desc)
+  on public.social_posts (venue_id, published_at desc)
   where category is null;
 
 create index if not exists social_posts_category_idx

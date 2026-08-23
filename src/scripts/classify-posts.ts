@@ -54,10 +54,10 @@ await requireSchema();
 
 let query = supabase
   .from('social_posts')
-  .select('id, post_id, caption, media_type, permalink, timestamp, venue_id, venues(name, slug)')
+  .select('id, post_id, caption, media_type, permalink, published_at, venue_id, venues(name, slug)')
   .is('category', null)
   .eq('content_type', 'post')
-  .order('timestamp', { ascending: false })
+  .order('published_at', { ascending: false })
   .limit(limit);
 
 if (onlySlug) {
