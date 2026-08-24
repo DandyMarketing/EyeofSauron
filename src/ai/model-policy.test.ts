@@ -122,3 +122,51 @@ test('a first request with nothing cached reports 0%', () => {
 test('a missing usage object does not throw', () => {
   assert.match(usageLine(OPUS, undefined), /cache_hit=0%/);
 });
+
+// --- output ceilings -------------------------------------------------------
+
+/**
+ * Thinking tokens count towards output_tokens, so a purpose with deeper
+ * thinking needs a HIGHER ceiling, not the same one. The first recommendation
+ * run came back at exactly 8192 output tokens with a 3,449-character answer:
+ * xhigh thinking had taken the budget and the analysis was truncated.
+ */
+test('every purpose has an output ceiling', () => {
+  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery'] as const) {
+    const choice = modelFor(purpose);
+    assert.ok(choice.maxTokens > 0, `${purpose} has no maxTokens`);
+  }
+});
+
+test('the deepest-thinking purpose gets the most room', () => {
+  assert.ok(
+    modelFor('recommendation').maxTokens > modelFor('chat').maxTokens,
+    'recommendation thinks harder AND writes longer than chat',
+  );
+  assert.ok(
+    modelFor('chat').maxTokens > modelFor('lookup').maxTokens,
+    'chat thinks; a lookup does not',
+  );
+});
+
+test('a thinking purpose is never left on the pre-thinking ceiling', () => {
+  // 8192 was set before any thinking existed in this codebase. Any purpose
+  // that thinks must have moved off it.
+  for (const purpose of ['chat', 'recommendation'] as const) {
+    const choice = modelFor(purpose);
+    assert.equal(choice.thinking, true);
+    assert.ok(choice.maxTokens > 8192, `${purpose} still on the pre-thinking ceiling`);
+  }
+});
+
+test('a model override does not change the ceiling', () => {
+  // Env overrides pick the engine; thinking and ceilings describe the JOB.
+  const before = modelFor('lookup').maxTokens;
+  process.env.SAURON_MODEL_LOOKUP = 'claude-haiku-4-5';
+  try {
+    assert.equal(modelFor('lookup').model, 'claude-haiku-4-5');
+    assert.equal(modelFor('lookup').maxTokens, before);
+  } finally {
+    delete process.env.SAURON_MODEL_LOOKUP;
+  }
+});

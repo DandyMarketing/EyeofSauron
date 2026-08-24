@@ -100,15 +100,17 @@ export interface QueryResult {
   sources: WebSource[];
 }
 
-// 2048 was too tight once answers began carrying tables and chart commentary.
-// Running out mid-response is what produced empty replies: the turn ends with
-// stop_reason 'max_tokens' and, if the model was still emitting tool calls,
-// no text block at all.
-// 4096 was too tight for an analytical answer that also has to interpret a
-// chart: the model would spend the budget on tool calls, get cut off before
-// writing anything, and the user got a blank recovery message instead of the
-// analysis it had already done the work for.
-const MAX_TOKENS = 8192;
+// The output ceiling now comes from the model policy, because it depends on the
+// purpose -- thinking tokens count towards output, so the deepest-thinking path
+// needs the most room. See ModelChoice.maxTokens.
+//
+// History kept, because each number was paid for. 2048 was too tight once
+// answers began carrying tables and chart commentary: running out mid-response
+// produced EMPTY replies, since the turn ends with stop_reason 'max_tokens' and,
+// if the model was still emitting tool calls, no text block at all. 4096 was too
+// tight for an analytical answer that also had to interpret a chart. 8192 was
+// too tight once thinking was switched on -- the first recommendation run
+// returned exactly 8192 output tokens with a 3,449-character answer behind it.
 
 // Ceiling on tool rounds. Nothing legitimate needs more, and without it a model
 // that keeps querying spins until the request times out with no answer.
@@ -272,7 +274,7 @@ export async function askSauron(
     const build = (withTools: Anthropic.Messages.ToolUnion[]) => {
       const params: any = {
         model: choice.model,
-        max_tokens: MAX_TOKENS,
+        max_tokens: choice.maxTokens,
         system: systemBlocks(opts.extraSystem),
         messages,
         tools: withTools,
@@ -367,6 +369,23 @@ export async function askSauron(
     // Logged on every call, because a cache that silently stopped working
     // shows up as a bill months later and nothing else.
     console.log(usageLine(choice.model, r.usage));
+
+    /**
+     * Hitting the ceiling is a TRUNCATED answer, and it looks like a finished
+     * one from the outside.
+     *
+     * It went unnoticed on the first recommendation run because the only
+     * evidence was `out=8192` matching the limit exactly -- which you have to
+     * already suspect to spot. In the chat a user might notice a reply stopping
+     * mid-sentence; in a proactive briefing nobody is reading it as it arrives,
+     * and the structuring pass will faithfully record whatever survived.
+     */
+    if (r.stop_reason === 'max_tokens') {
+      console.error(
+        `[model] TRUNCATED — hit the ${choice.maxTokens}-token ceiling for purpose "${purpose}". ` +
+        `Thinking counts towards this, so raise maxTokens in model-policy.ts rather than lowering effort.`,
+      );
+    }
 
     // A failed search returns HTTP 200 with an error object where the results
     // should be, so it is invisible unless it is said out loud.

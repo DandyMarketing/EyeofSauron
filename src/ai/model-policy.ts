@@ -41,6 +41,21 @@ export interface ModelChoice {
    */
   thinking: boolean;
   effort?: Effort;
+  /**
+   * Output ceiling for this purpose, THINKING INCLUDED -- which is the part
+   * that is easy to get wrong.
+   *
+   * Thinking tokens count towards output_tokens, so raising effort without
+   * raising this silently takes the budget away from the answer. The first real
+   * recommendation run proved it: the final call came back at exactly 8192
+   * output tokens -- the ceiling, to the token -- and the analysis behind it was
+   * 3,449 characters. Roughly 900 tokens of answer after xhigh thinking had
+   * taken the rest, on a briefing that had announced "three things".
+   *
+   * A truncated analysis is worse here than in chat, because nobody is watching
+   * it happen and the structuring pass will faithfully record whatever survived.
+   */
+  maxTokens: number;
 }
 
 export const OPUS = 'claude-opus-5';
@@ -48,16 +63,24 @@ export const SONNET = 'claude-sonnet-5';
 
 const DEFAULTS: Record<Purpose, ModelChoice> = {
   // The surface where the product's actual value is delivered.
-  chat: { model: OPUS, thinking: true, effort: 'high' },
+  //
+  // 8192 was chosen before thinking existed here, and it is now shared with
+  // `high` effort. Raised, but not to the recommendation ceiling: somebody is
+  // waiting for this one, and a very long answer on a phone is its own failure.
+  chat: { model: OPUS, thinking: true, effort: 'high', maxTokens: 16384 },
   // Nobody is waiting, and a weak proactive suggestion is worse than none --
   // it teaches people to ignore the feature.
-  recommendation: { model: OPUS, thinking: true, effort: 'xhigh' },
+  //
+  // The largest ceiling of the four because it has the deepest thinking AND the
+  // longest output: a week's briefing with tables for three findings. This is
+  // a ceiling, not a target -- an analysis that needs less costs less.
+  recommendation: { model: OPUS, thinking: true, effort: 'xhigh', maxTokens: 32768 },
   // A date and a number. Latency matters more than depth, especially on a
   // phone, and there is nothing here for reasoning to improve.
-  lookup: { model: SONNET, thinking: false },
+  lookup: { model: SONNET, thinking: false, maxTokens: 4096 },
   // Restating data already in the conversation. Deep thought cannot help, and
   // this path only runs when something has already gone wrong.
-  recovery: { model: SONNET, thinking: false },
+  recovery: { model: SONNET, thinking: false, maxTokens: 4096 },
 };
 
 /**
