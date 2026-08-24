@@ -303,9 +303,32 @@ export async function askSauron(
     const activeTools = () =>
       opts.tools ?? (searchDisabled ? queryTools : tools);
 
+    /**
+     * STREAMED, always, and not for the progress display -- we discard every
+     * event and take the final message.
+     *
+     * The SDK refuses a non-streaming request whose `max_tokens` could take it
+     * past ten minutes, and raising the recommendation ceiling to 32,768
+     * crossed that line:
+     *
+     *   Streaming is required for operations that may take longer than 10
+     *   minutes.
+     *
+     * The threshold is an internal estimate, not a documented number, so
+     * "pick a max_tokens just under it" is a guess that breaks silently the
+     * next time a model's throughput estimate changes. Streaming removes the
+     * question entirely and costs nothing here.
+     *
+     * finalMessage() returns a Message, so `container`, `usage` and
+     * `stop_reason` all survive -- checked against the SDK's own types rather
+     * than assumed, because the container fix depends on it.
+     */
+    const call = (params: any): Promise<Anthropic.Message> =>
+      client.messages.stream(params).finalMessage() as Promise<Anthropic.Message>;
+
     let r: Anthropic.Message;
     try {
-      r = await client.messages.create(build(activeTools()));
+      r = await call(build(activeTools()));
     } catch (e) {
       /**
        * Two optional enrichments, two fallbacks, one rule: a feature that is
@@ -323,7 +346,7 @@ export async function askSauron(
           `[model] ${choice.model} refused thinking/effort — retrying without them, answers will be shallower: ` +
           `${String((e as any)?.message ?? e).slice(0, 300)}`,
         );
-        r = await client.messages.create(build(activeTools()));
+        r = await call(build(activeTools()));
       } else if (!searchDisabled && !opts.tools && isWebSearchConfigError(e)) {
         /**
          * Only on the FIRST failure, and never when the caller pinned the tool
@@ -336,7 +359,7 @@ export async function askSauron(
           `${String((e as any)?.message ?? e).slice(0, 300)}`,
         );
         console.error('[engine] Answering from the warehouse only. Fix the tool config in src/ai/web-search.ts.');
-        r = await client.messages.create(build(queryTools));
+        r = await call(build(queryTools));
       } else {
         /**
          * No retry, but never silently. This failure threw away three complete
