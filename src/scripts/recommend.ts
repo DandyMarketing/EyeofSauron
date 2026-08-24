@@ -144,6 +144,29 @@ for (const venue of venues as any[]) {
     // Pass one: the real work. Unscoped so it can benchmark.
     const analysis = await askSauron(brief, [], undefined, 'recommendation');
 
+    /**
+     * Say the analysis finished, the moment it finishes.
+     *
+     * The first real run printed nothing at all between one venue's header and
+     * the next: five minutes of Opus, eleven tool rounds, and no evidence in
+     * the log that any of it produced anything. A long job that goes quiet is
+     * indistinguishable from a hung one, and if the process dies later the
+     * completed work leaves no trace.
+     */
+    console.log(`  analysed: ${analysis.toolCalls.length} quer${analysis.toolCalls.length === 1 ? 'y' : 'ies'}, ${analysis.charts.length} chart(s), ${analysis.answer.length} chars`);
+
+    /**
+     * In a dry run the PROSE is the deliverable.
+     *
+     * The structured headlines are what gets stored, but they are a summary of
+     * this -- and the question a dry run exists to answer is whether the advice
+     * is any good, which cannot be judged from a headline. Printed before the
+     * structuring call so it survives a failure in it.
+     */
+    if (dryRun) {
+      console.log(`\n${analysis.answer}\n`);
+    }
+
     // Pass two: rows, not prose.
     const structured = await client.messages.create({
       model: STRUCTURING_MODEL,
