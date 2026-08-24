@@ -69,17 +69,35 @@ console.log(`Analysis: ${ANALYSIS_MODEL}. Structuring: ${STRUCTURING_MODEL}. Run
 
 await requireSchema();
 
-let venueQuery = supabase.from('venues').select('id, name, slug').order('name');
-if (onlySlug) venueQuery = venueQuery.eq('slug', onlySlug);
-
-const { data: venues, error: venueError } = await venueQuery;
+const { data: allVenues, error: venueError } = await supabase
+  .from('venues')
+  .select('id, name, slug')
+  .order('name');
 
 if (venueError) {
   console.error(`Could not read venues: ${venueError.message}`);
   process.exit(1);
 }
-if (!venues || venues.length === 0) {
-  console.error(onlySlug ? `No venue with slug "${onlySlug}".` : 'No venues.');
+if (!allVenues || allVenues.length === 0) {
+  console.error('No venues in the warehouse.');
+  process.exit(1);
+}
+
+const venues = onlySlug
+  ? (allVenues as any[]).filter(v => v.slug === onlySlug)
+  : (allVenues as any[]);
+
+/**
+ * Say what the valid answers ARE, not just that this one was wrong.
+ *
+ * A slug is an internal identifier nobody memorises, and "no venue with slug
+ * X" leaves someone opening the admin console or guessing -- which is what
+ * happened: `neonpigeon` was guessed when the real form is hyphenated. The
+ * list is one query we have already made.
+ */
+if (venues.length === 0) {
+  console.error(`No venue with slug "${onlySlug}". The venues in this warehouse are:`);
+  for (const v of allVenues as any[]) console.error(`  --venue=${v.slug}    (${v.name})`);
   process.exit(1);
 }
 

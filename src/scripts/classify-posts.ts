@@ -86,7 +86,11 @@ let query = supabase
 if (onlySlug) {
   const { data: venue } = await supabase.from('venues').select('id').eq('slug', onlySlug).maybeSingle();
   if (!venue) {
-    console.error(`No venue with slug "${onlySlug}".`);
+    // Name the valid answers. A slug is an internal identifier nobody
+    // memorises, and a bare rejection leaves someone guessing at it.
+    const { data: all } = await supabase.from('venues').select('name, slug').order('name');
+    console.error(`No venue with slug "${onlySlug}". The venues in this warehouse are:`);
+    for (const v of (all ?? []) as any[]) console.error(`  --venue=${v.slug}    (${v.name})`);
     process.exit(1);
   }
   query = query.eq('venue_id', venue.id);
