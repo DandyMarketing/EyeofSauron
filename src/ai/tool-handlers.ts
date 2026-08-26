@@ -9,6 +9,7 @@ import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/accoun
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
+import { retentionRates, retentionCaveats, totalCounts, type RetentionCounts } from '../lib/retention.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -73,6 +74,8 @@ export async function handleToolCall(
       return queryMealPeriodSales(input);
     case 'query_reservations':
       return queryReservations(input);
+    case 'query_guest_retention':
+      return queryGuestRetention(input);
     case 'query_hourly_sales':
       return queryHourlySales(input);
     case 'list_available_data':
@@ -1428,3 +1431,100 @@ async function queryHourlySales(input: Record<string, any>): Promise<string> {
   });
 }
 
+
+
+/**
+ * Do guests come back -- here, and to the group?
+ *
+ * The arithmetic is a Postgres function, not this file. Answering it means
+ * looking at every prior visit by every guest who came in the period, across
+ * 116,000 completed reservations, and PostgREST silently caps a result at 1,000
+ * rows -- the defect this codebase has hit more than any other. A version that
+ * fetched the table to count it in Node would be wrong and would still look
+ * right.
+ */
+async function queryGuestRetention(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const lookback = Number(input.lookback_days) > 0 ? Math.floor(Number(input.lookback_days)) : 365;
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const { data, error } = await supabase.rpc('guest_retention', {
+    p_start: input.start_date,
+    p_end: input.end_date,
+    p_lookback: lookback,
+  });
+
+  if (error) {
+    // Named rather than swallowed: the likely cause is migration 028 not being
+    // applied, which would otherwise look like a venue with no returning guests.
+    return JSON.stringify({
+      error: `Could not compute retention: ${error.message}. If this says the function does not exist, migration 028_guest_retention.sql has not been applied.`,
+    });
+  }
+
+  const byVenue = new Map<string, RetentionCounts>();
+  for (const row of (data ?? []) as any[]) {
+    byVenue.set(row.venue_id, {
+      booked_guests: Number(row.booked_guests),
+      returning_here: Number(row.returning_here),
+      crossed_from_sister: Number(row.crossed_from_sister),
+      new_to_group: Number(row.new_to_group),
+      walk_in_guests: Number(row.walk_in_guests),
+    });
+  }
+
+  const empty: RetentionCounts = {
+    booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0,
+  };
+
+  /**
+   * The RPC computes across every venue, because a guest crossing FROM a venue
+   * the caller cannot see is still a returning group guest at one they can.
+   * Scoping happens here, on what is returned -- the same boundary as every
+   * other handler, and the reason cross-venue movement stays correct.
+   */
+  const scoped = venues.map(v => {
+    const counts = byVenue.get(v.id) ?? empty;
+    return {
+      venue: v.name,
+      slug: v.slug,
+      period: { start: input.start_date, end: input.end_date, lookback_days: lookback },
+      ...counts,
+      rates: retentionRates(counts),
+    };
+  });
+
+  const total = totalCounts(scoped.map(s => ({
+    booked_guests: s.booked_guests,
+    returning_here: s.returning_here,
+    crossed_from_sister: s.crossed_from_sister,
+    new_to_group: s.new_to_group,
+    walk_in_guests: s.walk_in_guests,
+  })));
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date, lookback_days: lookback },
+    venues: scoped,
+    // Only meaningful when more than one venue is in view -- a "group" of one
+    // is the venue again under a different heading.
+    group: venues.length > 1 ? { ...total, rates: retentionRates(total) } : null,
+    definitions: {
+      returning_here: 'Visited THIS venue within the lookback. The venue owns this one.',
+      crossed_from_sister: 'Visited a DIFFERENT group venue within the lookback, but not this one. The multi-venue premium.',
+      new_to_group: 'Visited no group venue within the lookback. The only guests being paid for.',
+      outlet_pct: 'returning_here / booked_guests',
+      group_pct: '(returning_here + crossed_from_sister) / booked_guests',
+    },
+    caveats: retentionCaveats(total),
+  });
+}

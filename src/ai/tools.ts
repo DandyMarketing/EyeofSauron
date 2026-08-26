@@ -345,6 +345,38 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_guest_retention',
+    description:
+      'Do guests come back? Returns, per venue and for the group, how many booked guests in a period were returning to THAT venue, arriving from a SISTER venue, or new to the group entirely. ' +
+      'OUTLET AND GROUP RETENTION ARE DIFFERENT METRICS AND FIXING THEM IS DIFFERENT WORK. Outlet retention is whether this venue gave someone a reason to come back HERE — the venue owns it: food, service, room, value. Group retention is whether the group held the guest at all, at any venue — the group owns it: CRM, cross-venue communication, loyalty. Report both, never blend them into one rate, and attribute a problem to the right one. ' +
+      'BOOKED GUESTS ONLY, and this is not optional. SevenRooms issues a fresh client id for nearly every walk-in (1.00 visits per guest against 1.34 for booked guests), so a walk-in can never be observed returning and including them would understate retention by construction. Walk-ins are counted separately and coverage_pct says what share of the period\'s guests this metric can actually see — at Neon Pigeon that is around 69%. Quote it whenever the rate is quoted. ' +
+      'It counts GUESTS, meaning the booking, not diners. A returning regular who brings four first-timers is one returning guest. This measures relationship, not reach — never describe it as "x% of people in the room had been before". ' +
+      'The lookback is a FIXED 365 days by default rather than "has ever visited", because with four years of history an ever-visited rate climbs every month purely as the window widens. Do not raise the lookback to make a number look better. ' +
+      'CHECK THE COUNTS BEFORE READING ANY MOVEMENT. crossed_from_sister measured 12 guests across the whole group in a week — ordinary variation on a count that size is several guests, which is tens of percent of the metric. The response returns caveats; repeat the relevant ones rather than presenting a small-sample figure as a trend. Use a multi-week window when comparing periods.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit for all venues plus a group total.',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of the period (inclusive), YYYY-MM-DD. Prefer a whole number of weeks — a part-week compared against a whole one invents a trend.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the period (inclusive), YYYY-MM-DD.',
+        },
+        lookback_days: {
+          type: 'number',
+          description: 'How far back a prior visit counts as a return. Defaults to 365. Changing it changes what the number means, so say so if you do.',
+        },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_hourly_sales',
     description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
     input_schema: {
