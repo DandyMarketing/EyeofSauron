@@ -10,6 +10,7 @@ import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '..
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
+import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -78,6 +79,8 @@ export async function handleToolCall(
       return queryGuestRetention(input);
     case 'query_guest_cohorts':
       return queryGuestCohorts(input);
+    case 'check_booking_channels':
+      return checkBookingChannels(input);
     case 'query_hourly_sales':
       return queryHourlySales(input);
     case 'list_available_data':
@@ -1607,5 +1610,95 @@ async function queryGuestCohorts(input: Record<string, any>): Promise<string> {
       'Booked guests only. Walk-ins carry a fresh SevenRooms client id each visit, so they can never be observed returning.',
       'Baseline: 81% of booked guests across the whole history visited exactly once, and under 1% visited six or more times. There is very little loyal core, so frequency schemes have almost nothing to work on; second-visit conversion is where the population is.',
     ],
+  });
+}
+
+
+/**
+ * Has a booking channel stopped working?
+ *
+ * The monitor that would have caught Neon Pigeon's four-month outage in its
+ * second week instead of not at all. Reads a month against the median of the
+ * trailing six, which is the resolution a slow failure is actually visible at
+ * -- week-on-week never sees a decline spread across four months.
+ */
+async function checkBookingChannels(input: Record<string, any>): Promise<string> {
+  const month = typeof input.month === 'string'
+    ? input.month
+    : lastCompleteMonth(new Date().toISOString().split('T')[0]);
+
+  // Enough trailing history for a baseline, plus the month itself.
+  const from = new Date(`${month}T00:00:00Z`);
+  from.setUTCMonth(from.getUTCMonth() - (BASELINE_MONTHS + 1));
+  const to = new Date(`${month}T00:00:00Z`);
+  to.setUTCMonth(to.getUTCMonth() + 1);
+  to.setUTCDate(0);   // last day of the month being checked
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const { data, error } = await supabase.rpc('booking_channel_months', {
+    p_from: from.toISOString().split('T')[0],
+    p_to: to.toISOString().split('T')[0],
+    p_min_bookings: 10,
+  });
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not read booking channels: ${error.message}. If this says the function does not exist, migration 030_booking_channel_months.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as any[];
+
+  const byVenue = venues.map(venue => {
+    /**
+     * Folded to canonical names BEFORE anything is compared, because
+     * SevenRooms renames channels -- "Google" became "Google Reserve
+     * Integration" mid-period, which compared raw reads as one channel dying
+     * and another being born.
+     */
+    const totals = new Map<string, number>();
+    for (const r of rows) {
+      if (r.venue_id !== venue.id) continue;
+      const channel = normaliseChannel(r.booked_by, r.is_walk_in === true);
+      const key = `${r.month}|${channel}`;
+      totals.set(key, (totals.get(key) ?? 0) + Number(r.bookings));
+    }
+
+    const months = [...totals.entries()].map(([key, bookings]) => {
+      const [m, channel] = key.split('|');
+      return { month: m, channel, bookings };
+    });
+
+    const alerts = channelAlerts(months, month);
+
+    return {
+      venue: venue.name,
+      slug: venue.slug,
+      month,
+      alerts: alerts.map(a => ({ ...a, explanation: describeAlert(a) })),
+      channels: months
+        .filter(m => m.month === month)
+        .sort((a, b) => b.bookings - a.bookings),
+    };
+  });
+
+  const total = byVenue.reduce((n, v) => n + v.alerts.length, 0);
+
+  return JSON.stringify({
+    month_checked: month,
+    baseline: `median of the ${BASELINE_MONTHS} months before ${month}`,
+    venues: byVenue,
+    alert_count: total,
+    // An empty list is the normal result and must not read as "no data".
+    summary: total === 0
+      ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
+      : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
   });
 }

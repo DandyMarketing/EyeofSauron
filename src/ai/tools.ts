@@ -409,6 +409,29 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'check_booking_channels',
+    description:
+      'Health check on where bookings come from. Returns bookings per channel per month for a venue, and RAISES AN ALERT for any material channel that has fallen to half its normal level or below in the last complete month. Use it for any question about booking channels, where guests come from, or whether something has broken — and check it whenever new guests or covers are down and the cause is not obvious. ' +
+      'WHY IT EXISTS. Neon Pigeon\'s two online booking paths both collapsed in February 2025 and stayed down until June: Google Reserve went 86, 43, 5, 1; the booking widget went 186, 133, 32, 24, 14. Roughly 360 bookings were lost over four months and nothing reported it, because a decline spread across four months is invisible in a week-on-week comparison. ' +
+      'A CHANNEL AT OR NEAR ZERO IS USUALLY BROKEN, NOT UNPOPULAR. Say so: an integration that stopped, a listing taken down, a widget migration. Recommend checking the channel works before offering a market explanation. And check it has not simply been RENAMED — SevenRooms relabelled "Google" as "Google Reserve Integration" mid-period, which reads exactly like one channel dying and another appearing. ' +
+      'AN EMPTY ALERT LIST IS THE NORMAL AND CORRECT RESULT. Report it as nothing wrong, not as no data. ' +
+      'The month checked is always the last COMPLETE one, because a part-month is always down on its own baseline. Baselines are medians of the trailing six months, so one exceptional December cannot mask a real drop, and channels under about 20 bookings a month are ignored as noise.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit to check all venues.',
+        },
+        month: {
+          type: 'string',
+          description: 'The month to check, as YYYY-MM-01. Defaults to the last complete month. Only use this to investigate a past period.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'query_hourly_sales',
     description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
     input_schema: {

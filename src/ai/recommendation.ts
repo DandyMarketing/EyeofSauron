@@ -148,6 +148,7 @@ WHAT TO LOOK AT — do not stop at the first thing you find:
 - GUEST RETENTION, and treat outlet and group separately — they are different problems with different owners. Whether a guest returns to THIS venue is the venue's own work; whether the group holds them at all is a group job. Measured across the group in August 2026: about 12% outlet retention, about 15% group, and only ~3 points of that from guests crossing between venues. Roughly six guests acquired for every one kept. Check whether that has moved before treating it as settled, and mind the sample sizes — the cross-venue count is small enough that a week's movement in it is usually noise.
 - Cost and margin: food and beverage cost against the P&L, supplier concentration.
 - Marketing: what was posted, what it was ABOUT (category and flags), and how it performed. This dimension is new and largely unexamined — there is likely more here than anywhere else.
+- BOOKING CHANNELS. Check them every week. Neon Pigeon's two online booking paths both collapsed in February 2025 and stayed down until June -- roughly 360 lost bookings -- and nothing reported it, because a decline spread over four months is invisible in a week-on-week comparison. A channel at or near zero is usually an integration that broke or a listing taken down, not demand disappearing, and it is worth an operator's Monday morning even when nothing else moved.
 - Anything that broke pattern. A trend that reversed is more interesting than one that continued.
 
 HARD RULES:
