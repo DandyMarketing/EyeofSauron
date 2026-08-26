@@ -9,7 +9,7 @@ import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/accoun
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
-import { retentionRates, retentionCaveats, totalCounts, type RetentionCounts } from '../lib/retention.js';
+import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -76,6 +76,8 @@ export async function handleToolCall(
       return queryReservations(input);
     case 'query_guest_retention':
       return queryGuestRetention(input);
+    case 'query_guest_cohorts':
+      return queryGuestCohorts(input);
     case 'query_hourly_sales':
       return queryHourlySales(input);
     case 'list_available_data':
@@ -1526,5 +1528,84 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
       group_pct: '(returning_here + crossed_from_sister) / booked_guests',
     },
     caveats: retentionCaveats(total),
+  });
+}
+
+
+/**
+ * Is retention getting better or worse?
+ *
+ * The cohort version of the same question, and the only one that can be
+ * compared across time: everyone in a cohort gets exactly the same number of
+ * days to come back, so two cohorts side by side mean something. A lifetime
+ * rate compares people who have had four years with people who have had four
+ * weeks, which is not a measurement.
+ */
+async function queryGuestCohorts(input: Record<string, any>): Promise<string> {
+  const grain = ['month', 'quarter', 'year'].includes(input.grain) ? input.grain : 'quarter';
+  const windowDays = Number(input.window_days) > 0 ? Math.floor(Number(input.window_days)) : 365;
+  const from = typeof input.from_date === 'string' ? input.from_date : '2022-01-01';
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const { data, error } = await supabase.rpc('guest_cohorts', {
+    p_grain: grain,
+    p_window: windowDays,
+    p_from: from,
+  });
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not compute cohorts: ${error.message}. If this says the function does not exist, migration 029_guest_cohorts.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as any[];
+  const toCohort = (r: any): Cohort => ({
+    cohort_start: r.cohort_start,
+    cohort_size: Number(r.cohort_size),
+    returned: Number(r.returned),
+    is_mature: r.is_mature === true,
+  });
+
+  const byVenue = venues.map(v => ({
+    venue: v.name,
+    slug: v.slug,
+    cohorts: cohortRates(rows.filter(r => r.venue_id === v.id).map(toCohort)),
+  }));
+
+  /**
+   * The group row is only offered when the caller can see the whole group.
+   * A manager scoped to one venue would otherwise be handed a figure covering
+   * venues they are not cleared for -- the same boundary as everywhere else,
+   * and easy to miss here because the row has no venue_id to filter on.
+   */
+  const seesEverything = venues.length === allVenues.length && !input.venue_slug;
+  const groupCohorts = seesEverything
+    ? cohortRates(rows.filter(r => r.venue_id === null).map(toCohort))
+    : null;
+
+  const mature = comparableCohorts(
+    (groupCohorts ?? byVenue.flatMap(v => v.cohorts)).map(c => c as Cohort),
+  );
+
+  return JSON.stringify({
+    settings: { grain, window_days: windowDays, from_date: from },
+    venues: byVenue,
+    group: groupCohorts,
+    comparable_cohorts: mature.length,
+    caveats: [
+      'A cohort is everyone whose FIRST visit fell in that period, each given the same window to return. That is what makes two cohorts comparable.',
+      'is_mature false means the window has not fully elapsed. Its rate WILL rise. Never plot it as the latest point in a trend or describe it as a fall — say the cohort is still filling.',
+      'Group rows are computed separately and do NOT equal the sum of the venue rows: a guest can be new to two venues in the same quarter.',
+      'Booked guests only. Walk-ins carry a fresh SevenRooms client id each visit, so they can never be observed returning.',
+      'Baseline: 81% of booked guests across the whole history visited exactly once, and under 1% visited six or more times. There is very little loyal core, so frequency schemes have almost nothing to work on; second-visit conversion is where the population is.',
+    ],
   });
 }

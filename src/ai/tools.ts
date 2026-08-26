@@ -377,6 +377,38 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_guest_cohorts',
+    description:
+      'Is retention getting BETTER OR WORSE over time? Groups guests by when they first visited, and reports how many came back within a fixed window (365 days by default). Use this for any question about a trend in retention, whether a change worked, or how a period compares with an earlier one. ' +
+      'WHY THIS AND NOT query_guest_retention: that one measures a period — who was in the room last week and had they been before. This one measures a COHORT — everyone who first arrived in the same quarter, each given exactly the same number of days to come back. Only the cohort version can be compared across time, because a lifetime rate mixes guests who have had four years to return with guests who have had four weeks. ' +
+      'NEVER COMPARE AN IMMATURE COHORT. Rows carry is_mature and a warning. A cohort that has not yet had the full window shows a near-zero rate purely because the days have not passed, and plotting it as the latest point draws a collapse that is the calendar rather than a finding. Say the most recent cohort is still filling rather than reporting its number as a fall. ' +
+      'Group rows have venue "Group" and are computed separately, NOT by summing the venues — a guest can be new to two venues in the same quarter, so the venue rows deliberately do not add up to the group row. ' +
+      'Booked guests only, walk-ins excluded, for the reason given in query_guest_retention. Baseline measured Aug 2026: 81% of booked guests visited exactly once across four and a half years, and the 6-or-more group is under 1%, so there is very little loyal core — second-visit conversion is where the population is.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit for all venues plus the group.',
+        },
+        grain: {
+          type: 'string',
+          enum: ['month', 'quarter', 'year'],
+          description: 'Cohort size. Quarter is the default and usually right — a month of first-time guests at one venue is often too small to read.',
+        },
+        window_days: {
+          type: 'number',
+          description: 'How long a guest has to come back and still count as returning. Defaults to 365. A shorter window makes more cohorts mature but measures a different thing, so say which you used.',
+        },
+        from_date: {
+          type: 'string',
+          description: 'Earliest first-visit date to include, YYYY-MM-DD. Defaults to 2022-01-01, the start of the reservation history.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'query_hourly_sales',
     description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
     input_schema: {

@@ -6,6 +6,9 @@ import {
   rollingWindow,
   totalCounts,
   MIN_SAMPLE_FOR_TREND,
+  cohortRates,
+  comparableCohorts,
+  MIN_COHORT_SIZE,
 } from './retention.js';
 
 /** Neon Pigeon, week of 17-23 Aug 2026. Real figures. */
@@ -122,4 +125,65 @@ test('venues sum to the group figures measured', () => {
 
 test('an empty group is null, not zero', () => {
   assert.equal(retentionRates(totalCounts([])).outlet_pct, null);
+});
+
+// --- cohorts ---------------------------------------------------------------
+
+const cohort = (over: Partial<{ cohort_start: string; cohort_size: number; returned: number; is_mature: boolean }> = {}) => ({
+  cohort_start: over.cohort_start ?? '2025-01-01',
+  cohort_size: over.cohort_size ?? 1000,
+  returned: over.returned ?? 150,
+  is_mature: over.is_mature ?? true,
+});
+
+test('a cohort rate is returned within the window over cohort size', () => {
+  const [r] = cohortRates([cohort({ cohort_size: 1000, returned: 150 })]);
+  assert.equal(r.return_pct, 15);
+});
+
+test('an IMMATURE cohort is marked, not silently dropped', () => {
+  // The most dangerous row in the table: its guests have not had the full
+  // window, so a near-zero rate plotted at the right-hand edge reads exactly
+  // like retention collapsing.
+  const [r] = cohortRates([cohort({ is_mature: false, returned: 4 })]);
+
+  assert.equal(r.return_pct, 0.4);
+  assert.match(r.warning!, /INCOMPLETE/);
+  assert.match(r.warning!, /Do NOT compare/);
+});
+
+test('a mature cohort of normal size carries no warning', () => {
+  assert.equal(cohortRates([cohort()])[0].warning, undefined);
+});
+
+test('a tiny cohort is flagged even when mature', () => {
+  const [r] = cohortRates([cohort({ cohort_size: 8, returned: 2 })]);
+  assert.match(r.warning!, /too few/);
+  assert.ok(MIN_COHORT_SIZE > 8);
+});
+
+test('cohorts come back in date order whatever order they arrive in', () => {
+  const rows = cohortRates([
+    cohort({ cohort_start: '2025-07-01' }),
+    cohort({ cohort_start: '2024-01-01' }),
+    cohort({ cohort_start: '2025-01-01' }),
+  ]);
+  assert.deepEqual(rows.map(r => r.cohort_start), ['2024-01-01', '2025-01-01', '2025-07-01']);
+});
+
+test('comparableCohorts excludes exactly what must not be compared', () => {
+  const all = [
+    cohort({ cohort_start: '2024-01-01' }),
+    cohort({ cohort_start: '2024-04-01', cohort_size: 5, returned: 1 }),   // too small
+    cohort({ cohort_start: '2026-04-01', is_mature: false, returned: 3 }), // too new
+  ];
+
+  assert.equal(comparableCohorts(all).length, 1);
+  // The full list still returns all three — an excluded row must be visible.
+  assert.equal(cohortRates(all).length, 3);
+});
+
+test('an empty cohort is null rather than 0%', () => {
+  const [r] = cohortRates([cohort({ cohort_size: 0, returned: 0 })]);
+  assert.equal(r.return_pct, null);
 });

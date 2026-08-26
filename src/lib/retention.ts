@@ -114,6 +114,76 @@ export function rollingWindow(weekEnd: string, weeks = 4): { start: string; end:
   return { start: iso(start), end: iso(end) };
 }
 
+/**
+ * One first-visit cohort: everyone who arrived in the same period, given the
+ * same number of days to come back.
+ */
+export interface Cohort {
+  cohort_start: string;
+  cohort_size: number;
+  returned: number;
+  /** False until every guest in the cohort has had the full window. */
+  is_mature: boolean;
+}
+
+export interface CohortRate extends Cohort {
+  return_pct: number | null;
+  /** Set when the row must not be compared with the others. */
+  warning?: string;
+}
+
+/**
+ * Below this many guests a cohort's rate is not a measurement.
+ *
+ * Lower than MIN_SAMPLE_FOR_TREND because a cohort is a quarter of arrivals
+ * rather than a week's, so a small one means something genuinely unusual
+ * happened -- a venue not yet open, or a period with almost no new guests --
+ * and that is worth seeing rather than hiding.
+ */
+export const MIN_COHORT_SIZE = 20;
+
+/**
+ * Rates, with the immature ones marked rather than dropped.
+ *
+ * AN IMMATURE COHORT IS THE MOST DANGEROUS ROW IN THE TABLE. Its guests have
+ * not had the full window, so its rate is near zero -- and plotted next to
+ * mature cohorts it draws a cliff at the right-hand edge that reads exactly
+ * like retention collapsing. It is the calendar, not a finding.
+ *
+ * Returned rather than filtered out, because a chart that simply stops leaves
+ * someone asking why, and the honest answer belongs on the row.
+ */
+export function cohortRates(cohorts: Cohort[]): CohortRate[] {
+  return cohorts
+    .slice()
+    .sort((a, b) => a.cohort_start.localeCompare(b.cohort_start))
+    .map(c => {
+      const rate: CohortRate = {
+        ...c,
+        return_pct: pct(c.returned, c.cohort_size),
+      };
+
+      if (!c.is_mature) {
+        rate.warning =
+          'INCOMPLETE — this cohort has not yet had the full window to return. Its rate will rise. Do NOT compare it with the mature cohorts or plot it as the latest point in a trend.';
+      } else if (c.cohort_size < MIN_COHORT_SIZE) {
+        rate.warning = `Only ${c.cohort_size} guest(s) in this cohort — too few for the rate to be meaningful.`;
+      }
+
+      return rate;
+    });
+}
+
+/**
+ * The cohorts that may legitimately be compared with one another.
+ *
+ * Useful for describing a trend without having to restate the exclusions every
+ * time; the full list including the excluded rows is what gets shown.
+ */
+export function comparableCohorts(cohorts: Cohort[]): CohortRate[] {
+  return cohortRates(cohorts).filter(c => c.is_mature && c.cohort_size >= MIN_COHORT_SIZE);
+}
+
 /** Sum several venues into one group-level row. */
 export function totalCounts(rows: RetentionCounts[]): RetentionCounts {
   return rows.reduce<RetentionCounts>(
