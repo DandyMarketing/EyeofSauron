@@ -105,7 +105,17 @@ as $$
     c.returned,
     -- Mature when the LAST guest to join the cohort has had the full window.
     -- That is the end of the cohort period plus the window, not the start.
-    ((c.cohort_start + ('1 ' || p_grain)::interval)::date + p_window) <= current_date
+    --
+    -- The grain is mapped rather than interpolated, because `quarter` is a
+    -- valid date_trunc field and NOT a valid interval unit: '1 quarter'::interval
+    -- fails with "invalid input syntax for type interval". The two accept
+    -- different vocabularies and only one of them says so.
+    ((c.cohort_start + case p_grain
+                         when 'month'   then interval '1 month'
+                         when 'quarter' then interval '3 months'
+                         when 'year'    then interval '1 year'
+                         else interval '3 months'
+                       end)::date + p_window) <= current_date
       as is_mature
   from combined c;
 $$;
