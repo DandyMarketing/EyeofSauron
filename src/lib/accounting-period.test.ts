@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  closeDateFor, isPeriodClosed, isSettled,
+  closeDateFor, isPeriodClosed, isSettled, latestClosedMonth,
   CLOSE_DAY_OF_FOLLOWING_MONTH, SETTLING_WORKING_DAYS,
 } from './accounting-period.js';
 
@@ -127,4 +127,45 @@ describe('isSettled — has Finance had time to look at it?', () => {
   test('refuses a date it cannot read', () => {
     assert.throws(() => isSettled('7 Aug 2026', at('2026-08-17')), /expected YYYY-MM-DD/);
   });
+});
+
+// --- latestClosedMonth -----------------------------------------------------
+
+/**
+ * The engine reported July's operating profit as fact and was right only by
+ * luck of the calendar — the run fell after 15 August. A fortnight earlier it
+ * would have said the same about a month still being worked on.
+ */
+test('after the 15th, last month is settled', () => {
+  assert.equal(latestClosedMonth(new Date('2026-08-26T00:00:00Z')), '2026-07-01');
+  assert.equal(latestClosedMonth(new Date('2026-08-15T00:00:00Z')), '2026-07-01');
+});
+
+test('before the 15th it is the month BEFORE last', () => {
+  // The trap: on 1 September, August has not closed and July is the newest
+  // month anyone may draw a conclusion from.
+  assert.equal(latestClosedMonth(new Date('2026-09-01T00:00:00Z')), '2026-07-01');
+  assert.equal(latestClosedMonth(new Date('2026-08-14T00:00:00Z')), '2026-06-01');
+});
+
+test('the current month is never settled', () => {
+  for (const day of ['2026-08-01', '2026-08-15', '2026-08-31']) {
+    assert.notEqual(latestClosedMonth(new Date(`${day}T00:00:00Z`)), '2026-08-01');
+  }
+});
+
+test('January looks back into the previous year', () => {
+  assert.equal(latestClosedMonth(new Date('2027-01-20T00:00:00Z')), '2026-12-01');
+  assert.equal(latestClosedMonth(new Date('2027-01-05T00:00:00Z')), '2026-11-01');
+});
+
+test('it agrees with isPeriodClosed, which is the rule of record', () => {
+  const asOf = new Date('2026-09-01T00:00:00Z');
+  const latest = latestClosedMonth(asOf);
+
+  assert.ok(isPeriodClosed(latest, asOf), 'the month it returns must be closed');
+
+  const next = new Date(`${latest}T00:00:00Z`);
+  next.setUTCMonth(next.getUTCMonth() + 1);
+  assert.ok(!isPeriodClosed(next.toISOString().slice(0, 10), asOf), 'the month after must be open');
 });

@@ -6,6 +6,7 @@ import { requireSchema } from '../lib/schema-check.js';
 import { askSauron } from '../ai/engine.js';
 import { modelFor } from '../ai/model-policy.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
+import { latestClosedMonth } from '../lib/accounting-period.js';
 import {
   analysisBrief,
   recommendationTool,
@@ -14,6 +15,7 @@ import {
   namesOtherVenues,
   fingerprint,
   lastCompleteWeek,
+  unsettledWeekNote,
   SUPPRESSION_DAYS,
 } from '../ai/recommendation.js';
 
@@ -54,6 +56,13 @@ if (!process.env.ANTHROPIC_API_KEY?.trim()) {
 }
 
 const { start: periodStart, end: periodEnd } = lastCompleteWeek(weekOf);
+
+/**
+ * Which P&L months the engine may treat as fact. Finance closes a month on the
+ * 15th of the following one; the first real run quoted July's operating profit
+ * as settled and was right only because it happened to fall after 15 August.
+ */
+const closedMonth = latestClosedMonth();
 const runId = randomUUID();
 
 /**
@@ -65,7 +74,8 @@ const STRUCTURING_MODEL = modelFor('recovery').model;
 const ANALYSIS_MODEL = modelFor('recommendation').model;
 
 console.log(`Weekly recommendations — ${periodStart} to ${periodEnd}`);
-console.log(`Analysis: ${ANALYSIS_MODEL}. Structuring: ${STRUCTURING_MODEL}. Run ${runId}\n`);
+console.log(`Analysis: ${ANALYSIS_MODEL}. Structuring: ${STRUCTURING_MODEL}. Run ${runId}`);
+console.log(`Latest settled P&L month: ${closedMonth}. Anything later is provisional.\n`);
 
 await requireSchema();
 
@@ -118,6 +128,8 @@ let written = 0;
 let suppressedTotal = 0;
 let withheldTotal = 0;
 let quietVenues = 0;
+/** Venues whose week had unresolved reconciliation alerts in it. */
+let unsettledVenues = 0;
 /** Venues fully dealt with, so an abort can say how many were never looked at. */
 let processed = 0;
 const problems: string[] = [];
@@ -138,8 +150,36 @@ for (const venue of venues as any[]) {
 
   const recentRows = (recent ?? []) as any[];
 
+  /**
+   * Did Finance actually close this week?
+   *
+   * The Tuesday schedule assumes they did on Monday. The detection for a week
+   * still moving has existed since the Monday reconciliation was built and
+   * nothing consumed it -- so a briefing could be written on figures that
+   * changed the next day, frozen, and never revisited.
+   */
+  const { data: openAlerts } = await supabase
+    .from('reconciliation_alerts')
+    .select('alert_type, business_date')
+    .eq('venue_id', venue.id)
+    .eq('resolved', false)
+    .gte('business_date', periodStart)
+    .lte('business_date', periodEnd);
+
+  const unsettled = unsettledWeekNote((openAlerts ?? []) as any[]);
+  if (unsettled) {
+    unsettledVenues++;
+    console.log(`  week NOT settled — ${(openAlerts ?? []).length} unresolved alert(s); briefing will say so`);
+  }
+
   try {
-    const brief = analysisBrief(venue.name, periodStart, periodEnd, recentRows.map(r => r.headline));
+    const brief = analysisBrief(
+      venue.name,
+      periodStart,
+      periodEnd,
+      recentRows.map(r => r.headline),
+      { latestClosedMonth: closedMonth, warnings: unsettled ? [unsettled] : [] },
+    );
 
     // Pass one: the real work. Unscoped so it can benchmark.
     const analysis = await askSauron(brief, [], undefined, 'recommendation');
@@ -286,6 +326,9 @@ if (quietVenues > 0) {
  * same thing and the advice has gone stale. Withholding above zero means the
  * brief's comparative-only rule is being ignored and only the code caught it.
  */
+if (unsettledVenues > 0) {
+  console.log(`${unsettledVenues} venue(s) had an unsettled week — their briefings say so on the face of them.`);
+}
 if (suppressedTotal > 0) {
   console.log(`${suppressedTotal} suppressed as a repeat of something said in the last ${SUPPRESSION_DAYS} days.`);
 }

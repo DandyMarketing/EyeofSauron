@@ -10,6 +10,7 @@ import {
   RECOMMENDATION_DOMAINS,
   namesOtherVenues,
   lastCompleteWeek,
+  unsettledWeekNote,
 } from './recommendation.js';
 
 const rec = (over: Partial<{ headline: string; body: string; domain: string; confidence: number }> = {}) => ({
@@ -265,4 +266,65 @@ test('the tool caps the array and permits an empty one', () => {
   assert.equal(list.maxItems, MAX_PER_RUN);
   // No minItems: an empty list is the engine saying the week was quiet.
   assert.equal(list.minItems, undefined);
+});
+
+// --- settled figures -------------------------------------------------------
+
+test('a settled week says nothing — no alerts, no note', () => {
+  assert.equal(unsettledWeekNote([]), null);
+});
+
+test('an unsettled week names the days and the reason', () => {
+  // The Tuesday schedule assumes Finance closed on Monday. This is the check
+  // behind that assumption, and reconciliation_alerts has always had the data.
+  const note = unsettledWeekNote([
+    { alert_type: 'post_lock_change', business_date: '2026-08-19' },
+    { alert_type: 'post_lock_change', business_date: '2026-08-19' },
+    { alert_type: 'mismatch', business_date: '2026-08-22' },
+  ])!;
+
+  assert.match(note, /HAVE NOT SETTLED/);
+  assert.match(note, /3 unresolved/);
+  assert.match(note, /2 day\(s\)/);          // deduplicated: 19th twice is one day
+  assert.match(note, /2026-08-19, 2026-08-22/);
+  assert.match(note, /post-lock change/);
+});
+
+test('a mismatch alone does not claim a post-lock change', () => {
+  const note = unsettledWeekNote([{ alert_type: 'mismatch', business_date: '2026-08-20' }])!;
+  assert.ok(!/post-lock change/.test(note));
+});
+
+test('the brief states which P&L month is settled', () => {
+  // The first real run quoted July's operating profit as fact and was right
+  // only because it fell after 15 August.
+  const brief = analysisBrief('Neon Pigeon', '2026-08-17', '2026-08-23', [], {
+    latestClosedMonth: '2026-07-01',
+  });
+
+  assert.match(brief, /LATEST SETTLED P&L MONTH IS 2026-07-01/);
+  assert.match(brief, /PROVISIONAL/);
+});
+
+test('warnings reach the brief', () => {
+  const brief = analysisBrief('Fat Prince', '2026-08-17', '2026-08-23', [], {
+    warnings: ['THE FIGURES FOR THIS WEEK HAVE NOT SETTLED.'],
+  });
+  assert.match(brief, /HAVE NOT SETTLED/);
+});
+
+test('with no options the brief is unchanged — neither section appears', () => {
+  const brief = analysisBrief('Fat Prince', '2026-08-17', '2026-08-23', []);
+  assert.ok(!/SETTLED P&L MONTH/.test(brief));
+  assert.ok(!/HAVE NOT SETTLED/.test(brief));
+});
+
+test('what was already said still reaches the brief alongside the new sections', () => {
+  // Regression: the sections were appended where alreadySaid used to be.
+  const brief = analysisBrief('Fat Prince', '2026-08-17', '2026-08-23', ['Cut the Monday roster'], {
+    latestClosedMonth: '2026-07-01',
+  });
+
+  assert.match(brief, /Cut the Monday roster/);
+  assert.match(brief, /LATEST SETTLED P&L MONTH/);
 });

@@ -107,6 +107,33 @@ export function lastCompleteWeek(today: string): { start: string; end: string } 
   return { start: iso(start), end: iso(end) };
 }
 
+/**
+ * A line saying the week under review has not settled.
+ *
+ * The Tuesday schedule ASSUMES Finance closed the week on Monday. That is a
+ * hint, not a control, and this codebase's expensive failures have all been the
+ * same shape -- something that assumed rather than checked and looked fine while
+ * being wrong. `reconciliation_alerts` already detects Revel figures being
+ * amended after the fact and nothing consumed it.
+ *
+ * Reported rather than used to SKIP the venue: a flagged briefing beats no
+ * briefing, and it also tells the reader the close slipped, which is worth
+ * knowing on its own.
+ */
+export function unsettledWeekNote(alerts: Array<{ alert_type: string; business_date: string }>): string | null {
+  if (alerts.length === 0) return null;
+
+  const dates = [...new Set(alerts.map(a => a.business_date))].sort();
+  const changed = alerts.filter(a => a.alert_type === 'post_lock_change').length;
+
+  return (
+    `THE FIGURES FOR THIS WEEK HAVE NOT SETTLED. ${alerts.length} unresolved reconciliation alert(s) ` +
+    `cover ${dates.length} day(s) in the period (${dates.join(', ')})` +
+    (changed > 0 ? `, ${changed} of them a post-lock change — a day whose sales were amended after being locked` : '') +
+    `. Say this on the face of your briefing, and be careful drawing a conclusion from a daily or weekly total that may still move.`
+  );
+}
+
 export interface Recommendation {
   headline: string;
   body: string;
@@ -126,9 +153,25 @@ export function analysisBrief(
   periodStart: string,
   periodEnd: string,
   recentHeadlines: string[],
+  options: { latestClosedMonth?: string; warnings?: string[] } = {},
 ): string {
   const alreadySaid = recentHeadlines.length > 0
     ? `\n\nYOU HAVE ALREADY TOLD THIS VENUE THE FOLLOWING in the last ${SUPPRESSION_DAYS} days. Do not raise any of them again unless something has MATERIALLY changed — and if it has, say what changed and why it is worth hearing twice:\n${recentHeadlines.map(h => `- ${h}`).join('\n')}`
+    : '';
+
+  /**
+   * Which P&L months may be treated as fact.
+   *
+   * Finance closes a month on the 15th of the following one. The first real
+   * run quoted July's operating profit as settled and was right only because
+   * it happened to fall after 15 August.
+   */
+  const closedMonth = options.latestClosedMonth
+    ? `\n\nTHE LATEST SETTLED P&L MONTH IS ${options.latestClosedMonth}. Finance closes a month on the 15th of the month after it, so anything later than that is PROVISIONAL. You may use a provisional month, but say that it is provisional and never present its profit, margin or cost ratios as settled fact — those figures still move.`
+    : '';
+
+  const warnings = (options.warnings ?? []).length > 0
+    ? `\n\n${(options.warnings ?? []).join('\n\n')}`
     : '';
 
   return `You are preparing this week's briefing for the person who runs ${venueName}. Nobody asked you a question. You are deciding what they most need to know.
@@ -158,9 +201,9 @@ HARD RULES:
 - If the data behind a claim is thin — three posts, one week, a category with four rows — say the sample is small in the body. A confident claim resting on four rows is worse than no claim.
 - Draw a chart wherever the metric supports one, and put figures in a table rather than in a sentence. This is read on a phone between services.
 
-IF THERE IS NOTHING WORTH SAYING, SAY SO AND STOP. A quiet week where everything ran to pattern is a real outcome and reporting it as such is honest. Do not manufacture three findings because three were asked for — an engine that always has something to say is one nobody believes.${alreadySaid}
+IF THERE IS NOTHING WORTH SAYING, SAY SO AND STOP. A quiet week where everything ran to pattern is a real outcome and reporting it as such is honest. Do not manufacture three findings because three were asked for — an engine that always has something to say is one nobody believes.
 
-Write your findings as prose with the figures and charts included. They will be structured afterwards.`;
+Write your findings as prose with the figures and charts included. They will be structured afterwards.${closedMonth}${warnings}${alreadySaid}`;
 }
 
 /**

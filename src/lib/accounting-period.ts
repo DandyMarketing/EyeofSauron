@@ -56,6 +56,33 @@ export function isPeriodClosed(businessDate: string, asOf: Date = new Date()): b
 }
 
 /**
+ * The most recent month whose figures are settled, as YYYY-MM-01.
+ *
+ * The reconciliation code has always known this rule; the AI never did. The
+ * recommendation engine reported "-$11,236 operating profit" for July as a
+ * plain fact, and happened to be right only because that run fell after 15
+ * August. A run a fortnight earlier would have said the same thing about a
+ * month still being worked on, in a briefing that is frozen and never revisited.
+ *
+ * Walks back rather than doing the arithmetic in one step, because the answer
+ * depends on where in the month you are asking and an off-by-one here silently
+ * promotes an open month to closed.
+ */
+export function latestClosedMonth(asOf: Date = new Date()): string {
+  const cursor = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), 1));
+
+  // Never more than two steps in practice: the current month is always open,
+  // and the previous one closes on the 15th. Three is a guard, not a need.
+  for (let i = 0; i < 3; i++) {
+    const first = cursor.toISOString().slice(0, 10);
+    if (isPeriodClosed(first, asOf)) return first;
+    cursor.setUTCMonth(cursor.getUTCMonth() - 1);
+  }
+
+  return cursor.toISOString().slice(0, 10);
+}
+
+/**
  * How long Finance gets before a mismatch counts as a finding.
  *
  * Reconciliation is not done daily, and it is not done at weekends. Friday's
