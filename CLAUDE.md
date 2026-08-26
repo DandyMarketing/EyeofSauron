@@ -729,6 +729,34 @@ it entirely. It must be both: the tool list for relevance, and a server-side
 domain check next to `enforceVenueScope()` for permission. This is BUILD_LOG 4.1
 repeating itself if it is got wrong.
 
+**The WHAT dimension is now enforced, built 26 Aug 2026.** `src/ai/data-domains.ts`
+sits beside `venue-scope.ts` and answers what KIND of data a role may read, where
+that one answers whose venue. `enforceDomainScope()` runs in `handleToolCall`
+before anything else, so it is a control rather than a hint — the trap named
+below, that withholding a tool from the model's list is defeated by the model
+naming it from history or by the deferred SQL tool ignoring the list.
+
+**The wall is around PAYROLL, not around finance.** A manager may read the P&L:
+someone who cannot see cost of sales cannot run a kitchen, and the security
+model guards payroll specifically. So `query_profit_and_loss` stays available
+and its payroll LINES lose their amount, keeping `pct_of_income` — which is
+exactly what "managers see labour %, never individual pay" says. The detector is
+`isPayrollAccount()`, the same one that keeps personal pay out of the warehouse
+at ingest.
+
+**An unmapped tool defaults to `operations`, the least guarded domain.** A new
+tool that quietly gained payroll access by being forgotten is the worst failure
+available; one that is over-restricted merely does not work and somebody says
+so.
+
+**The recommendation engine is filtered on its OUTPUT, not its input**, for the
+same reason as `namesOtherVenues()`: it runs as the system and must see the P&L
+to say anything about margin. `sensitivityOf()` tags each recommendation and
+`/api/recommendations` withholds what the reader's role may not see, counting
+what it withheld. `mentionsPayrollAmounts()` looks for a payroll word within a
+SENTENCE of a currency amount — so "labour is 44.8% of income" passes and
+"staff costs $63,118" does not, which is the line the rule actually draws.
+
 **Still open:** whether a restaurant manager sees other venues' figures.
 Benchmarking across venues is stated above as the product edge ("your food cost
 32% vs sister venue 28%"), while the security model says each venue sees only

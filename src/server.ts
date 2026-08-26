@@ -15,6 +15,7 @@ import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
+import { effectiveRole, mayRead, sensitivityOf } from './ai/data-domains.js';
 import { socialFreshness } from './lib/social-freshness.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
@@ -273,7 +274,10 @@ app.post('/ask', async (c) => {
 
   try {
     const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
-    const result = await askSauron(body.question, body.history ?? [], venueFilter);
+    // WHO and WHAT are independent: the filter decides which venues, the role
+    // decides which kinds of data. Both are enforced server-side in the tool
+    // layer, never by what the model was offered.
+    const result = await askSauron(body.question, body.history ?? [], venueFilter, 'chat', effectiveRole(user));
     return c.json(result);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
@@ -499,8 +503,22 @@ app.get('/api/recommendations', async (c) => {
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 400);
 
+  /**
+   * The WHAT dimension applied to advice.
+   *
+   * The engine runs as the system and sees everything -- it must, or it cannot
+   * say anything about margin. So the guard is on the way OUT, exactly like
+   * namesOtherVenues() for the venue dimension: a recommendation quoting
+   * payroll AMOUNTS is withheld from a reader whose role may not see them.
+   * The percentage version is what a manager is meant to work with and passes.
+   */
+  const role = effectiveRole(user);
+  const permitted = (data ?? []).filter((r: any) => mayRead(role, sensitivityOf(r)));
+  const withheld = (data ?? []).length - permitted.length;
+
   return c.json({
-    recommendations: (data ?? []).map((r: any) => ({
+    withheld_for_role: withheld > 0 ? withheld : undefined,
+    recommendations: permitted.map((r: any) => ({
       ...r,
       venue: r.venues?.name ?? 'Unknown venue',
       /**

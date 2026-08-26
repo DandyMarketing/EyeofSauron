@@ -3,8 +3,10 @@ import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
+import { enforceDomainScope, mayRead, type Role } from './data-domains.js';
 import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
+import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
@@ -40,11 +42,30 @@ function dateLabel(dateFilter: ReturnType<typeof getDateFilter>): string {
   return `${dateFilter.start} to ${dateFilter.end}`;
 }
 
+export const CALLER_ROLE = '__caller_role';
+
 export async function handleToolCall(
   name: string,
   input: Record<string, any>,
   venueFilter?: string[],
+  role?: Role,
 ): Promise<string> {
+  /**
+   * The WHAT dimension, beside the WHO one.
+   *
+   * CLAUDE.md is explicit that withholding a tool from the model's list is a
+   * hint and not a control -- the model can name a tool from conversation
+   * history, and the deferred read-only SQL tool would ignore the list
+   * entirely. So the list stays a hint about what is useful and this is the
+   * control over what is allowed.
+   */
+  const deniedDomain = enforceDomainScope(name, role);
+  if (deniedDomain) return JSON.stringify({ error: deniedDomain });
+
+  // Carried on the input so a handler can redact WITHIN a permitted domain --
+  // the P&L is allowed for a manager, its payroll lines are not.
+  if (role) input[CALLER_ROLE] = role;
+
   // `undefined` means an owner, who may see everything. An empty array is the
   // opposite -- a caller holding no venues at all -- and must resolve to
   // nothing. Testing `length > 0` here treated the two as the same thing, so a
@@ -418,6 +439,42 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
     return { ...row, canonical_account, business_line };
   });
 
+  /**
+   * Payroll AMOUNTS are removed for anyone who is not owner or finance.
+   *
+   * The security model says aggregate payroll cost is finance and owner only,
+   * and that managers see labour PERCENTAGE and never individual pay. So the
+   * P&L itself stays available -- a manager who cannot see cost of sales cannot
+   * run a kitchen -- and only the payroll lines lose their figure, keeping the
+   * share of income, which is the number a manager is meant to work with.
+   *
+   * Redacted HERE rather than by not offering the tool, because withholding a
+   * tool is a hint and this is a control. isPayrollAccount() is the same
+   * detector the bill ingestion uses to keep personal pay out of the warehouse.
+   */
+  const callerRole: Role | undefined = input[CALLER_ROLE];
+  let payrollRedacted = 0;
+
+  if (callerRole && !mayRead(callerRole, 'payroll')) {
+    const income = rows.find(r => r.is_summary && /total income|revenue/i.test(r.account_name ?? ''))?.amount;
+
+    rows = rows.map(row => {
+      if (!isPayrollAccount(row.account_name)) return row;
+      payrollRedacted++;
+
+      const share = income && Number(income) !== 0
+        ? Math.round((Number(row.amount) / Number(income)) * 1000) / 10
+        : null;
+
+      return {
+        ...row,
+        amount: null,
+        pct_of_income: share,
+        redacted: 'payroll — amount withheld for this role; use the percentage of income',
+      };
+    });
+  }
+
   // Sub-businesses roll INTO the venue P&L by default -- Neon Pigeon's sushi
   // exists to improve Potus Pte Ltd's profitability, so excluding it silently
   // would answer a different question than the one asked.
@@ -435,6 +492,10 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
     source: 'Xero accounting ledger (not the POS — figures will not tie exactly to Revel sales)',
     naming: 'canonical_account is the SHARED name across venues — always compare on it, never on account_name, which differs per ledger. business_line separates sub-businesses (sushi, merchandise) that still belong in this venue\'s P&L.',
     business_lines_present: [...new Set(rows.map(r => r.business_line))],
+    payroll_redacted: payrollRedacted > 0 ? payrollRedacted : undefined,
+    payroll_note: payrollRedacted > 0
+      ? `${payrollRedacted} payroll line(s) have had their AMOUNT withheld for this reader's role — pct_of_income is given instead and is the figure they are meant to work with. Quote the percentage, never estimate the amount from it, and never total a section that contains a withheld line as though the total were complete.`
+      : undefined,
     business_line_filter: input.business_line ?? 'none — all lines included, which is the venue\'s true P&L',
     unmapped_accounts: unmapped.length > 0 ? unmapped : undefined,
     unmapped_note: unmapped.length > 0

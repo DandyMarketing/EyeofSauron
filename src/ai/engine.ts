@@ -3,6 +3,7 @@ import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
 import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
 import { modelFor, isModelFeatureError, usageLine, type Purpose } from './model-policy.js';
+import type { Role } from './data-domains.js';
 import {
   webSearchTool,
   extractSources,
@@ -160,6 +161,13 @@ export async function askSauron(
   history: ChatMessage[] = [],
   venueFilter?: string[],
   purpose: Purpose = 'chat',
+  /**
+   * The caller's access level, for the WHAT dimension. `undefined` means an
+   * internal caller with no user attached -- the recommendation engine, which
+   * must see the P&L to say anything about margin and is filtered on its
+   * OUTPUT instead.
+   */
+  role?: Role,
 ): Promise<QueryResult> {
   /**
    * Chosen ONCE, before the first call, and used for every turn.
@@ -463,7 +471,7 @@ export async function askSauron(
     for (const block of assistantContent) {
       if (block.type === 'tool_use') {
         toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
-        const result = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter);
+        const result = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role);
 
         // create_chart returns rendered SVG. Pull it out for the client and
         // strip it before the result goes back to the model -- a chart is
