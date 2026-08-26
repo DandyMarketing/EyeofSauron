@@ -9,6 +9,7 @@ import {
   WEB_SEARCH_TOOL_TYPE,
   EXTERNAL_CONTEXT_FRAMING,
   isWebSearchConfigError,
+  consultedPages,
   nextContainerId,
   isMissingContainerError,
   joinText,
@@ -336,4 +337,84 @@ test('a non-400 naming a container is not this error', () => {
     false,
   );
   assert.equal(isMissingContainerError(null), false);
+});
+
+// --- nested blocks ---------------------------------------------------------
+
+/**
+ * Dynamic filtering runs the search from inside code execution, so the docs
+ * say the nested server_tool_use and web_search_tool_result pairs arrive
+ * INSIDE the code execution result rather than beside it. searchErrors() was
+ * written that way and extractSources() was not — the same response, read two
+ * different ways, in one file.
+ */
+const NESTED_SEARCH = [
+  {
+    type: 'code_execution_tool_result',
+    content: [
+      {
+        type: 'web_search_tool_result',
+        content: [
+          { type: 'web_search_result', url: 'https://example.sg/holidays', title: 'SG public holidays 2026' },
+          { type: 'web_search_result', url: 'https://example.sg/trends', title: 'F&B trends' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'text',
+    text: 'Singapore has a public holiday on 9 August.',
+    citations: [{
+      type: 'web_search_result_location',
+      url: 'https://example.sg/holidays',
+      title: 'SG public holidays 2026',
+      cited_text: 'National Day falls on 9 August.',
+    }],
+  },
+] as any;
+
+test('a citation is found whether it nests or not', () => {
+  const [source] = extractSources(NESTED_SEARCH);
+  assert.equal(source.url, 'https://example.sg/holidays');
+  assert.equal(source.quotes[0], 'National Day falls on 9 August.');
+});
+
+test('a citation nested inside a code execution result is still found', () => {
+  const buried = [{ type: 'code_execution_tool_result', content: [NESTED_SEARCH[1]] }] as any;
+  assert.equal(extractSources(buried).length, 1);
+});
+
+test('pages consulted are recorded even when nothing is quoted', () => {
+  // Two runs of the recommendation engine made seven searches and produced
+  // zero citations, leaving no trace of what had been looked at. "We read
+  // these and quoted none" is a different message from silence.
+  const pages = consultedPages(NESTED_SEARCH);
+
+  assert.equal(pages.length, 2);
+  assert.deepEqual(pages.map(p => p.url).sort(), [
+    'https://example.sg/holidays',
+    'https://example.sg/trends',
+  ]);
+});
+
+test('the same page returned by two searches is listed once', () => {
+  const twice = [NESTED_SEARCH[0], NESTED_SEARCH[0]] as any;
+  assert.equal(consultedPages(twice).length, 2);
+});
+
+test('an error result yields no consulted pages and does not throw', () => {
+  // On an error `content` is a single object rather than a list.
+  const errored = [{
+    type: 'web_search_tool_result',
+    content: { type: 'web_search_tool_result_error', error_code: 'max_uses_exceeded' },
+  }] as any;
+
+  assert.deepEqual(consultedPages(errored), []);
+  assert.deepEqual(searchErrors(errored), ['max_uses_exceeded']);
+});
+
+test('no search at all is empty, not an error', () => {
+  const plain = [{ type: 'text', text: 'Net sales were $28,318.' }] as any;
+  assert.deepEqual(consultedPages(plain), []);
+  assert.deepEqual(extractSources(plain), []);
 });

@@ -10,6 +10,7 @@ import {
   searchErrors,
   searchRequestCount,
   isWebSearchConfigError,
+  consultedPages,
   nextContainerId,
   isMissingContainerError,
   joinText,
@@ -243,6 +244,11 @@ export async function askSauron(
   const tools: Anthropic.Messages.ToolUnion[] = [...queryTools, webSearchTool()];
 
   const sources: WebSource[] = [];
+  /**
+   * What the search RETURNED, separate from what the answer quoted. A weaker
+   * provenance record than a citation and a far better one than nothing.
+   */
+  const consulted: Array<{ url: string; title: string }> = [];
   let searches = 0;
   /** Set when the API refuses the search tool, so we stop sending it. */
   let searchDisabled = false;
@@ -396,6 +402,9 @@ export async function askSauron(
     containerId = nextContainerId(containerId, r);
 
     sources.push(...extractSources(r.content));
+    for (const page of consultedPages(r.content)) {
+      if (!consulted.some(p => p.url === page.url)) consulted.push(page);
+    }
     searches += searchRequestCount(r.usage);
     // Logged on every call, because a cache that silently stopped working
     // shows up as a bill months later and nothing else.
@@ -584,12 +593,30 @@ export async function askSauron(
    * nothing, so it looked identical to a feature that was simply never needed.
    */
   if (searches > 0) {
-    console.log(`[engine] ${searches} web search(es), ${sources.length} cited source(s)`);
+    console.log(
+      `[engine] ${searches} web search(es), ${sources.length} cited source(s), ${consulted.length} page(s) consulted`,
+    );
     // Searching and citing nothing is the state worth noticing: the answer
     // leans on the web and the reader has no way to check it, which is the
     // exact thing the switch away from Brave was meant to buy.
     if (sources.length === 0) {
-      console.warn('[engine] searched but returned NO citations — external claims in this answer are unverifiable by the reader.');
+      /**
+       * Reworded after checking the docs rather than guessing at it.
+       *
+       * The original said external claims were unverifiable, which assumes the
+       * answer MADE an external claim. Citations are documented as always
+       * enabled, so zero of them most likely means the search informed nothing
+       * the answer states -- which is normal and fine when the analysis is
+       * built on warehouse figures. The pages consulted are reported either
+       * way, because "we looked at these and quoted none of them" is a
+       * different and much more useful message than silence.
+       */
+      console.warn(
+        `[engine] ${searches} search(es) produced NO citations. ` +
+        (consulted.length > 0
+          ? `${consulted.length} page(s) were returned and none was quoted — fine if the answer rests on warehouse data, a problem if it states an external figure. Pages consulted: ${consulted.map(p => p.url).join(', ')}`
+          : 'No pages were returned either — the searches found nothing.'),
+      );
     }
   }
 

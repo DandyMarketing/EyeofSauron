@@ -262,23 +262,87 @@ export function mergeSources(sources: WebSource[]): WebSource[] {
 export function extractSources(content: Anthropic.Messages.ContentBlock[]): WebSource[] {
   const sources: WebSource[] = [];
 
-  for (const block of content) {
-    if (block.type !== 'text') continue;
-    for (const citation of block.citations ?? []) {
-      if (citation.type !== 'web_search_result_location') continue;
-      sources.push({
-        url: citation.url,
-        title: citation.title,
-        quotes: [citation.cited_text],
-      });
+  /**
+   * Walks NESTED blocks, not just the top level.
+   *
+   * Dynamic filtering runs the search from inside code execution, and the docs
+   * are explicit that the nested server_tool_use and web_search_tool_result
+   * pairs arrive inside the code execution result rather than beside it.
+   * searchErrors() was written that way and this was not -- the same response,
+   * read two different ways, in one file.
+   *
+   * Whether the model's own citations can nest is not something the docs
+   * settle. Walking anyway costs nothing and removes the question.
+   */
+  const visit = (blocks: any[]): void => {
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+
+      if (block.type === 'text') {
+        for (const citation of block.citations ?? []) {
+          if (citation.type !== 'web_search_result_location') continue;
+          sources.push({
+            url: citation.url,
+            title: citation.title,
+            quotes: [citation.cited_text],
+          });
+        }
+        continue;
+      }
+
+      if (Array.isArray(block.content)) visit(block.content);
     }
-  }
+  };
+
+  visit(content as any[]);
 
   // Grouping and de-duplication both live in mergeSources, so one page cited
   // twice in a paragraph and one page cited across two responses collapse the
   // same way.
   return mergeSources(sources);
 }
+
+/**
+ * Pages the search RETURNED, whether or not the answer quoted any of them.
+ *
+ * A weaker record than a citation and a much better one than nothing. Two runs
+ * of the recommendation engine performed seven searches between them and
+ * produced zero citations, which left no trace at all of what had been looked
+ * at -- so a reader could not tell whether the search had found nothing,
+ * returned something the model ignored, or informed the answer silently.
+ *
+ * Citations say "this sentence came from here". This says "these pages were in
+ * front of it". They are different claims and the app should show them
+ * differently.
+ */
+export function consultedPages(content: Anthropic.Messages.ContentBlock[]): Array<{ url: string; title: string }> {
+  const pages = new Map<string, string>();
+
+  const visit = (blocks: any[]): void => {
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+
+      if (block.type === 'web_search_tool_result') {
+        // A list is results; a single object is the error case, handled by
+        // searchErrors().
+        if (Array.isArray(block.content)) {
+          for (const result of block.content) {
+            if (result?.type === 'web_search_result' && typeof result.url === 'string') {
+              if (!pages.has(result.url)) pages.set(result.url, result.title ?? result.url);
+            }
+          }
+        }
+        continue;
+      }
+
+      if (Array.isArray(block.content)) visit(block.content);
+    }
+  };
+
+  visit(content as any[]);
+  return [...pages].map(([url, title]) => ({ url, title }));
+}
+
 
 /**
  * Search failures, which do NOT arrive as failures.

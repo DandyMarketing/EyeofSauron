@@ -514,6 +514,24 @@ but it is the wrong control for holidays and local events, which is most of
 what this is for. It belongs on the benchmarks path, where an external NUMBER
 is the point.
 
+**The citation claim above was overstated, and the reason was checked rather
+than guessed.** Two recommendation runs performed seven searches between them
+and produced ZERO citations, which undercut the provenance argument the switch
+was made on. The docs settle part of it: *"Citations are always enabled for web
+search"*, so dynamic filtering does not suppress them and the theory that it did
+was wrong. What the docs also say is that when a search runs through dynamic
+filtering the nested `server_tool_use` and `web_search_tool_result` pairs arrive
+INSIDE the code execution result — and `searchErrors()` walked nested blocks
+while `extractSources()` read only the top level. The same response, read two
+different ways, in one file.
+
+The likeliest remaining explanation is mundane and not a defect: the engine
+searched for context, wrote its analysis from warehouse figures, and quoted
+nothing — in which case zero citations is correct. `consultedPages()` now
+records what the search RETURNED regardless, because "we read these and quoted
+none of them" is a different and far more useful message than silence, and it
+is what will distinguish the two on the next run.
+
 **Three things about the server-side tool that are not obvious:**
 
 - A failed search returns **HTTP 200** with an error object where the results
