@@ -812,16 +812,27 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const notesSection = el('div', 'section');
   const venueOpts2 = '<option value="">All venues</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
   let notesHtml = `<h2>AI Context Notes</h2>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Notes you add here are fed to the AI on every query. Use them to give Sauron business context it can't get from numbers alone — promotions, events, operational changes, goals.</p>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Notes you add here are fed to the AI on every query. Use them for what the numbers can never say — who a venue is for, what you would never do, why something exists, and how you'd phrase it. The most valuable are the <strong>never do</strong> rules: one note stops every future briefing suggesting something you'd reject out of hand. Keep each note short and about one thing; fifty sharp notes beat one long document.</p>
     <div class="invite-form" id="note-form-container">
       <select id="note-venue" style="min-width:140px">${venueOpts2}</select>
-      <select id="note-category" style="min-width:120px">
-        <option value="general">General</option>
-        <option value="operations">Operations</option>
-        <option value="menu">Menu</option>
-        <option value="events">Events</option>
-        <option value="promotions">Promotions</option>
-        <option value="goals">Goals</option>
+      <select id="note-category" style="min-width:150px">
+        <optgroup label="Who this venue is">
+          <option value="positioning">Positioning — who it's for</option>
+          <option value="voice">Voice — how we say things</option>
+          <option value="intent">Intent — why something exists</option>
+        </optgroup>
+        <optgroup label="What we would never do">
+          <option value="never_do">Never do — a hard rule</option>
+          <option value="constraint">Constraint — can't, not won't</option>
+        </optgroup>
+        <optgroup label="Operating context">
+          <option value="general">General</option>
+          <option value="operations">Operations</option>
+          <option value="menu">Menu</option>
+          <option value="events">Events</option>
+          <option value="promotions">Promotions</option>
+          <option value="goals">Goals</option>
+        </optgroup>
       </select>
       <input type="text" id="note-text" placeholder="e.g. Fat Prince runs happy hour 5-7pm weekdays with 20% off drinks" style="flex:2;min-width:240px">
       <button class="btn" id="note-add-btn">Add</button>

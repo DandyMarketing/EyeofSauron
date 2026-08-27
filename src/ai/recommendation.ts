@@ -180,6 +180,10 @@ The period under review is ${periodStart} to ${periodEnd}. Compare it against th
 
 Find at most ${MAX_PER_RUN} things worth their attention, ranked by how much money or risk is attached. Fewer is better than padding.
 
+CHECK EVERY RECOMMENDATION AGAINST THIS VENUE'S OWN RULES BEFORE YOU PROPOSE IT. The team knowledge in your context carries positioning, constraints, intent, voice and things this business would never do — recorded by the people who run it. A recommendation that contradicts a "never do" is worse than no recommendation: it costs the reader's trust in everything else you wrote. If the data genuinely argues against a standing rule, say so explicitly and explain the tension rather than quietly proposing the thing anyway.
+
+A rule constrains the ADVICE, never the OBSERVATION. If the numbers show something a rule would rather were not true, report it. "We do not discount" does not stop you noticing that the discount rate is 5.9% — it stops you recommending a promotion.
+
 WHAT MAKES SOMETHING WORTH SAYING:
 - It is actionable. "Tuesdays are quiet" is an observation; "the Tuesday set menu is drawing half the covers of the Wednesday one, consider moving it" is advice. Only the second is worth sending.
 - It is not obvious to someone who was there. They worked the service. They know it was quiet. What they cannot see is the pattern across eight weeks, or how it compares to the sister venues, or that the drop is concentrated in one category.

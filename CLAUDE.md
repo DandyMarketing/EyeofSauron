@@ -355,6 +355,48 @@ lines, supplier bills, product mix and post categories have to be markdown
 tables, and the prompt says so rather than letting the model promise a chart it
 cannot draw.
 
+### Group fees: a real cost, and a free reconciliation check
+
+Established 26 Aug 2026 with Finance. Each venue pays The Dandy Partnership a
+fee calculated as a percentage of **sales less discounts**. Neon Pigeon pays
+TWO — a Management Fee and a Licensing Fee at 3% each — and Fat Prince and
+Firangi pay one. Measured against total income across Jan–Jul 2026:
+
+| venue | fees | % of income |
+|---|---|---|
+| Firangi Superstar | Management fee | 4.39% |
+| Fat Prince | Management Fees | 4.42% |
+| Neon Pigeon | Licensing + Management | 5.06% |
+
+**These are REAL COSTS, not an internal reallocation.** Each venue is a
+separate Pte Ltd with different shareholders, so money leaving Potus Pte Ltd
+does not come back to Potus's investors. They belong in the venue's P&L exactly
+where they sit. The distinction that does matter is *whose question* is being
+answered: for "is this venue a good business" they are a cost like any other;
+for "is the manager running it well" they are a formula on sales that nobody on
+the floor controls, and reporting their movement as performance is reporting
+arithmetic.
+
+**Neon Pigeon carries about 0.65 points more than the other two**, consistently
+every month. Real, but far smaller than a structural gap — it explains a sliver
+of the margin difference, not the story.
+
+**Do not confuse `Licensing Fees` with `Licensing Expenses`.** The first is the
+3% group charge; the second is subscriptions, SFA and the liquor licence.
+Confirmed distinct and recorded in `account_map` so nobody merges them on the
+reasonable-looking assumption that they are a naming variant.
+
+**The check is free and it has already found something.** Where a venue pays a
+matched PAIR at the same rate on the same base, the two amounts must be
+identical — they are at Neon Pigeon, to the cent, in every month looked at — so
+a divergence has no explanation but a coding error. Neon Pigeon's **June 2026**
+fee came in at **1.99% of income against 2.43–2.59%** in every other month of
+the year, and nothing reported it. `feeAnomalies()` now runs on every weekly
+recommendation run and puts a line on the face of the briefing. Rates are judged
+against a venue's OWN history, never another venue's: the rates differ by
+agreement, so a cross-venue comparison would flag the arrangement rather than an
+error.
+
 ## Company structure (Singapore incorporation)
 
 Each venue is its own private limited company, under an umbrella that operates

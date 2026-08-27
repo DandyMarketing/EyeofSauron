@@ -169,6 +169,21 @@ export async function askSauron(
    * OUTPUT instead.
    */
   role?: Role,
+  /**
+   * Whose team knowledge to load, when that is NOT the same as whose data may
+   * be queried.
+   *
+   * The recommendation engine runs UNSCOPED so it can benchmark, which meant
+   * fetchNotes(null) -- every venue's notes in every venue's briefing. Harmless
+   * while the knowledge layer was nearly empty, and actively wrong the moment
+   * it carries brand and positioning: three venues with three identities would
+   * be advised by a blend of all three, and the prompt would triple.
+   *
+   * Not a security boundary -- notes are already venue-scoped for real users by
+   * the venueFilter below. This is about RELEVANCE, and it is separate because
+   * the two questions genuinely differ for one caller.
+   */
+  noteScope?: string[],
 ): Promise<QueryResult> {
   /**
    * Chosen ONCE, before the first call, and used for every turn.
@@ -217,7 +232,7 @@ export async function askSauron(
   // unfiltered and appended here, one line below the text telling the user
   // which venues they may see -- so a venue manager received every other
   // venue's notes, which are free text and could say anything.
-  const notes = await fetchNotes(venueFilter ?? null);
+  const notes = await fetchNotes(noteScope ?? venueFilter ?? null);
   const notesText = formatNotes(notes, today);
   if (notesText) {
     volatileSystem += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;

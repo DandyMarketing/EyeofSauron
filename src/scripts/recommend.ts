@@ -7,6 +7,7 @@ import { askSauron } from '../ai/engine.js';
 import { modelFor } from '../ai/model-policy.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
 import { latestClosedMonth } from '../lib/accounting-period.js';
+import { feeAnomalies, feeWarning, type FeeMonth } from '../lib/fee-checks.js';
 import {
   analysisBrief,
   recommendationTool,
@@ -130,6 +131,8 @@ let withheldTotal = 0;
 let quietVenues = 0;
 /** Venues whose week had unresolved reconciliation alerts in it. */
 let unsettledVenues = 0;
+/** Venues where a fee to the group did not look right. */
+let feeFlagged = 0;
 /** Venues fully dealt with, so an abort can say how many were never looked at. */
 let processed = 0;
 const problems: string[] = [];
@@ -172,17 +175,62 @@ for (const venue of venues as any[]) {
     console.log(`  week NOT settled — ${(openAlerts ?? []).length} unresolved alert(s); briefing will say so`);
   }
 
+  /**
+   * Do the fees to the group look right?
+   *
+   * A percentage-of-sales charge is the easiest line in the ledger to verify
+   * and the easiest to get wrong unnoticed, because it is expected to be
+   * boring and nobody reads it. Neon Pigeon's June 2026 fee came in at 1.99%
+   * of income against 2.43-2.59% every other month and nothing reported it.
+   * Checked on the weekly run because that is the thing that runs; the data is
+   * monthly and already in the warehouse, so it costs one query.
+   */
+  const { data: feeRows } = await supabase
+    .from('profit_and_loss')
+    .select('period_start, account_name, amount, is_summary')
+    .eq('venue_id', venue.id)
+    .gte('period_start', new Date(new Date(periodEnd).getFullYear() - 1, 0, 1).toISOString().slice(0, 10));
+
+  const feePeriods = new Map<string, number>();
+  for (const r of (feeRows ?? []) as any[]) {
+    if (r.is_summary && /total income/i.test(r.account_name ?? '')) {
+      feePeriods.set(r.period_start, Number(r.amount));
+    }
+  }
+
+  const fees: FeeMonth[] = ((feeRows ?? []) as any[])
+    .filter(r => !r.is_summary && /(management|licens\w*)\s*fee/i.test(r.account_name ?? ''))
+    .map(r => ({
+      period_start: r.period_start,
+      account_name: r.account_name,
+      amount: Number(r.amount),
+      income: feePeriods.get(r.period_start) ?? null,
+    }));
+
+  const feeIssue = feeWarning(feeAnomalies(fees));
+  if (feeIssue) {
+    feeFlagged++;
+    console.log(`  fee to the group looks off — briefing will say so`);
+  }
+
   try {
     const brief = analysisBrief(
       venue.name,
       periodStart,
       periodEnd,
       recentRows.map(r => r.headline),
-      { latestClosedMonth: closedMonth, warnings: unsettled ? [unsettled] : [] },
+      {
+        latestClosedMonth: closedMonth,
+        warnings: [unsettled, feeIssue].filter((w): w is string => Boolean(w)),
+      },
     );
 
     // Pass one: the real work. Unscoped so it can benchmark.
-    const analysis = await askSauron(brief, [], undefined, 'recommendation');
+    /**
+     * Unscoped for DATA so it can benchmark, scoped for NOTES so it is advised
+     * by this venue's own knowledge rather than a blend of all three.
+     */
+    const analysis = await askSauron(brief, [], undefined, 'recommendation', undefined, [venue.slug]);
 
     /**
      * Say the analysis finished, the moment it finishes.
@@ -328,6 +376,9 @@ if (quietVenues > 0) {
  */
 if (unsettledVenues > 0) {
   console.log(`${unsettledVenues} venue(s) had an unsettled week — their briefings say so on the face of them.`);
+}
+if (feeFlagged > 0) {
+  console.log(`${feeFlagged} venue(s) had a fee to the group that does not look right — the briefing says so and it is worth a question to Finance.`);
 }
 if (suppressedTotal > 0) {
   console.log(`${suppressedTotal} suppressed as a repeat of something said in the last ${SUPPRESSION_DAYS} days.`);
