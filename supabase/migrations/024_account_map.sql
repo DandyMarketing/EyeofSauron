@@ -145,7 +145,14 @@ from (values
   ('Sales - Sushi',          'Sales - Food',       'sushi',       'Rolls into food revenue for comparison; isolate with business_line = sushi.'),
   ('COGS - Sushi',           'COGS - Food',        'sushi',       'Rolls into food cost so Neon Pigeon compares like-for-like; isolate with business_line = sushi.'),
   ('COGS - Sushi Packaging', 'COGS - Packaging',   'sushi',       'Rolls into packaging cost; isolate with business_line = sushi.'),
-  ('Transportation - Sushi', 'Transportation - Sushi', 'sushi',   'CONFIRM: may belong under COGS - Delivery Fee. Left as itself until somebody decides.'),
+  -- Confirmed by Khai, 26 Aug 2026: a delivery fee for the sushi B2B WHOLESALE
+  -- model. Deliberately NOT merged -- nothing at Fat Prince or Firangi is
+  -- comparable to it, so a canonical name would invite a comparison with no
+  -- meaning. This is also why every cross-venue cost ratio must be run with
+  -- business_line = 'main': the sushi operation has its own margin structure
+  -- and blending it into food cost compares a restaurant against a
+  -- restaurant-plus-wholesaler.
+  ('Transportation - Sushi', 'Transportation - Sushi', 'sushi',   'B2B delivery fee for the sushi wholesale model. Confirmed by Khai 26 Aug 2026 as its own account with no cross-venue equivalent — do not merge.'),
   ('Sales - Merchandise',    'Sales - Merchandise', 'merchandise', 'No equivalent at the other venues; kept as itself.')
 ) as v(source, canonical, line, why)
 where m.account_name = v.source;

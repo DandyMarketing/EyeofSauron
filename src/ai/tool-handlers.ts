@@ -492,6 +492,29 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
     source: 'Xero accounting ledger (not the POS — figures will not tie exactly to Revel sales)',
     naming: 'canonical_account is the SHARED name across venues — always compare on it, never on account_name, which differs per ledger. business_line separates sub-businesses (sushi, merchandise) that still belong in this venue\'s P&L.',
     business_lines_present: [...new Set(rows.map(r => r.business_line))],
+    /**
+     * A sub-business inside the venue makes these totals NOT comparable to
+     * another venue's, and nothing previously said so.
+     *
+     * Neon Pigeon runs a sushi operation with a B2B wholesale model inside
+     * Potus Pte Ltd. Its revenue and cost roll into Sales - Food and COGS -
+     * Food, which is correct for the entity's real profitability and wrong for
+     * a benchmark: wholesale carries a different margin structure entirely, so
+     * "Neon Pigeon's food cost is 24%" is a blend of two businesses and Fat
+     * Prince's 24% would not mean the same thing.
+     *
+     * Raised as a WARNING on the data rather than only as a line in the tool
+     * description, because the description is a hint and this is the response
+     * the model is actually reading when it computes the ratio.
+     */
+    comparability_warning: (() => {
+      const sub = [...new Set(rows.map(r => r.business_line))].filter(l => l && l !== 'main');
+      if (sub.length === 0 || input.business_line) return undefined;
+      return (
+        `These totals INCLUDE sub-business line(s): ${sub.join(', ')}. That is correct for this entity's real profitability and WRONG for a cross-venue comparison — a sub-business has its own margin structure, so a cost ratio computed here is a blend and does not mean the same thing as another venue's. ` +
+        `For ANY cross-venue cost, margin or ratio comparison, call this tool again with business_line:"main" and say which basis you used.`
+      );
+    })(),
     payroll_redacted: payrollRedacted > 0 ? payrollRedacted : undefined,
     payroll_note: payrollRedacted > 0
       ? `${payrollRedacted} payroll line(s) have had their AMOUNT withheld for this reader's role — pct_of_income is given instead and is the figure they are meant to work with. Quote the percentage, never estimate the amount from it, and never total a section that contains a withheld line as though the total were complete.`
