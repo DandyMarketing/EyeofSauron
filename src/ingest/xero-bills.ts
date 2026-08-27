@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getAccessToken } from './xero.js';
-import { toBillRow, toBillLineRows, isSpend } from '../parsers/xero/bills.js';
+import { toBillRow, toBillLineRows, isSpend, type BillRow, type BillLineRow } from '../parsers/xero/bills.js';
+import { toCreditNoteRow, toCreditNoteLineRows } from '../parsers/xero/credit-notes.js';
 import { payrollAccountIds, looksLikePersonalPay } from '../lib/payroll-accounts.js';
 
 /**
@@ -23,6 +24,8 @@ const XERO_API = 'https://api.xero.com/api.xro/2.0';
 const PAGE_SIZE = 100;
 
 export interface BillIngestResult {
+  /** ACCPAY for bills, ACCPAYCREDIT for supplier credit notes. */
+  document_type?: string;
   venue_id: string;
   tenant_id: string;
   from_date: string;
@@ -133,7 +136,83 @@ function xeroDate(iso: string): string {
   return `DateTime(${Number(y)},${Number(m)},${Number(d)})`;
 }
 
-export async function ingestSupplierBills(
+/**
+ * What distinguishes a bill from a credit note, and nothing else.
+ *
+ * PARAMETERISED RATHER THAN COPIED, and the reason is the payroll guards. This
+ * function drops personal pay twice over -- by account, and by what the line
+ * itself looks like -- and those exclusions are the strongest protection in the
+ * security model. Two code paths would mean two copies, and the day they drift
+ * is the day a credit note reversing a wage payment carries a person's name
+ * into the warehouse. One path cannot drift.
+ */
+interface DocumentSource {
+  /** Xero's Type filter: ACCPAY for bills, ACCPAYCREDIT for supplier credits. */
+  xeroType: string;
+  /** Endpoint path. */
+  endpoint: string;
+  /** Key the array arrives under in the response body. */
+  responseKey: string;
+  /** Stored on every row so a credit is distinguishable from a bill. */
+  documentType: string;
+  /** For error messages. */
+  label: string;
+  toRow: (raw: any) => BillRow | null;
+  toLines: (raw: any) => BillLineRow[];
+}
+
+const BILLS: DocumentSource = {
+  xeroType: 'ACCPAY',
+  endpoint: 'Invoices',
+  responseKey: 'Invoices',
+  documentType: 'ACCPAY',
+  label: 'bills',
+  toRow: toBillRow,
+  toLines: toBillLineRows,
+};
+
+/**
+ * Supplier credit notes -- refunds and returns.
+ *
+ * Without them bill-derived cost is OVERSTATED: Neon Pigeon's COGS Food came
+ * back at 109% of its ledger total in June 2026, which is impossible and is
+ * exactly the size of the credits nobody was counting.
+ *
+ * No new scope. Credit notes sit under `accounting.invoices`, which this app
+ * already holds -- checked against Xero's granular scope mapping before any
+ * work began, because the one-scope-at-a-time rule exists so nobody guesses at
+ * this and spends a consent round on three organisations finding out.
+ */
+const CREDIT_NOTES: DocumentSource = {
+  xeroType: 'ACCPAYCREDIT',
+  endpoint: 'CreditNotes',
+  responseKey: 'CreditNotes',
+  documentType: 'ACCPAYCREDIT',
+  label: 'credit notes',
+  toRow: toCreditNoteRow,
+  toLines: toCreditNoteLineRows,
+};
+
+export function ingestSupplierBills(
+  tenantId: string,
+  fromDate: string,
+  toDate: string,
+  paceMs = 1100,
+): Promise<BillIngestResult> {
+  return ingestDocuments(BILLS, tenantId, fromDate, toDate, paceMs);
+}
+
+export function ingestCreditNotes(
+  tenantId: string,
+  fromDate: string,
+  toDate: string,
+  paceMs = 1100,
+): Promise<BillIngestResult> {
+  return ingestDocuments(CREDIT_NOTES, tenantId, fromDate, toDate, paceMs);
+}
+
+async function ingestDocuments(
+  source: DocumentSource,
   tenantId: string,
   fromDate: string,
   toDate: string,
@@ -175,7 +254,7 @@ export async function ingestSupplierBills(
 
   const accessToken = await getAccessToken(tenantId);
   const where = encodeURIComponent(
-    `Type=="ACCPAY" AND Date>=${xeroDate(fromDate)} AND Date<=${xeroDate(toDate)}`,
+    `Type=="${source.xeroType}" AND Date>=${xeroDate(fromDate)} AND Date<=${xeroDate(toDate)}`,
   );
 
   let page = 1;
@@ -188,7 +267,7 @@ export async function ingestSupplierBills(
   let unmappedAccountLines = 0;
 
   for (;;) {
-    const res = await fetch(`${XERO_API}/Invoices?where=${where}&page=${page}`, {
+    const res = await fetch(`${XERO_API}/${source.endpoint}?where=${where}&page=${page}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Xero-tenant-id': tenantId,
@@ -197,9 +276,9 @@ export async function ingestSupplierBills(
     });
 
     const text = await res.text();
-    if (!res.ok) throw new Error(`Xero bills request failed: ${res.status} ${text.slice(0, 300)}`);
+    if (!res.ok) throw new Error(`Xero ${source.label} request failed: ${res.status} ${text.slice(0, 300)}`);
 
-    const invoices = (JSON.parse(text)?.Invoices ?? []) as any[];
+    const invoices = (JSON.parse(text)?.[source.responseKey] ?? []) as any[];
     if (invoices.length === 0) break;
 
     /**
@@ -215,10 +294,10 @@ export async function ingestSupplierBills(
      * -- so this is purely the write pattern, which is where the time was.
      */
     const pageBills: any[] = [];
-    const linesByInvoice = new Map<string, ReturnType<typeof toBillLineRows>>();
+    const linesByInvoice = new Map<string, BillLineRow[]>();
 
     for (const invoice of invoices) {
-      const bill = toBillRow(invoice);
+      const bill = source.toRow(invoice);
       if (!bill) {
         // No id, or no readable date. Counted rather than skipped silently: a
         // bill nobody can date is a gap somebody should be able to see.
@@ -231,12 +310,13 @@ export async function ingestSupplierBills(
         ...bill,
         venue_id: venueId,
         tenant_id: tenantId,
+        document_type: source.documentType,
         fetched_at: new Date().toISOString(),
       });
       // Dropped BEFORE anything is written. Aggregate labour cost still reaches
       // the warehouse through the P&L, where it is a section total with no names
       // and no individual amounts.
-      const allLines = toBillLineRows(invoice);
+      const allLines = source.toLines(invoice);
       const keep = allLines.filter(line => {
         // Guard one: the account is known to hold personal pay.
         if (line.account_id && excludedAccounts.has(line.account_id)) {
@@ -306,6 +386,7 @@ export async function ingestSupplierBills(
   }
 
   return {
+    document_type: source.documentType,
     venue_id: venueId,
     tenant_id: tenantId,
     from_date: fromDate,

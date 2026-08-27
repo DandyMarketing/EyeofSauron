@@ -36,14 +36,26 @@ test('an account bills explain in full carries no caveat', () => {
   assert.equal(cov.caveat, null);
 });
 
-test('above 100% is reported as overstatement, not as thoroughness', () => {
-  // COGS Food measured 109%. Credit notes reduce the ledger and we do not
-  // ingest them, so the bill side is too high — the opposite of the marketing
-  // problem, and it would otherwise read as excellent coverage.
+test('above 100% is reported as a failure to reconcile, not as thoroughness', () => {
+  // COGS Food measured 109%. Whatever the cause, the bill side claims more was
+  // spent than the ledger recorded, which is impossible — and left unflagged it
+  // reads as excellent coverage, the opposite of the marketing problem.
   const [cov] = coverageByAccount([line('acct-food', 'COGS Food', 10900)], new Map([['acct-food', 10000]]));
   assert.equal(cov.coverage_pct, 109);
-  assert.match(cov.caveat!, /OVERSTATED/);
-  assert.match(cov.caveat!, /ACCPAYCREDIT/);
+  assert.match(cov.caveat!, /ABOVE 100%/);
+  assert.match(cov.caveat!, /does not reconcile/);
+});
+
+test('above 100% no longer blames credit notes, because they are ingested', () => {
+  // The caveat named ACCPAYCREDIT as the cause from the day coverage was built,
+  // which was true then and is a wild goose chase now: migration 031 ingests
+  // credit notes negative, so they are already netted off. A caveat that sends
+  // somebody to fix what is fixed is worse than no caveat.
+  const caveat = caveatFor(109)!;
+  assert.doesNotMatch(caveat, /ACCPAYCREDIT/);
+  assert.match(caveat, /Credit notes ARE included/);
+  // And it still points at the P&L as the authority rather than the bills.
+  assert.match(caveat, /P&L account total as the authority/);
 });
 
 test('no P&L line means unmeasurable, never 100%', () => {

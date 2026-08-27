@@ -14,9 +14,12 @@
  * finding, and the reason the percentage is computed here and returned with
  * every response rather than left to the model to remember.
  *
- * ABOVE 100% IS ALSO REAL, and means the opposite problem. Credit notes
- * (ACCPAYCREDIT) reduce the ledger and we do not ingest them, so refunds and
- * returns are not deducted from the bill side. COGS Food measured 109%.
+ * ABOVE 100% IS ALSO REAL, and means the opposite problem: the bill side claims
+ * more was spent than the ledger recorded. COGS Food measured 109%. The cause
+ * WAS un-ingested credit notes, and no longer is -- migration 031 pulls
+ * ACCPAYCREDIT and stores it negative, so credits already net against bills
+ * here. What is left over is timing or a mis-coded line, and the caveat says so
+ * rather than sending somebody to fix what is fixed.
  */
 
 /** One bill line, reduced to what coverage needs. */
@@ -95,7 +98,16 @@ export function caveatFor(pct: number | null): string | null {
     return 'No P&L figure for this account in the period, so coverage cannot be measured. Do not describe this breakdown as complete.';
   }
   if (pct > 100) {
-    return `ABOVE 100% (${pct}%) — credit notes (ACCPAYCREDIT) are not ingested, so refunds and returns are not deducted. This bill-derived figure is OVERSTATED; the P&L account total is the authority.`;
+    /**
+     * Credit notes ARE ingested now (migration 031), stored negative so they
+     * net against bills. So this no longer has a known cause, and saying it
+     * does would send someone to fix something already fixed.
+     *
+     * What remains: a bill dated in one period and its credit in the next, a
+     * bill coded to an account the P&L reports differently, or a genuine
+     * mis-coding. The P&L stays the authority either way.
+     */
+    return `ABOVE 100% (${pct}%) — bills and credits together exceed the ledger total for this account, which should not happen. Credit notes ARE included (stored negative), so the likely causes are timing (a bill in one period credited in the next) or a mis-coded line. Treat the P&L account total as the authority and say the bill-derived figure does not reconcile.`;
   }
   if (pct < COVERAGE_TRUSTWORTHY_PCT) {
     return `These bills explain only ${pct}% of the ledger account. The rest was card- or bank-settled and never became a bill, so it is invisible here. Never present this as the full breakdown.`;

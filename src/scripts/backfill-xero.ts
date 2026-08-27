@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { ingestProfitAndLoss } from '../ingest/xero-pl.js';
-import { ingestSupplierBills } from '../ingest/xero-bills.js';
+import { ingestSupplierBills, ingestCreditNotes } from '../ingest/xero-bills.js';
 import { monthsBack, isStoredPeriodFinal } from '../lib/accounting-months.js';
 import { requireSchema } from '../lib/schema-check.js';
 
@@ -124,6 +124,7 @@ if (dryRun) {
 let stored = 0;
 let skipped = 0;
 let billLines = 0;
+let creditLines = 0;
 /** Periods whose P&L was already final but whose bills had never been fetched. */
 let billsBackfilled = 0;
 const findings: string[] = [];
@@ -205,6 +206,26 @@ for (const t of targets as any[]) {
           `  ${period.label}: ${b.bills} bill(s), ${b.lines} bill line(s)` +
           `${b.pages > 1 ? `, ${b.pages} pages` : ''}`,
         );
+
+        /**
+         * Credits in the SAME pass as the bills they offset.
+         *
+         * Not a separate flag, because a period with bills and no credits is
+         * overstated by exactly the credits nobody fetched -- which is the
+         * defect this exists to fix, reintroduced as an option somebody has to
+         * remember. Whenever bills are pulled for a period, credits are too.
+         */
+        const cn = await ingestCreditNotes(t.tenant_id, period.start, period.end, paceMs);
+        creditLines += cn.lines;
+        if (cn.bills > 0) {
+          console.log(`  ${period.label}: ${cn.bills} credit note(s), ${cn.lines} credit line(s) — stored NEGATIVE so they net against bills`);
+        }
+        if (cn.non_spend > 0) {
+          findings.push(`${label} ${period.label}: ${cn.non_spend} credit note(s) voided or deleted — stored, but not a credit`);
+        }
+        if (cn.payroll_lines_excluded > 0) {
+          findings.push(`${label} ${period.label}: ${cn.payroll_lines_excluded} credit note line(s) EXCLUDED as personal pay — a credit reversing a wage payment carries a name just as the bill did`);
+        }
         // Both are findings rather than failures, and both are invisible
         // unless said: a voided bill is real but is not spend, and a bill
         // with no readable date is a gap somebody should be able to see.
@@ -250,6 +271,13 @@ for (const t of targets as any[]) {
 console.log(`\n${stored} period(s) stored, ${skipped} already final and skipped.`);
 if (withBills) {
   console.log(`${billLines} supplier bill line(s) stored.`);
+  /**
+   * Reported separately, always, even at zero. Credits are the correction that
+   * makes a coverage figure trustworthy, and "we fetched none" and "there were
+   * none" are different facts -- the first was the state of the world until
+   * today and it looked exactly like the second.
+   */
+  console.log(`${creditLines} credit note line(s) stored (negative — they net against bills).`);
   // Reported because it is the number that was silently zero before: months
   // whose P&L was already final and whose bills had never been fetched.
   if (billsBackfilled > 0) {

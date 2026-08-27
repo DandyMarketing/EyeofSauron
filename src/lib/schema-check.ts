@@ -83,6 +83,11 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     migration: '022_supplier_bills.sql',
   },
   {
+    table: 'supplier_bills',
+    columns: ['document_type'],
+    migration: '031_credit_notes.sql',
+  },
+  {
     table: 'supplier_bill_lines',
     columns: ['bill_id', 'venue_id', 'line_item_id', 'description', 'line_amount', 'account_code', 'account_id'],
     migration: '022_supplier_bills.sql',
