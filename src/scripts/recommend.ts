@@ -2,7 +2,7 @@ import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, RECOMMENDATION_SCHEMA } from '../lib/schema-check.js';
 import { askSauron } from '../ai/engine.js';
 import { modelFor } from '../ai/model-policy.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
@@ -78,7 +78,7 @@ console.log(`Weekly recommendations — ${periodStart} to ${periodEnd}`);
 console.log(`Analysis: ${ANALYSIS_MODEL}. Structuring: ${STRUCTURING_MODEL}. Run ${runId}`);
 console.log(`Latest settled P&L month: ${closedMonth}. Anything later is provisional.\n`);
 
-await requireSchema();
+await requireSchema(RECOMMENDATION_SCHEMA);
 
 const { data: allVenues, error: venueError } = await supabase
   .from('venues')

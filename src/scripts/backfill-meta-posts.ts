@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { backfillMetaPosts, refreshMetaPostFields, ACCOUNT_FIELDS } from '../ingest/meta.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, SOCIAL_SCHEMA } from '../lib/schema-check.js';
 
 /**
  * Two years of individual posts, fetched slowly enough not to get us blocked.
@@ -59,7 +59,7 @@ console.log(fieldsOnly
 // Before a single call to Meta. Twenty minutes into a run is the worst
 // possible moment to discover a column is missing -- and it is exactly when
 // this failed on 18 Aug 2026, twice.
-await requireSchema();
+await requireSchema(SOCIAL_SCHEMA);
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')

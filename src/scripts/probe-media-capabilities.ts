@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { probeMediaFields, probeCommentsAccess } from '../ingest/meta.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, SOCIAL_SCHEMA } from '../lib/schema-check.js';
 
 /**
  * What Meta will actually give us about a post, before we design around it.
@@ -25,7 +25,7 @@ const paceMs = Number(process.argv.find(a => a.startsWith('--pace='))?.split('='
 
 console.log('Probing what Meta exposes per media item. Read-only, nothing is stored.\n');
 
-await requireSchema();
+await requireSchema(SOCIAL_SCHEMA);
 
 /**
  * Candidate fields.

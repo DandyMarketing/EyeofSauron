@@ -4,7 +4,7 @@ import {
   ingestMetaInsights, ingestMetaPosts, ingestMetaStories, isMetaAuthError,
   PLATFORM_METRICS, TOTAL_VALUE_METRICS, ACCOUNT_FIELDS,
 } from '../ingest/meta.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, SOCIAL_SCHEMA } from '../lib/schema-check.js';
 import { socialFreshness, describeStale } from '../lib/social-freshness.js';
 
 /**
@@ -37,7 +37,7 @@ console.log(`Meta social ingestion — ${since} to ${until}\n`);
 
 // A nightly job that cannot write is a night of stories lost, and stories
 // cannot be re-fetched. Better to fail before making the calls than after.
-await requireSchema();
+await requireSchema(SOCIAL_SCHEMA);
 
 /**
  * How long since this job last wrote anything?

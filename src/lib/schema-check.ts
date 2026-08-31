@@ -32,7 +32,7 @@ export interface SchemaExpectation {
 }
 
 /**
- * What the code depends on.
+ * What the code depends on, GROUPED BY THE JOB THAT WRITES IT.
  *
  * Deliberately NOT every column in the schema. A manifest that mirrors the
  * whole database is a second schema to maintain, and it would drift from the
@@ -40,8 +40,23 @@ export interface SchemaExpectation {
  * What belongs here is what a RECENT migration added, because that is what
  * production has not caught up with. Old columns are proven by the fact that
  * everything has been working for months.
+ *
+ * GROUPED, because a flat list made every job depend on every migration. On
+ * 31 Aug 2026 migration 031 sat un-run for four days and the Instagram post
+ * classifier died on `supplier_bills.document_type` -- a column it does not
+ * read, write, or know exists. Both scheduled Xero and Meta jobs were down, and
+ * the Meta one had no fault of any kind. A gate that stops a job for somebody
+ * else's missing column is a second outage bolted onto the first.
+ *
+ * The line is what a job WRITES, which is what the error message already says:
+ * "the code in this deploy writes columns the database does not have". A
+ * missing column on the READ side surfaces as one tool returning an error while
+ * the rest of the run works -- degraded, not dead, the same judgment
+ * `warnSchema` makes for the server.
  */
-export const REQUIRED_SCHEMA: SchemaExpectation[] = [
+
+/** Instagram posts and their derived features. Written by the Meta jobs. */
+export const SOCIAL_SCHEMA: SchemaExpectation[] = [
   {
     table: 'social_posts',
     columns: ['content_type'],
@@ -62,16 +77,19 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     columns: ['category', 'category_confidence', 'shows_people', 'has_call_to_action', 'is_repost', 'is_trend', 'shows_process', 'classified_at', 'classifier_model', 'classified_from'],
     migration: '026_post_shows_process.sql',
   },
-  {
-    table: 'venue_notes',
-    columns: ['source_question'],
-    migration: '015_note_source_question.sql',
-  },
+];
+
+/** The weekly brief's own output table. Written by `recommend`. */
+export const RECOMMENDATION_SCHEMA: SchemaExpectation[] = [
   {
     table: 'recommendations',
     columns: ['venue_id', 'run_id', 'period_start', 'period_end', 'headline', 'body', 'domain', 'confidence', 'evidence', 'charts', 'model', 'fingerprint', 'status', 'rating'],
     migration: '027_recommendations.sql',
   },
+];
+
+/** The Xero ledger: P&L, bills, credit notes and the mappings they need. */
+export const XERO_SCHEMA: SchemaExpectation[] = [
   {
     table: 'profit_and_loss',
     columns: ['venue_id', 'tenant_id', 'period_start', 'period_end', 'section', 'amount', 'is_summary'],
@@ -110,11 +128,40 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
     columns: ['tenant_id', 'tenant_name', 'venue_id'],
     migration: '012_xero_connections.sql',
   },
+];
+
+/**
+ * Written by the web app rather than by any scheduled job.
+ *
+ * These reach the database through a person clicking something, so the failure
+ * they cause is one user losing one action -- which is how migration 015 went
+ * unnoticed for weeks: every "Save for review" was discarded silently. The
+ * server warns rather than exits, so they are checked there and nowhere else.
+ */
+export const APP_SCHEMA: SchemaExpectation[] = [
+  {
+    table: 'venue_notes',
+    columns: ['source_question'],
+    migration: '015_note_source_question.sql',
+  },
   {
     table: 'daily_operations',
     columns: ['finance_notes'],
     migration: '016_finance_notes.sql',
   },
+];
+
+/**
+ * Everything, for the server -- which touches all of it and only warns.
+ *
+ * Composed from the groups rather than listed again, so a new expectation
+ * cannot be added to one and forgotten in the other.
+ */
+export const REQUIRED_SCHEMA: SchemaExpectation[] = [
+  ...SOCIAL_SCHEMA,
+  ...RECOMMENDATION_SCHEMA,
+  ...XERO_SCHEMA,
+  ...APP_SCHEMA,
 ];
 
 export interface SchemaProblem {
@@ -174,8 +221,10 @@ export function formatSchemaProblems(problems: SchemaProblem[]): string {
  * server refusing to boot because one column is missing takes down every
  * feature that does not use it, and a degraded app beats a dead one.
  */
-export async function requireSchema(): Promise<void> {
-  const problems = await checkSchema();
+export async function requireSchema(
+  expectations: SchemaExpectation[] = REQUIRED_SCHEMA,
+): Promise<void> {
+  const problems = await checkSchema(expectations);
   if (problems.length === 0) return;
   console.error(formatSchemaProblems(problems));
   process.exit(1);

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabase } from '../lib/supabase.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, SOCIAL_SCHEMA } from '../lib/schema-check.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { classifierPrompt, classificationTool, parseClassification } from '../ai/post-classifier.js';
 import { fetchImageAsBase64 } from '../lib/image-fetch.js';
@@ -73,7 +73,7 @@ console.log(captionOnly
   ? 'CAPTION ONLY. Subject is largely invisible in a caption; expect lower confidence and do not mix these with an image pass.\n'
   : 'Caption + image. Image URLs are fetched fresh per batch — Instagram CDN links expire.\n');
 
-await requireSchema();
+await requireSchema(SOCIAL_SCHEMA);
 
 let query = supabase
   .from('social_posts')

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { ingestProfitAndLoss } from '../ingest/xero-pl.js';
 import { ingestSupplierBills, ingestCreditNotes } from '../ingest/xero-bills.js';
 import { monthsBack, isStoredPeriodFinal } from '../lib/accounting-months.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, XERO_SCHEMA } from '../lib/schema-check.js';
 
 /**
  * Monthly Profit & Loss for every connected Xero organisation.
@@ -76,7 +76,7 @@ console.log(force
   : 'Months already closed AND fetched since they closed are skipped.\n');
 if (withBills) console.log('Also pulling supplier bills. Paginated — Xero returns 100 per page and says nothing when there are more.\n');
 
-await requireSchema();
+await requireSchema(XERO_SCHEMA);
 
 const { data: connections, error } = await supabase
   .from('xero_connections')

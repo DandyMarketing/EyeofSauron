@@ -4,7 +4,7 @@ import {
   ingestMetaInsights, isMetaBlockedError, isMetaAuthError,
   PLATFORM_METRICS, TOTAL_VALUE_METRICS,
 } from '../ingest/meta.js';
-import { requireSchema } from '../lib/schema-check.js';
+import { requireSchema, SOCIAL_SCHEMA } from '../lib/schema-check.js';
 import { backfillWindow, daysCoveredBy } from '../lib/backfill-window.js';
 
 /**
@@ -54,7 +54,7 @@ console.log(`Meta backfill — ${days} days back, ${windowDays}-day windows, ${p
 console.log('Run by hand only. Safe to stop and restart: days already stored are skipped.\n');
 
 // Before a single call to Meta, for the same reason as the post backfill.
-await requireSchema();
+await requireSchema(SOCIAL_SCHEMA);
 
 const { data: accounts, error } = await supabase
   .from('social_accounts')
