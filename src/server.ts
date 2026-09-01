@@ -657,6 +657,65 @@ app.get('/admin/api/venues', async (c) => {
  * account at another venue. That is invisible in an answer, so it has to be
  * visible here.
  */
+/**
+ * Fee months somebody has explained, and the act of explaining one.
+ *
+ * OWNER ONLY to write, because this silences a control. Who decided a month was
+ * fine, and why, is the entire value of the row -- an anonymous acknowledgement
+ * would be indistinguishable from the check having been quietly disabled.
+ */
+app.get('/admin/api/fee-acknowledgements', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data, error } = await supabaseAdmin
+    .from('fee_acknowledgements')
+    .select('id, venue_id, period_start, account_name, reason, created_at, venues(name)')
+    .order('period_start', { ascending: false });
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ acknowledgements: data ?? [] });
+});
+
+app.post('/admin/api/fee-acknowledgements', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { venue_id, period_start, account_name, reason } = await c.req.json();
+  if (!venue_id || !period_start) return c.json({ error: 'venue_id and period_start are required' }, 400);
+  // The reason is the point. An acknowledgement with no explanation tells a
+  // future reader only that somebody wanted the warning gone.
+  if (!reason || !String(reason).trim()) return c.json({ error: 'A reason is required — the briefing states it instead of going silent' }, 400);
+
+  const { data, error } = await supabaseAdmin
+    .from('fee_acknowledgements')
+    .upsert({
+      venue_id,
+      period_start,
+      account_name: account_name || null,
+      reason: String(reason).trim(),
+      acknowledged_by: user.id,
+    }, { onConflict: 'venue_id,period_start,account_name' })
+    .select()
+    .single();
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ acknowledgement: data });
+});
+
+app.delete('/admin/api/fee-acknowledgements/:id', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { error } = await supabaseAdmin
+    .from('fee_acknowledgements')
+    .delete()
+    .eq('id', c.req.param('id'));
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ ok: true });
+});
+
 app.get('/admin/api/account-map', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);

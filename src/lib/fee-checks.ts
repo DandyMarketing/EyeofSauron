@@ -42,6 +42,35 @@ export interface FeeAnomaly {
   period_start: string;
   kind: 'pair_mismatch' | 'rate_outlier';
   detail: string;
+  /**
+   * Why this month is known to be fine, when somebody has said so.
+   *
+   * Set rather than the anomaly being removed. A check that goes silent is
+   * indistinguishable from one that stopped working -- the failure this
+   * codebase keeps finding -- so an explained month stays visible and carries
+   * its explanation instead of disappearing.
+   */
+  acknowledged?: string;
+}
+
+/**
+ * Somebody has looked at this month and it is not an error.
+ *
+ * PER MONTH, never per venue. Neon Pigeon's June 2026 fee was set lower by the
+ * founder, so it will trip the rate check every Monday for the rest of the
+ * year -- and a monitor that cries wolf weekly is one nobody reads by
+ * November, which costs us the real coding error it exists to catch. But
+ * acknowledging the VENUE would silence June 2027 too, and that is the same
+ * mistake with a longer fuse.
+ *
+ * `account_name` null acknowledges every fee that month, which is what a
+ * decision affecting the whole charge looks like. Naming one acknowledges only
+ * that fee, and the other half of a matched pair still reports.
+ */
+export interface FeeAcknowledgement {
+  period_start: string;
+  account_name: string | null;
+  reason: string;
 }
 
 /**
@@ -72,7 +101,10 @@ const money = (n: number) => `$${n.toLocaleString('en-SG', { minimumFractionDigi
  * outcome -- and the caller must report that as nothing wrong rather than as no
  * data, the same rule as the booking channel monitor.
  */
-export function feeAnomalies(rows: FeeMonth[]): FeeAnomaly[] {
+export function feeAnomalies(
+  rows: FeeMonth[],
+  acknowledged: FeeAcknowledgement[] = [],
+): FeeAnomaly[] {
   const anomalies: FeeAnomaly[] = [];
 
   // --- paired fees must match, and that is the strong check ---------------
@@ -134,11 +166,28 @@ export function feeAnomalies(rows: FeeMonth[]): FeeAnomaly[] {
     }
   }
 
-  return anomalies.sort((a, b) =>
-    a.period_start === b.period_start
-      ? (a.kind === 'pair_mismatch' ? -1 : 1)
-      : b.period_start.localeCompare(a.period_start),
-  );
+  return anomalies
+    .map(a => {
+      // A pair mismatch spans both fees, so only a whole-month acknowledgement
+      // can explain it. Naming one account cannot account for the two
+      // disagreeing.
+      const match = acknowledged.find(ack =>
+        ack.period_start === a.period_start &&
+        (ack.account_name === null ||
+          (a.kind === 'rate_outlier' && a.detail.startsWith(ack.account_name))),
+      );
+      return match ? { ...a, acknowledged: match.reason } : a;
+    })
+    .sort((a, b) =>
+      a.period_start === b.period_start
+        ? (a.kind === 'pair_mismatch' ? -1 : 1)
+        : b.period_start.localeCompare(a.period_start),
+    );
+}
+
+/** The ones nobody has explained yet. */
+export function unexplained(anomalies: FeeAnomaly[]): FeeAnomaly[] {
+  return anomalies.filter(a => !a.acknowledged);
 }
 
 /**
@@ -149,10 +198,23 @@ export function feeAnomalies(rows: FeeMonth[]): FeeAnomaly[] {
  * advice it exists to deliver.
  */
 export function feeWarning(anomalies: FeeAnomaly[]): string | null {
-  if (anomalies.length === 0) return null;
+  const open = unexplained(anomalies);
+  if (open.length === 0) {
+    /**
+     * Explained is not the same as absent, and the briefing says so.
+     *
+     * Going silent would leave a reader unable to tell "the fees are fine"
+     * from "the check broke". One quiet line costs nothing and keeps the
+     * monitor's silence meaningful.
+     */
+    const explained = anomalies.filter(a => a.acknowledged);
+    if (explained.length === 0) return null;
+    const [newest] = explained;
+    return `The fee to the group in ${newest.period_start} is outside its usual range, and that is known and accounted for: ${newest.acknowledged}. Nothing to raise.`;
+  }
 
-  const [newest] = anomalies;
-  const rest = anomalies.length - 1;
+  const [newest] = open;
+  const rest = open.length - 1;
 
   return (
     `A FEE TO THE GROUP DOES NOT LOOK RIGHT. ${newest.detail}` +

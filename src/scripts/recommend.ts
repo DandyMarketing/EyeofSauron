@@ -7,7 +7,7 @@ import { askSauron } from '../ai/engine.js';
 import { modelFor } from '../ai/model-policy.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
 import { latestClosedMonth } from '../lib/accounting-period.js';
-import { feeAnomalies, feeWarning, type FeeMonth } from '../lib/fee-checks.js';
+import { feeAnomalies, feeWarning, unexplained, type FeeMonth, type FeeAcknowledgement } from '../lib/fee-checks.js';
 import {
   analysisBrief,
   recommendationTool,
@@ -215,10 +215,28 @@ for (const venue of venues as any[]) {
       income: feePeriods.get(r.period_start) ?? null,
     }));
 
-  const feeIssue = feeWarning(feeAnomalies(fees));
-  if (feeIssue) {
+  /**
+   * Months somebody has already explained.
+   *
+   * Read per venue rather than filtered in code, because an acknowledgement is
+   * a decision about ONE venue's month and there is no reason another venue's
+   * should ever be in scope.
+   */
+  const { data: ackRows } = await supabase
+    .from('fee_acknowledgements')
+    .select('period_start, account_name, reason')
+    .eq('venue_id', venue.id);
+
+  const checked = feeAnomalies(fees, (ackRows ?? []) as FeeAcknowledgement[]);
+  const feeIssue = feeWarning(checked);
+  if (feeIssue && unexplained(checked).length > 0) {
     feeFlagged++;
     console.log(`  fee to the group looks off — briefing will say so`);
+  } else if (feeIssue) {
+    // Reported, but not as a finding. The distinction matters: a run that says
+    // nothing about fees and a run where every wobble is accounted for look
+    // identical otherwise, and only one of them means the check still works.
+    console.log(`  fee outside its usual range, already explained — briefing says so and moves on`);
   }
 
   try {

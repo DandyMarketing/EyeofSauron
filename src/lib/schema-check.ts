@@ -140,6 +140,11 @@ export const XERO_SCHEMA: SchemaExpectation[] = [
  */
 export const APP_SCHEMA: SchemaExpectation[] = [
   {
+    table: 'fee_acknowledgements',
+    columns: ['venue_id', 'period_start', 'account_name', 'reason'],
+    migration: '033_fee_acknowledgements.sql',
+  },
+  {
     table: 'venue_notes',
     columns: ['source_question'],
     migration: '015_note_source_question.sql',

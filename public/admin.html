@@ -531,6 +531,69 @@ async function loadAccountMap() {
   });
 }
 
+async function loadFeeAcks() {
+  const body = document.getElementById('fee-body');
+  if (!body) return;
+
+  const data = await api('GET', '/admin/api/fee-acknowledgements');
+  if (data.error) { body.innerHTML = '<div class="error-msg">' + esc(data.error) + '</div>'; return; }
+
+  const venueOpts = venues.map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
+  let html = '<div class="invite-form">' +
+    '<select id="fee-venue" style="min-width:140px">' + venueOpts + '</select>' +
+    '<input type="month" id="fee-month" style="min-width:150px">' +
+    '<input type="text" id="fee-account" placeholder="Fee name, or blank for all fees that month" style="min-width:220px">' +
+    '<input type="text" id="fee-reason" placeholder="Why is this month different?" style="flex:2;min-width:240px">' +
+    '<button class="btn" id="fee-add-btn">Record</button>' +
+    '</div>';
+
+  const acks = data.acknowledgements || [];
+  if (acks.length === 0) {
+    html += '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">Nothing explained yet. Every flagged month is still being reported as a finding.</div>';
+  } else {
+    html += '<div style="margin-top:12px">';
+    for (const a of acks) {
+      html += '<div class="file-item" style="margin-bottom:6px">' +
+        '<strong>' + esc(a.venues?.name || '') + '</strong> — ' + esc(a.period_start) +
+        (a.account_name ? ' — ' + esc(a.account_name) : ' — all fees') +
+        '<div style="color:var(--text-muted);font-size:12px;margin-top:2px">' + esc(a.reason) + '</div>' +
+        '<button class="btn btn-small btn-outline fee-del" data-id="' + esc(a.id) + '" style="margin-top:6px">Remove</button>' +
+        '</div>';
+    }
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
+
+  document.getElementById('fee-add-btn').addEventListener('click', function () {
+    const month = document.getElementById('fee-month').value;
+    const reason = document.getElementById('fee-reason').value.trim();
+    if (!month) { alert('Pick the month this applies to.'); return; }
+    // Required here as well as server-side: an acknowledgement with no reason
+    // tells a future reader only that somebody wanted the warning gone.
+    if (!reason) { alert('A reason is required — the briefing states it instead of going silent.'); return; }
+
+    api('POST', '/admin/api/fee-acknowledgements', {
+      venue_id: document.getElementById('fee-venue').value,
+      period_start: month + '-01',
+      account_name: document.getElementById('fee-account').value.trim() || null,
+      reason: reason,
+    }).then(function (r) {
+      if (r.error) { alert('Could not save: ' + r.error); return; }
+      loadFeeAcks();
+    });
+  });
+
+  body.querySelectorAll('.fee-del').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      api('DELETE', '/admin/api/fee-acknowledgements/' + btn.dataset.id).then(function (r) {
+        if (r.error) { alert('Could not remove: ' + r.error); return; }
+        loadFeeAcks();
+      });
+    });
+  });
+}
+
 async function loadAll() {
   const [usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData] = await Promise.all([
     api('GET', '/admin/api/users'),
@@ -919,6 +982,29 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     '</p><div id="map-body">Loading…</div>';
   app.appendChild(mapSection);
   loadAccountMap();
+
+  /**
+   * Fee months somebody has explained.
+   *
+   * feeAnomalies() found Neon Pigeon's June 2026 fee at 1.99% of income and put
+   * it on the briefing. Finance answered: the rate was set lower by the founder.
+   * With no way to record that, the check would flag the same month every Monday
+   * for the rest of the year -- and a monitor that cries wolf weekly is one
+   * nobody reads by the time it catches a real error.
+   *
+   * The reason is required, and the briefing STATES it rather than going quiet:
+   * a check that falls silent is indistinguishable from one that broke.
+   */
+  const feeSection = el('div', 'section');
+  feeSection.innerHTML = '<h2>Explained Fee Months</h2>' +
+    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">' +
+    'Sauron checks the fee each venue pays the group against that venue\'s own history, and flags a month that is out of line. ' +
+    'When a month is out of line for a known reason — a rate set differently by decision — record it here. ' +
+    'The briefing still shows the month and states your reason; it just stops calling it a finding. ' +
+    '<strong>One month at a time, never a whole venue</strong> — otherwise the same month next year goes unchecked too.' +
+    '</p><div id="fee-body">Loading…</div>';
+  app.appendChild(feeSection);
+  loadFeeAcks();
 
   // Meta. Not loaded with the page -- it is several Graph calls plus a probe
   // per Instagram account, and the answer only changes while someone is
