@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Briefing - Sauron</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #14141f;
+    --surface-hover: #1a1a2a;
+    --border: #2a2a3a;
+    --text: #e4e4ef;
+    --text-muted: #8888a0;
+    --accent: #e8933a;
+    --accent-dim: #c47520;
+    --error: #e84040;
+    --success: #40c060;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .logo {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim));
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .subtitle { font-size: 11px; color: var(--text-muted); }
+  header nav { margin-left: auto; display: flex; gap: 16px; font-size: 14px; }
+  header nav a { color: var(--text-muted); text-decoration: none; }
+  header nav a.active { color: var(--accent); }
+  header nav a:hover { color: var(--text); }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  .loading { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
+
+  .empty {
+    border: 1px dashed var(--border); border-radius: 10px;
+    padding: 32px 24px; text-align: center; color: var(--text-muted); font-size: 14px;
+  }
+  .empty strong { color: var(--text); display: block; margin-bottom: 6px; font-size: 15px; }
+
+  .run-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin: 28px 0 12px;
+  }
+  .run-head:first-child { margin-top: 0; }
+  .run-head h2 { font-size: 17px; font-weight: 600; }
+  .run-head .when { font-size: 12px; color: var(--text-muted); }
+
+  .venue-head {
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .06em;
+    margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+
+  .rec {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .rec.dismissed { opacity: .45; border-left-color: var(--border); }
+  .rec-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .rec-headline { font-weight: 600; font-size: 15px; flex: 1; min-width: 240px; }
+  .rec-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .rec-tag {
+    background: var(--surface-hover); border: 1px solid var(--border);
+    border-radius: 3px; padding: 1px 6px;
+  }
+  .rec-confidence { font-variant-numeric: tabular-nums; }
+  .rec-body { font-size: 14px; line-height: 1.6; margin-top: 10px; color: var(--text); }
+  .rec-body p { margin: 8px 0; }
+  .rec-body ul { margin: 8px 0 8px 18px; }
+  .rec-body h2, .rec-body h3, .rec-body h4 { font-size: 14px; margin: 12px 0 4px; }
+  .rec-body table { border-collapse: collapse; margin: 10px 0; font-size: 13px; width: 100%; }
+  .rec-body th, .rec-body td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  .rec-body th { background: var(--surface-hover); }
+  .rec-body code { background: var(--surface-hover); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .rec-body svg { max-width: 100%; height: auto; }
+  .rec-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .rec-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .rec-btn:hover { background: var(--surface-hover); color: var(--text); }
+  .rec-btn.on { border-color: var(--accent); color: var(--accent); }
+  .rec-note { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+  details.history { margin-top: 36px; }
+  details.history > summary {
+    cursor: pointer; color: var(--text-muted); font-size: 13px;
+    padding: 10px 0; border-top: 1px solid var(--border);
+  }
+  details.history > summary:hover { color: var(--text); }
+
+  .withheld {
+    font-size: 12px; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin-top: 16px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"></div>
+    <div>
+      <h1>Weekly Briefing</h1>
+      <div class="subtitle">The Dandy Collection</div>
+    </div>
+    <nav>
+      <a href="/">Chat</a>
+      <a href="/briefing.html" class="active">Briefing</a>
+      <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
+      <a href="#" id="logout-link">Logout</a>
+    </nav>
+  </header>
+
+  <div class="container" id="app">
+    <div class="loading">Loading...</div>
+  </div>
+
+<script>
+let token = null;
+let myVenues = [];
+
+(async function init() {
+  const cfg = await fetch('/api/config').then(r => r.json());
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+    document.getElementById('app').innerHTML = '<div class="loading">Auth not configured.</div>';
+    return;
+  }
+
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  token = session.access_token;
+
+  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+  if (!meRes.ok) { window.location.href = '/login.html'; return; }
+  const me = await meRes.json();
+  myVenues = me.venues || [];
+  if (me.isOwner) document.getElementById('admin-link').style.display = '';
+
+  document.getElementById('logout-link').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await supabase.auth.signOut();
+    window.location.href = '/login.html';
+  });
+
+  await load();
+})();
+
+async function load() {
+  const app = document.getElementById('app');
+
+  let payload;
+  try {
+    const res = await fetch('/api/recommendations', { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) {
+      app.innerHTML = '<div class="empty"><strong>Could not load the briefing.</strong>The chat still works — this page is an addition, not a gate on it.</div>';
+      return;
+    }
+    payload = await res.json();
+  } catch (e) {
+    app.innerHTML = '<div class="empty"><strong>Could not load the briefing.</strong>' + escapeHtml(String(e.message || e)) + '</div>';
+    return;
+  }
+
+  const recs = payload.recommendations || [];
+
+  if (recs.length === 0) {
+    /**
+     * "None yet" and "a quiet week" are different facts and the API cannot
+     * tell them apart, so this says the honest thing rather than guessing at
+     * the friendlier one. An engine with permission to say nothing needs a
+     * reader who knows silence is a valid answer.
+     */
+    app.innerHTML =
+      '<div class="empty"><strong>No briefing published yet.</strong>' +
+      'Recommendations are written once a week, on Monday night. A week where nothing was worth raising ' +
+      'produces no briefing at all — that is a valid outcome, not a fault.</div>';
+    return;
+  }
+
+  /**
+   * Grouped by the PERIOD it covers, newest first.
+   *
+   * The chat panel only ever showed the latest run, deliberately: stacking four
+   * weeks into one panel is how a briefing becomes a backlog. On a page of its
+   * own history has somewhere to live, so it is kept — but collapsed, and
+   * subordinate to this week.
+   */
+  const byPeriod = new Map();
+  for (const r of recs) {
+    const key = r.period_start + '|' + r.period_end;
+    if (!byPeriod.has(key)) byPeriod.set(key, []);
+    byPeriod.get(key).push(r);
+  }
+
+  const periods = [...byPeriod.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  const [latestKey, latestRecs] = periods[0];
+
+  let html = renderPeriod(latestKey, latestRecs, payload.withheld_for_role || 0);
+
+  if (periods.length > 1) {
+    html += '<details class="history"><summary>Earlier briefings (' + (periods.length - 1) + ')</summary>';
+    for (const [key, rows] of periods.slice(1)) html += renderPeriod(key, rows, 0);
+    html += '</details>';
+  }
+
+  app.innerHTML = html;
+}
+
+function renderPeriod(key, rows, withheld) {
+  const [start, end] = key.split('|');
+  const venues = [...new Set(rows.map(r => r.venue))].sort();
+
+  let html =
+    '<div class="run-head"><h2>' + escapeHtml(start) + ' to ' + escapeHtml(end) + '</h2>' +
+    '<span class="when">' + rows.length + ' recommendation' + (rows.length === 1 ? '' : 's') +
+    (venues.length > 1 ? ' across ' + venues.length + ' venues' : '') + '</span></div>';
+
+  // One venue per section when the reader can see more than one. A mixed list
+  // makes the reader do the grouping, and outlet problems have outlet owners.
+  if (venues.length > 1) {
+    for (const venue of venues) {
+      html += '<div class="venue-head">' + escapeHtml(venue) + '</div>';
+      html += rows.filter(r => r.venue === venue).map(renderRecommendation).join('');
+    }
+  } else {
+    html += rows.map(renderRecommendation).join('');
+  }
+
+  /**
+   * Say when something was withheld.
+   *
+   * /api/recommendations counts what the reader's role may not see. A briefing
+   * that silently drops a finding looks identical to one that had nothing to
+   * say, and the difference matters to whoever is reading it.
+   */
+  if (withheld > 0) {
+    html += '<div class="withheld">' + withheld + ' recommendation' + (withheld === 1 ? ' was' : 's were') +
+      ' withheld because they touch data your role cannot see. Ask an owner if you need them.</div>';
+  }
+
+  return html;
+}
+
+function renderRecommendation(r) {
+  const charts = (r.charts || []).map(c => '<div>' + c.svg + '</div>').join('');
+  return '' +
+    '<div class="rec' + (r.status === 'dismissed' ? ' dismissed' : '') + '" id="rec-' + r.id + '">' +
+      '<div class="rec-head">' +
+        '<div class="rec-headline">' + escapeHtml(r.headline) + '</div>' +
+        '<div class="rec-meta">' +
+          '<span class="rec-tag">' + escapeHtml(r.domain) + '</span>' +
+          '<span class="rec-confidence">confidence ' + Number(r.confidence).toFixed(2) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="rec-body">' + renderMarkdown(r.body || '') + charts + '</div>' +
+      '<div class="rec-actions">' +
+        '<button class="rec-btn' + (r.status === 'acted_on' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {status:\'acted_on\'}, this)">Acted on</button>' +
+        '<button class="rec-btn' + (r.rating === 'useful' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'useful\'}, this)">Useful</button>' +
+        '<button class="rec-btn' + (r.rating === 'not_useful' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'not_useful\'}, this)">Not useful</button>' +
+        '<button class="rec-btn' + (r.rating === 'wrong' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'wrong\', status:\'dismissed\'}, this)">Wrong</button>' +
+        '<span class="rec-note">' + (r.evidence || []).length + ' quer' + ((r.evidence || []).length === 1 ? 'y' : 'ies') + ' behind this</span>' +
+      '</div>' +
+    '</div>';
+}
+
+async function rateRec(id, patch, btn) {
+  // Marked immediately. A rating button that waits on a round trip gets
+  // pressed twice, and the second press is the one nobody meant.
+  const row = btn.closest('.rec');
+  if (patch.rating) {
+    row.querySelectorAll('.rec-btn').forEach(b => {
+      if (b.textContent !== 'Acted on') b.classList.remove('on');
+    });
+  }
+  btn.classList.add('on');
+  if (patch.status === 'dismissed') row.classList.add('dismissed');
+
+  try {
+    await fetch('/api/recommendations/' + id + '/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    // Nothing to roll back to that would be clearer than the state shown.
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * The same renderer the chat uses, and the same reasoning behind it: this
+ * writes into innerHTML, so a URL is an attribute in a live document rather
+ * than text. Both links and images are allowlisted to https and quotes are
+ * stripped, because a recommendation body is model-written prose.
+ */
+function renderMarkdown(text) {
+  let html = text;
+
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  const safeUrl = u => (/^https:\/\//i.test(u) ? u.replace(/["'<>]/g, '') : '');
+
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return '';
+    const altText = String(alt).replace(/["'<>]/g, '');
+    return '<img src="' + safe + '" alt="' + altText + '" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%">';
+  });
+
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, linkText, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return linkText;
+    return '<a href="' + safe + '" target="_blank" rel="noopener noreferrer">' + linkText + '</a>';
+  });
+
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Only the leading and trailing empties are dropped -- an empty cell in the
+  // MIDDLE is a real column, and discarding it shifts every later value one
+  // column left.
+  function splitTableRow(row) {
+    const parts = row.split('|');
+    if (parts.length && parts[0].trim() === '') parts.shift();
+    if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
+    return parts.map(c => c.trim());
+  }
+
+  html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (match, headerRow, sepRow, bodyRows) => {
+    const headers = splitTableRow(headerRow);
+    let table = '<table><thead><tr>';
+    headers.forEach(h => { table += '<th>' + h + '</th>'; });
+    table += '</tr></thead><tbody>';
+    bodyRows.trim().split('\n').forEach(row => {
+      if (!row.trim()) return;
+      const cells = splitTableRow(row);
+      while (cells.length < headers.length) cells.push('');
+      table += '<tr>';
+      for (let i = 0; i < headers.length; i++) table += '<td>' + cells[i] + '</td>';
+      table += '</tr>';
+    });
+    table += '</tbody></table>';
+    return table;
+  });
+
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  html = html.split('\n\n').map(block => {
+    block = block.trim();
+    if (!block) return '';
+    if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<table') || block.startsWith('<img')) return block;
+    return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+
+  return html;
+}
+</script>
+</body>
+</html>
