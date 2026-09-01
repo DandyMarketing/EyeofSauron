@@ -126,6 +126,14 @@ const forbiddenFor = (venueId: string) => [
 ];
 
 let written = 0;
+/**
+ * Things worth saying that are NOT failures.
+ *
+ * Separate from `problems` because that array decides the exit code -- a run
+ * is a failure only when EVERY venue failed -- and a successful cap trim
+ * counted toward that threshold until 1 Sep 2026. One signal doing two jobs.
+ */
+const notices: string[] = [];
 let suppressedTotal = 0;
 let withheldTotal = 0;
 let quietVenues = 0;
@@ -290,9 +298,12 @@ for (const venue of venues as any[]) {
     const parsed = parseRecommendations(call?.input);
 
     if (parsed.ok && parsed.dropped) {
-      // Visible, because a model that routinely ignores maxItems is worth
-      // knowing about -- and because the reader is seeing three of six.
-      problems.push(
+      // A NOTICE, not a problem. Visible because a model routinely ignoring
+      // maxItems is worth knowing about -- but the trim SUCCEEDED, and
+      // `problems` decides the exit code as well as the printed list. Putting
+      // it there made three venues trimming cleanly exit 1 and report as
+      // "Crashed" while writing nine recommendations.
+      notices.push(
         `${venue.name}: returned ${parsed.value.length + parsed.dropped} recommendations against a cap of ${parsed.value.length} — kept the top ${parsed.value.length}, dropped ${parsed.dropped}.`,
       );
     }
@@ -439,6 +450,11 @@ if (suppressedTotal > 0) {
 }
 if (withheldTotal > 0) {
   console.log(`${withheldTotal} WITHHELD for naming another venue. The prompt asked for anonymous comparison and did not get it — worth reading the brief again if this keeps happening.`);
+}
+
+if (notices.length > 0) {
+  console.log(`\nNOTES (${notices.length}) — the run worked, these are worth knowing:`);
+  for (const n of notices) console.log(`  - ${n}`);
 }
 
 if (problems.length > 0) {
