@@ -258,7 +258,24 @@ for (const venue of venues as any[]) {
     // Pass two: rows, not prose.
     const structured = await client.messages.create({
       model: STRUCTURING_MODEL,
-      max_tokens: 4096,
+      /**
+       * NOT 4096, and the old number is the whole reason this job had written
+       * zero recommendations since it was built.
+       *
+       * Every run failed with "no recommendations array returned". The cause
+       * was not a refusal or a bad schema: `tool_choice` FORCES the tool, so
+       * the model always called it -- it simply ran out of output partway
+       * through the JSON. A truncated tool input arrives as a partial object
+       * with no complete `recommendations` array, and parseRecommendations
+       * correctly refused it. The analysis it has to split ran to 11,000
+       * characters and up to three recommendations carry headline, body,
+       * evidence and charts.
+       *
+       * engine.ts already documents this exact ceiling being raised twice for
+       * the same reason. This pass was written with the number that had
+       * already been retired.
+       */
+      max_tokens: 16384,
       system: [{
         type: 'text',
         text: `You are splitting a finished analysis into records. Do not add findings, do not soften them, and do not invent figures — everything must already be in the text you are given. If the analysis concluded there was nothing worth raising, return an empty list.`,
@@ -273,7 +290,21 @@ for (const venue of venues as any[]) {
     const parsed = parseRecommendations(call?.input);
 
     if (!parsed.ok) {
-      problems.push(`${venue.name}: could not structure the analysis — ${parsed.reason}`);
+      /**
+       * Say TRUNCATED when it was truncated.
+       *
+       * Without this the failure reads "no recommendations array returned",
+       * which describes the symptom and points at the model's behaviour --
+       * and sent this investigation looking at the tool schema and the prompt
+       * for a week, when the answer was a number in this file.
+       */
+      const truncated = structured.stop_reason === 'max_tokens';
+      problems.push(
+        `${venue.name}: could not structure the analysis — ${parsed.reason}` +
+        (truncated
+          ? ` — TRUNCATED at the ${16384}-token ceiling. The analysis was ${analysis.answer.length} chars; raise max_tokens on the structuring call.`
+          : ''),
+      );
       continue;
     }
 
