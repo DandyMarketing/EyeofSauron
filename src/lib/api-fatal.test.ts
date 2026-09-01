@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { fatalApiReason, fatalRunSummary } from './api-fatal.js';
+import { fatalApiReason, fatalRunSummary, isTransientCapacityError, transientReason, humanApiError } from './api-fatal.js';
 
 /**
  * The case this exists for, copied from the run that produced it: the
@@ -73,4 +73,73 @@ test('the summary says what survived, what is left, and how to resume', () => {
   assert.match(text, /npm run classify:posts/);
   // The reflex on a failed job is to assume the finished part must be redone.
   assert.match(text, /Nothing needs redoing/);
+});
+
+describe('transient capacity failures — the half that recovers', () => {
+  /** As it actually arrived on 1 Sep 2026, raised from Stream.iterator. */
+  const OVERLOADED = new Error(
+    '{"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CecahFk1FfxfFLw1ja8sL"}',
+  );
+
+  test('an overload delivered inside a stream is recognised', () => {
+    // The SDK cannot retry this one: shouldRetry() inspects the HTTP response,
+    // and an overload raised mid-stream arrives inside a 200.
+    assert.equal(isTransientCapacityError(OVERLOADED), true);
+    assert.match(transientReason(OVERLOADED)!, /overloaded/i);
+  });
+
+  test('a rate limit is transient, and says which it was', () => {
+    // Both recover, but only one of them means we are asking too often.
+    const limited = new Error('rate_limit_error: too many requests');
+    assert.match(transientReason(limited)!, /rate limited/);
+  });
+
+  test('529 and 429 by status, not only by message', () => {
+    assert.equal(isTransientCapacityError({ status: 529, message: 'nope' }), true);
+    assert.equal(isTransientCapacityError({ status: 429, message: 'nope' }), true);
+  });
+
+  test('an ACCOUNT problem is never treated as transient', () => {
+    // Retrying an exhausted balance is a loop, not a recovery — and it would
+    // undo the whole point of fatalApiReason().
+    const broke = new Error('400 invalid_request_error: Your credit balance is too low');
+    assert.equal(isTransientCapacityError(broke), false);
+    assert.equal(transientReason(broke), null);
+  });
+
+  test('an ordinary bug is not retried', () => {
+    assert.equal(isTransientCapacityError(new Error('Cannot read properties of undefined')), false);
+  });
+
+  test('the two classifications never both claim the same error', () => {
+    for (const err of [OVERLOADED, new Error('credit balance is too low'), new Error('boom')]) {
+      assert.ok(
+        !(fatalApiReason(err) !== null && transientReason(err) !== null),
+        'an error was classed as both fatal and transient',
+      );
+    }
+  });
+});
+
+describe('humanApiError', () => {
+  test('an overload becomes a sentence, not a request_id', () => {
+    // What went in front of a venue manager was the raw JSON body. That tells
+    // them nothing and reads as a broken product rather than a busy minute.
+    const message = humanApiError(new Error('{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011Cec"}'));
+
+    assert.doesNotMatch(message, /request_id|req_011|\{/);
+    assert.match(message, /ask again in a moment/);
+    assert.match(message, /not your question/);
+  });
+
+  test('an account problem keeps its actionable explanation', () => {
+    // "Try again in a moment" would be actively wrong here.
+    const message = humanApiError(new Error('credit balance is too low'));
+    assert.match(message, /out of credit/);
+    assert.doesNotMatch(message, /ask again in a moment/);
+  });
+
+  test('anything else passes through rather than being swallowed', () => {
+    assert.match(humanApiError(new Error('some unexpected fault')), /some unexpected fault/);
+  });
 });

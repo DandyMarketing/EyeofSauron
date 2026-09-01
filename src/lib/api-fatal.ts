@@ -72,6 +72,82 @@ export function fatalApiReason(error: unknown): string | null {
 }
 
 /**
+ * The other half of the same judgment: failures that DO recover.
+ *
+ * `fatalApiReason` deliberately excludes 429 and 529, and the note above says
+ * why. What it did not do was say what to do with them instead, so the chat did
+ * nothing -- and on 1 Sep 2026 a question died with `overloaded_error` and put a
+ * raw JSON blob with a request_id in front of a venue manager.
+ *
+ * The reason the SDK's own retry missed it is worth knowing before trusting
+ * `maxRetries` anywhere else: `shouldRetry()` inspects the HTTP RESPONSE, and
+ * returns true for any status >= 500. But an overload raised partway through a
+ * STREAM arrives inside a 200 -- from the SDK's side the request succeeded and
+ * later threw, so there is nothing for it to retry. Anything streaming has to
+ * handle this itself.
+ */
+const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /overloaded_error|"Overloaded"/i, reason: 'Anthropic is overloaded' },
+  { pattern: /rate_limit_error|rate limit/i, reason: 'rate limited' },
+];
+
+const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 529]);
+
+/** Is this worth trying again in a moment? */
+export function isTransientCapacityError(error: unknown): boolean {
+  return transientReason(error) !== null;
+}
+
+/**
+ * Why it is worth retrying, or null when it is not.
+ *
+ * Returns the reason rather than a boolean so a log line can say which of the
+ * two it was: an overload and a rate limit both recover, but only one of them
+ * means we are asking too often.
+ */
+export function transientReason(error: unknown): string | null {
+  if (!error) return null;
+
+  // An account problem outranks a capacity one. A run out of credit can return
+  // shapes that look transient, and retrying that is a loop, not a recovery.
+  if (fatalApiReason(error)) return null;
+
+  const err = error as { status?: unknown; message?: unknown };
+  const status = typeof err.status === 'number' ? err.status : undefined;
+  const message = String(err.message ?? error);
+
+  for (const { pattern, reason } of TRANSIENT_PATTERNS) {
+    if (pattern.test(message)) return reason;
+  }
+
+  if (status !== undefined && TRANSIENT_STATUSES.has(status)) {
+    return `Anthropic returned ${status}`;
+  }
+
+  return null;
+}
+
+/**
+ * What to say to the person waiting.
+ *
+ * The raw error is a JSON object with a request_id in it, which tells a venue
+ * manager nothing and reads as a broken product. This is not a fix for the
+ * failure, it is a fix for what the failure LOOKS like -- and the two are
+ * different jobs.
+ */
+export function humanApiError(error: unknown): string {
+  const reason = transientReason(error);
+  if (reason) {
+    return `${reason.charAt(0).toUpperCase()}${reason.slice(1)} right now — this is on Anthropic's side, not your question. Please ask again in a moment.`;
+  }
+
+  const fatal = fatalApiReason(error);
+  if (fatal) return fatal;
+
+  return String((error as { message?: unknown })?.message ?? error);
+}
+
+/**
  * The block printed when a run gives up.
  *
  * Says how much survived and how much is left, because the reflex on seeing a

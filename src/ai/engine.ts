@@ -3,6 +3,7 @@ import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
 import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
 import { modelFor, isModelFeatureError, usageLine, type Purpose } from './model-policy.js';
+import { isTransientCapacityError, transientReason } from '../lib/api-fatal.js';
 import type { Role } from './data-domains.js';
 import {
   webSearchTool,
@@ -117,6 +118,16 @@ export interface QueryResult {
 // Ceiling on tool rounds. Nothing legitimate needs more, and without it a model
 // that keeps querying spins until the request times out with no answer.
 const MAX_TOOL_ROUNDS = 12;
+
+/**
+ * How many times to retry a capacity failure, and how long to wait first.
+ *
+ * Two, doubling from two seconds. An overload clears in seconds or it does not
+ * clear; a third attempt mostly adds latency to a question that is going to
+ * fail anyway, and the person is watching a spinner the whole time.
+ */
+const OVERLOAD_RETRIES = 2;
+const OVERLOAD_BACKOFF_MS = 2_000;
 
 /**
  * Ceiling on `pause_turn` continuations.
@@ -352,8 +363,42 @@ export async function askSauron(
      * `stop_reason` all survive -- checked against the SDK's own types rather
      * than assumed, because the container fix depends on it.
      */
-    const call = (params: any): Promise<Anthropic.Message> =>
-      client.messages.stream(params).finalMessage() as Promise<Anthropic.Message>;
+    /**
+     * RETRIED HERE, because the SDK structurally cannot retry this one.
+     *
+     * On 1 Sep 2026 a question died with `overloaded_error` raised from
+     * `Stream.iterator`, and the user was shown a raw JSON blob with a
+     * request_id in it. The SDK's own retry looked like it should have covered
+     * that -- `maxRetries` defaults to 2 and `shouldRetry()` returns true for
+     * any status >= 500. It did not, and the reason is worth writing down:
+     * `shouldRetry(response)` inspects the HTTP RESPONSE, and an overload that
+     * arrives partway through a stream arrives inside a 200. The SDK sees a
+     * successful request that later threw. There is nothing for it to retry.
+     *
+     * Same class as the web search failure already documented in web-search.ts
+     * -- an error delivered inside a successful envelope -- and it needs the
+     * same treatment: catch it where the envelope is opened.
+     *
+     * Only overload and rate limit are retried, matching the judgment already
+     * made in api-fatal.ts: those recover, and everything else is either a bug
+     * in our request or an account-level problem that more attempts cannot fix.
+     * A retry restarts the whole call, which is safe because a stream that
+     * errored produced no final message.
+     */
+    const call = async (params: any): Promise<Anthropic.Message> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await client.messages.stream(params).finalMessage() as Anthropic.Message;
+        } catch (e: any) {
+          if (attempt >= OVERLOAD_RETRIES || !isTransientCapacityError(e)) throw e;
+          const waitMs = OVERLOAD_BACKOFF_MS * 2 ** attempt;
+          console.warn(
+            `[model] ${transientReason(e)} — retrying in ${waitMs}ms (attempt ${attempt + 1}/${OVERLOAD_RETRIES})`,
+          );
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+      }
+    };
 
     let r: Anthropic.Message;
     try {

@@ -7,6 +7,7 @@ import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySales
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
+import { humanApiError } from './lib/api-fatal.js';
 import { summarisePostLockChange } from './ingest/monday.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection, XERO_SCOPES } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
@@ -294,7 +295,11 @@ app.post('/ask', async (c) => {
      * alike, which is exactly why this line has to exist.
      */
     console.error(`[ask] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
-    return c.json({ error: e.message }, 500);
+    // The log gets the raw error; the person gets a sentence. Returning the
+    // raw one put `{"type":"error","error":{"type":"overloaded_error",...,
+    // "request_id":"req_011Cec..."}` in front of a venue manager, which tells
+    // them nothing and reads as a broken product rather than a busy minute.
+    return c.json({ error: humanApiError(e) }, 500);
   }
 });
 
