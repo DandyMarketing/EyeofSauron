@@ -19,7 +19,8 @@
     "ingest:xero": "NODE_USE_ENV_PROXY=1 tsx src/scripts/backfill-xero.ts",
     "probe:bills": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-bills.ts",
     "classify:posts": "NODE_USE_ENV_PROXY=1 tsx src/scripts/classify-posts.ts",
-    "recommend": "NODE_USE_ENV_PROXY=1 tsx src/scripts/recommend.ts"
+    "recommend": "NODE_USE_ENV_PROXY=1 tsx src/scripts/recommend.ts",
+    "probe:xero-pl": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-pl-layout.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.118.0",
