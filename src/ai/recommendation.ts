@@ -269,7 +269,7 @@ export function recommendationTool() {
  */
 export function parseRecommendations(
   raw: unknown,
-): { ok: true; value: Recommendation[] } | { ok: false; reason: string } {
+): { ok: true; value: Recommendation[]; dropped?: number } | { ok: false; reason: string } {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, reason: 'response was not an object' };
   }
@@ -279,13 +279,29 @@ export function parseRecommendations(
     return { ok: false, reason: 'no recommendations array returned' };
   }
 
-  if (list.length > MAX_PER_RUN) {
-    return { ok: false, reason: `${list.length} recommendations returned, the cap is ${MAX_PER_RUN}` };
-  }
+  /**
+   * TRIMMED, not rejected -- and this is the one place the reject-rather-than-
+   * repair rule does not apply.
+   *
+   * Firangi Superstar returned SIX on 1 Sep 2026 and lost all six, along with
+   * a twelve-minute Opus analysis, because the cap is three. That rule exists
+   * so nobody guesses at what was MEANT; here nothing is being guessed. The
+   * tool says "most important first", `maxItems` already declares the cap, and
+   * taking the top three is precisely what the cap is for -- it forces a
+   * ranking decision instead of a list whose best item is seventh. Throwing
+   * the ranked list away because it was ranked too generously discards the
+   * work and delivers nothing.
+   *
+   * The count is returned so the trim is VISIBLE. A silent trim would make a
+   * model that routinely ignores its own schema indistinguishable from one
+   * that obeys it, and that is worth knowing.
+   */
+  const dropped = Math.max(0, list.length - MAX_PER_RUN);
+  const capped = dropped > 0 ? list.slice(0, MAX_PER_RUN) : list;
 
   const value: Recommendation[] = [];
 
-  for (const [i, item] of list.entries()) {
+  for (const [i, item] of capped.entries()) {
     if (!item || typeof item !== 'object') {
       return { ok: false, reason: `recommendation ${i + 1} was not an object` };
     }
@@ -315,7 +331,7 @@ export function parseRecommendations(
     });
   }
 
-  return { ok: true, value };
+  return dropped > 0 ? { ok: true, value, dropped } : { ok: true, value };
 }
 
 /**

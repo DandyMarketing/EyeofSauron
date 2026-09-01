@@ -1,17 +1,6 @@
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import {
-  fingerprint,
-  parseRecommendations,
-  suppressRepeats,
-  analysisBrief,
-  recommendationTool,
-  MAX_PER_RUN,
-  RECOMMENDATION_DOMAINS,
-  namesOtherVenues,
-  lastCompleteWeek,
-  unsettledWeekNote,
-} from './recommendation.js';
+import { fingerprint, parseRecommendations, suppressRepeats, analysisBrief, recommendationTool, MAX_PER_RUN, RECOMMENDATION_DOMAINS, namesOtherVenues, lastCompleteWeek, unsettledWeekNote } from './recommendation.js';
 
 const rec = (over: Partial<{ headline: string; body: string; domain: string; confidence: number }> = {}) => ({
   headline: over.headline ?? 'Move the Tuesday set menu to Wednesday',
@@ -80,14 +69,19 @@ test('an unknown domain is rejected, never mapped to a neighbour', () => {
   assert.match((parsed as any).reason, /finance/);
 });
 
-test('more than the cap is rejected rather than truncated', () => {
-  // Truncating would silently drop findings the model ranked. If it ignored
-  // the cap, that is worth seeing.
+test('more than the cap is trimmed and the trim is reported', () => {
+  // This asserted rejection until 1 Sep 2026, on the reasoning that silently
+  // dropping ranked findings hides a model ignoring its own cap. The first
+  // half was right and the remedy was wrong: Firangi Superstar returned six,
+  // lost all six, and lost a twelve-minute Opus analysis with them. Keeping
+  // the top three is what the cap is FOR, and `dropped` keeps the second half
+  // of the original argument — the trim is still visible.
   const parsed = parseRecommendations({
     recommendations: Array.from({ length: MAX_PER_RUN + 1 }, (_, i) => rec({ headline: `Thing ${i}` })),
   });
-  assert.equal(parsed.ok, false);
-  assert.match((parsed as any).reason, new RegExp(`cap is ${MAX_PER_RUN}`));
+  assert.equal(parsed.ok, true);
+  assert.equal((parsed as any).value.length, MAX_PER_RUN);
+  assert.equal((parsed as any).dropped, 1);
 });
 
 test('a headline with no body is rejected — advice without reasoning is a claim', () => {
@@ -327,4 +321,55 @@ test('what was already said still reaches the brief alongside the new sections',
 
   assert.match(brief, /Cut the Monday roster/);
   assert.match(brief, /LATEST SETTLED P&L MONTH/);
+});
+
+describe('the cap trims rather than discards', () => {
+  const rec = (n: number) => ({
+    headline: `Do thing ${n}`,
+    body: `Because of figure ${n}.`,
+    domain: 'sales',
+    confidence: 0.6,
+  });
+
+  test('six against a cap of three keeps the top three', () => {
+    // Firangi Superstar returned six on 1 Sep 2026 and lost all six, along
+    // with a twelve-minute Opus analysis. The tool says "most important
+    // first", so the top three is what the cap was always for.
+    const parsed = parseRecommendations({ recommendations: [1, 2, 3, 4, 5, 6].map(rec) });
+
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, MAX_PER_RUN);
+    assert.deepEqual(parsed.value.map(r => r.headline), ['Do thing 1', 'Do thing 2', 'Do thing 3']);
+  });
+
+  test('the trim is reported, never silent', () => {
+    // A silent trim makes a model that ignores its own maxItems look identical
+    // to one that obeys it.
+    const parsed = parseRecommendations({ recommendations: [1, 2, 3, 4, 5, 6].map(rec) });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.dropped, 3);
+  });
+
+  test('a list within the cap reports no drop at all', () => {
+    const parsed = parseRecommendations({ recommendations: [rec(1), rec(2)] });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.dropped, undefined);
+  });
+
+  test('an empty list is still valid and still not a drop', () => {
+    // A quiet week is a real outcome, not a failure.
+    const parsed = parseRecommendations({ recommendations: [] });
+    assert.ok(parsed.ok);
+    assert.deepEqual(parsed.value, []);
+    assert.equal(parsed.dropped, undefined);
+  });
+
+  test('trimming does not rescue a malformed entry inside the kept three', () => {
+    // The cap is the ONLY thing repaired. A recommendation with no headline is
+    // still a rejection, because that would be guessing at meaning.
+    const parsed = parseRecommendations({
+      recommendations: [rec(1), { ...rec(2), headline: '' }, rec(3), rec(4)],
+    });
+    assert.equal(parsed.ok, false);
+  });
 });

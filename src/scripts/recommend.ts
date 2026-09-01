@@ -289,6 +289,14 @@ for (const venue of venues as any[]) {
     const call = structured.content.find(b => b.type === 'tool_use') as any;
     const parsed = parseRecommendations(call?.input);
 
+    if (parsed.ok && parsed.dropped) {
+      // Visible, because a model that routinely ignores maxItems is worth
+      // knowing about -- and because the reader is seeing three of six.
+      problems.push(
+        `${venue.name}: returned ${parsed.value.length + parsed.dropped} recommendations against a cap of ${parsed.value.length} — kept the top ${parsed.value.length}, dropped ${parsed.dropped}.`,
+      );
+    }
+
     if (!parsed.ok) {
       /**
        * Say TRUNCATED when it was truncated.
@@ -299,10 +307,25 @@ for (const venue of venues as any[]) {
        * for a week, when the answer was a number in this file.
        */
       const truncated = structured.stop_reason === 'max_tokens';
+      /**
+       * SAY WHAT CAME BACK, not only that it was unusable.
+       *
+       * Neon Pigeon failed with "no recommendations array returned" and no
+       * truncation, which ruled out the ceiling and left nothing else to go
+       * on -- the message described our verdict rather than the response.
+       * stop_reason and the input's own keys are the two facts that separate
+       * a refusal, a wrong shape and an empty object, and all three would
+       * otherwise read identically.
+       */
+      const shape = call?.input && typeof call.input === 'object'
+        ? `keys: [${Object.keys(call.input).join(', ') || 'none'}]`
+        : `no tool_use block (content: ${structured.content.map(b => b.type).join(', ') || 'empty'})`;
+
       problems.push(
         `${venue.name}: could not structure the analysis — ${parsed.reason}` +
+        ` — stop_reason=${structured.stop_reason}, ${shape}, analysis ${analysis.answer.length} chars` +
         (truncated
-          ? ` — TRUNCATED at the ${16384}-token ceiling. The analysis was ${analysis.answer.length} chars; raise max_tokens on the structuring call.`
+          ? ' — TRUNCATED at the 16384-token ceiling; raise max_tokens on the structuring call.'
           : ''),
       );
       continue;
