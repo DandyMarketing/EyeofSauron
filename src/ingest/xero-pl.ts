@@ -22,6 +22,8 @@ export interface PlIngestResult {
   lines: number;
   checks: SectionCheck[];
   stored: boolean;
+  /** Rows an earlier report left behind that this one did not produce. */
+  stale_removed?: number;
   error?: string;
 }
 
@@ -31,7 +33,29 @@ export async function fetchProfitAndLoss(
   toDate: string,
 ): Promise<any> {
   const accessToken = await getAccessToken(tenantId);
-  const url = `${XERO_API}/Reports/ProfitAndLoss?fromDate=${fromDate}&toDate=${toDate}`;
+  /**
+   * standardLayout=true, and the default is actively wrong for us.
+   *
+   * Measured 2 Sep 2026 by asking all three ways for Neon Pigeon's June. With
+   * the parameter omitted -- and with standardLayout=false, which is the same
+   * thing -- Xero returns the organisation's CUSTOM layout, and that layout
+   * merges COGS - Alcohol into COGS - Beverages: one line reading 13,079.52
+   * where the accounts hold 11,246.00 and 1,833.52. Alcohol, the venue's
+   * second-largest purchase line at 80,901 year to date, had no row of its own
+   * in the warehouse at all.
+   *
+   * Total Cost of Sales is 45,166.87 under every variant, which is exactly why
+   * reconcileSections() passed it every month for a year: a merge INSIDE a
+   * section preserves the section total. That gate proves the total and never
+   * the split.
+   *
+   * A warehouse needs ACCOUNTS, not a presentation. Any grouping can be
+   * rebuilt from accounts; a merged line can never be un-merged. The cost is
+   * that the custom layout's own groupings (a "Staff Costs" section here) stop
+   * arriving -- which is the right trade, and is what account_map exists to
+   * reproduce when somebody wants it back.
+   */
+  const url = `${XERO_API}/Reports/ProfitAndLoss?fromDate=${fromDate}&toDate=${toDate}&standardLayout=true`;
 
   const res = await fetch(url, {
     headers: {
@@ -99,6 +123,10 @@ export async function ingestProfitAndLoss(
     };
   }
 
+  // One timestamp for the whole period, because it is also the marker that
+  // separates what THIS report produced from what an earlier one left behind.
+  const fetchedAt = new Date().toISOString();
+
   const rows = report.lines.map(line => ({
     ...base,
     section: line.section,
@@ -107,7 +135,7 @@ export async function ingestProfitAndLoss(
     amount: line.amount,
     is_summary: line.is_summary,
     sort_order: line.sort_order,
-    fetched_at: new Date().toISOString(),
+    fetched_at: fetchedAt,
   }));
 
   const { error } = await supabase
@@ -134,5 +162,28 @@ export async function ingestProfitAndLoss(
 
   if (error) throw new Error(`P&L upsert failed: ${error.message}`);
 
-  return { ...base, lines: rows.length, checks, stored: true };
+  /**
+   * Rows the current report did NOT produce are deleted.
+   *
+   * An upsert alone cannot remove a line that has stopped existing, and the
+   * layout switch above makes several stop existing at once -- the custom
+   * layout's "Total Staff Costs" among them. Left behind they would never be
+   * updated and never be wrong-looking: a summary row with a real figure,
+   * carrying an old grouping, that query_profit_and_loss would happily sum.
+   * That is migration 023's 213 duplicate rows in a different costume.
+   *
+   * Keyed on fetched_at rather than on a diff of names, because the question
+   * is not "which names went" but "which rows did this run not write". A
+   * renamed account, a removed account and a changed layout all answer it the
+   * same way.
+   */
+  const { count: removed } = await supabase
+    .from('profit_and_loss')
+    .delete({ count: 'exact' })
+    .eq('venue_id', conn.venue_id)
+    .eq('period_start', fromDate)
+    .eq('period_end', toDate)
+    .lt('fetched_at', fetchedAt);
+
+  return { ...base, lines: rows.length, checks, stored: true, stale_removed: removed ?? 0 };
 }

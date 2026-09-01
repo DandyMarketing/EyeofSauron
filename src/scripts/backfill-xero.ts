@@ -196,6 +196,13 @@ for (const t of targets as any[]) {
       if (r.stored) {
         stored++;
         console.log(`  ${period.label}: ${r.lines} line(s)`);
+        // Reported, because a silent cleanup is how nobody notices that a
+        // layout change quietly rewrote a year of the ledger's shape.
+        if ((r as any).stale_removed > 0) {
+          findings.push(
+            `${label} ${period.label}: ${(r as any).stale_removed} stale P&L row(s) removed — lines an earlier report produced that this one did not`,
+          );
+        }
       }
 
       if (withBills && (r.stored || billsMissing)) {
