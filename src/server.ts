@@ -280,6 +280,20 @@ app.post('/ask', async (c) => {
     const result = await askSauron(body.question, body.history ?? [], venueFilter, 'chat', effectiveRole(user));
     return c.json(result);
   } catch (e: any) {
+    /**
+     * LOGGED, not just returned. This handed the message to the browser and
+     * wrote nothing to the console, so every chat failure since it was written
+     * was invisible in Railway -- and on 1 Sep 2026 a log export covering the
+     * failure contained a single line, because there was nothing else to find.
+     *
+     * Worth knowing what this catch does NOT cover: the browser's "Request
+     * failed" is its own fallback for a body that will not parse as JSON, and
+     * this returns valid JSON. So that message means the response never came
+     * from here at all -- the request outlived the edge timeout. A six-minute
+     * answer and a crash look identical from the front end and are nothing
+     * alike, which is exactly why this line has to exist.
+     */
+    console.error(`[ask] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: e.message }, 500);
   }
 });

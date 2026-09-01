@@ -12,6 +12,7 @@ import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '..
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
+import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 
 async function getVenueId(slug: string): Promise<string> {
@@ -100,6 +101,8 @@ export async function handleToolCall(
       return queryGuestRetention(input);
     case 'query_guest_cohorts':
       return queryGuestCohorts(input);
+    case 'query_visit_distribution':
+      return queryVisitDistribution(input);
     case 'check_booking_channels':
       return checkBookingChannels(input);
     case 'query_hourly_sales':
@@ -1784,5 +1787,80 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * The visit-number mix, month by month.
+ *
+ * WHY IT IS ONE CALL. This exists because assembling it from thirty-two calls
+ * to `query_guest_retention` is what timed the chat out on 1 Sep 2026: twelve
+ * tool rounds, six minutes of Opus, the round ceiling hit, and a 4,149-token
+ * recovery answer discarded because the HTTP request had already gone. The
+ * arithmetic belongs in Postgres for the same reason retention and cohorts do.
+ */
+async function queryVisitDistribution(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const { data, error } = await supabase.rpc('visit_distribution', {
+    p_start: input.start_date,
+    p_end: input.end_date,
+  });
+
+  if (error) {
+    // Named rather than swallowed: an unapplied migration would otherwise look
+    // exactly like a period in which nobody ever came back.
+    return JSON.stringify({
+      error: `Could not compute the visit distribution: ${error.message}. If this says the function does not exist, migration 032_visit_distribution.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as VisitRow[];
+
+  /**
+   * When the records begin, so left-censoring can be COMPUTED rather than
+   * assumed. A guest whose first visit predates SevenRooms counts here as a
+   * first-timer, which overstates acquisition in the early months -- and the
+   * only honest way to say which months those are is to know the start date.
+   */
+  const { data: earliest } = await supabase
+    .from('reservations')
+    .select('business_date')
+    .order('business_date', { ascending: true })
+    .limit(1);
+  const dataStartsAt = earliest?.[0]?.business_date ?? null;
+
+  const forVenue = (id: string | null) =>
+    monthlyDistribution(rows.filter(r => r.venue_id === id), dataStartsAt);
+
+  const byVenue = venues.map(v => {
+    const months = forVenue(v.id);
+    return { venue: v.name, slug: v.slug, months, change: rateChange(months) };
+  });
+
+  /**
+   * The group row only when the caller can see the whole group -- the same
+   * boundary as `query_guest_cohorts`, and easy to miss here for the same
+   * reason: the row carries no venue_id to filter on.
+   */
+  const seesEverything = venues.length === allVenues.length && !input.venue_slug;
+  const groupMonths = seesEverything ? forVenue(null) : null;
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    data_starts_at: dataStartsAt,
+    venues: byVenue,
+    group: groupMonths ? { months: groupMonths, change: rateChange(groupMonths) } : null,
+    caveats: distributionCaveats(groupMonths ?? byVenue.flatMap(v => v.months)),
   });
 }

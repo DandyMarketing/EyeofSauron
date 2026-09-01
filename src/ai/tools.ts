@@ -433,6 +433,35 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_visit_distribution',
+    description:
+      'THE MONTH-BY-MONTH MIX OF FIRST, SECOND, THIRD AND FOURTH-OR-LATER VISITS, per venue and for the group. Use this for any question about how many people are on their first visit versus coming back, how that mix moves over months, or the share of return guests over a period. ' +
+      'PREFER IT OVER LOOPING query_guest_retention. That tool answers ONE period, so a monthly series across three venues needs about thirty-two calls — which exceeds the tool-round ceiling, takes minutes, and returns nothing. This is one query. If you find yourself about to call any tool once per month, stop and use this. ' +
+      'IT COUNTS VISITS, NOT GUESTS. A guest who came twice in March appears in March twice, as a second visit and as a third, so the buckets sum to the month\'s booked footfall. Never describe a bucket as a number of people. ' +
+      'GROUP AND VENUE ROWS DO NOT ADD UP, deliberately: a guest who ate at two venues on one day is one GROUP visit and two OUTLET visits. Outlet and group are different questions with different owners — outlet is whether this venue earned a second visit, group is whether the group held the guest at all. ' +
+      'CHECK left_censored BEFORE READING ANY TREND. A guest whose first visit predates our SevenRooms records counts as a first-timer, so early months overstate first visits and understate the return rate. A rise across the first year is partly the data filling in, not the business improving. The response computes which months are affected; the `change` field already excludes them and excludes thin months, so use it rather than eyeballing the first and last rows. ' +
+      'Booked guests only. Walk-ins get a fresh client id nearly every time and can never be observed returning, so including them would understate every rate here. ' +
+      'Baseline measured Aug 2026: 81% of booked guests across the whole history visited exactly once and under 1% reached six visits, so second-visit conversion is where the population is.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit for all venues plus the group.',
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start of the period (inclusive), YYYY-MM-DD. Whole months — a part-month plotted beside full ones reads as a collapse.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the period (inclusive), YYYY-MM-DD.',
+        },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_hourly_sales',
     description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
     input_schema: {
