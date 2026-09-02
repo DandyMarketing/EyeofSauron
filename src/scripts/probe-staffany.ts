@@ -68,13 +68,17 @@ async function call(path: string, query: Record<string, string | undefined> = {}
     .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`)
     .join('&');
 
-  const res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ''}`, {
+  const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${KEY}`, Accept: 'application/json' },
   });
 
   const text = await res.text();
   let body: any = null;
   try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 300) }; }
+  // The request itself on a failure. A 400 with no URL beside it sends you
+  // reading the spec instead of comparing what you sent against it.
+  if (!res.ok) console.log(`  → ${url.replace(/Bearer [^&]*/, '')}`);
   return { ok: res.ok, status: res.status, body };
 }
 
@@ -85,8 +89,17 @@ async function call(path: string, query: Record<string, string | undefined> = {}
  */
 function verdict(p: Probe): string {
   if (p.ok) return 'OK';
-  const msg = p.body?.message ?? p.body?.error ?? p.body?.raw ?? '';
-  return `${p.status} — ${String(msg).slice(0, 160)}`;
+  /**
+   * The WHOLE body, stringified.
+   *
+   * The first version picked `message ?? error ?? raw` and String()'d it, so a
+   * validation error -- which arrives as an OBJECT listing the offending
+   * fields -- printed as "[object Object]". Three 400s, and not one of them
+   * said what was wrong with the request. That is the same fault this codebase
+   * has been fixing all week: a report of the symptom where the cause was
+   * already in hand.
+   */
+  return `${p.status} — ${JSON.stringify(p.body).slice(0, 400)}`;
 }
 
 const items = (p: Probe): any[] => (Array.isArray(p.body?.data?.items) ? p.body.data.items : []);
@@ -127,7 +140,8 @@ console.log(`  (${items(roles).length} role(s) — this is what the BOH/FOH mapp
 const slots = await call('/workspace/v2/shift-slots', {
   start: `${START}T00:00:00Z`,
   end: `${END}T23:59:59Z`,
-  limit: '500',
+  // The spec caps this at 100. 500 was rejected outright.
+  limit: '100',
 });
 console.log(`shift-slots: ${verdict(slots)}`);
 
