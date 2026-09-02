@@ -137,12 +137,36 @@ for (const r of items(roles)) {
 console.log(`  (${items(roles).length} role(s) — this is what the BOH/FOH mapping table must cover)\n`);
 
 // --- shifts and the role link ----------------------------------------------
-const slots = await call('/workspace/v2/shift-slots', {
+/**
+ * Asked BOTH ways, because `includeUnpublished` defaults to false.
+ *
+ * An empty week and a week whose schedule was never published look identical
+ * from outside, and only one of them is a problem. If published returns
+ * nothing and unpublished returns plenty, this business rosters in StaffAny
+ * without publishing -- which the ingest would have to honour, and which
+ * nobody would have found later without wondering where the labour went.
+ */
+let slots = await call('/workspace/v2/shift-slots', {
   start: `${START}T00:00:00Z`,
   end: `${END}T23:59:59Z`,
   // The spec caps this at 100. 500 was rejected outright.
   limit: '100',
 });
+console.log(`shift-slots (published only): ${verdict(slots)} — ${items(slots).length} slot(s)`);
+
+if (slots.ok && items(slots).length === 0) {
+  slots = await call('/workspace/v2/shift-slots', {
+    start: `${START}T00:00:00Z`,
+    end: `${END}T23:59:59Z`,
+    limit: '100',
+    includeUnpublished: 'true',
+  });
+  console.log(`shift-slots (incl. unpublished): ${verdict(slots)} — ${items(slots).length} slot(s)`);
+  if (items(slots).length > 0) {
+    console.log('  → schedules are NOT published. The ingest must pass includeUnpublished=true');
+    console.log('    or it will silently see no labour at all.');
+  }
+}
 console.log(`shift-slots: ${verdict(slots)}`);
 
 if (slots.ok) {
@@ -195,12 +219,18 @@ const firstSection = items(sections)[0];
 if (!firstSection) {
   console.log('schedule-costs: skipped — no section to ask about');
 } else {
-  const startMs = Date.parse(`${START}T00:00:00Z`);
-  const endMs = Date.parse(`${END}T23:59:59Z`);
-
+  /**
+   * YYYY-MM-DD, and the published spec says otherwise.
+   *
+   * It declares start and end as `type: integer`, so this first tried epoch
+   * milliseconds and then epoch seconds. Both were refused with the answer in
+   * plain words: `"start" must be in YYYY-MM-DD format`. The spec is wrong
+   * about its own parameter, which is the argument for probing an API rather
+   * than reading it -- and worth remembering for every other field in that
+   * document.
+   */
   for (const [label, s, e] of [
-    ['milliseconds', String(startMs), String(endMs)],
-    ['seconds', String(Math.floor(startMs / 1000)), String(Math.floor(endMs / 1000))],
+    ['YYYY-MM-DD', START, END],
   ] as Array<[string, string, string]>) {
     const cost = await call('/workspace/v2/schedule-costs', {
       start: s,
