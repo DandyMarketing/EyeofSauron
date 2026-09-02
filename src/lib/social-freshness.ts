@@ -125,6 +125,14 @@ export function describeStale(freshness: SocialFreshness): string {
  * max()-per-group, there are three accounts, and this runs on a watchdog
  * endpoint nobody polls in a loop. Clarity beats cleverness at this size.
  */
+/**
+ * Platforms this system ingests, and therefore the only ones that can be stale.
+ *
+ * Instagram alone today. Facebook accounts exist in social_accounts because
+ * account discovery finds them; nothing fetches them.
+ */
+export const INGESTED_PLATFORMS = ['instagram'];
+
 export async function socialFreshness(
   maxAgeHours: number = MAX_SOCIAL_AGE_HOURS,
   nowMs: number = Date.now(),
@@ -133,7 +141,28 @@ export async function socialFreshness(
     .from('social_accounts')
     .select('platform, account_id, venues(name)')
     .not('venue_id', 'is', null)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    /**
+     * Only platforms we actually PULL.
+     *
+     * discoverAccounts() records every account the Meta token can see, which
+     * includes the Facebook page behind each Instagram account. Nothing ingests
+     * Facebook -- its proven-metric list in meta.ts is deliberately empty, and
+     * CLAUDE.md is explicit that the Meta source is our own Instagram. So the
+     * watchdog was reporting three feeds as NEVER INGESTED, in red, forever,
+     * for something nobody intends to ingest.
+     *
+     * That is the Firangi Sunday lesson (BUILD_LOG 3.2 and
+     * classifyIngestFailure) in a second place: a monitor that is permanently
+     * red is one nobody reads, and it takes the real alarm down with it. Three
+     * of the six lines on this panel were noise.
+     *
+     * Listed rather than derived from PROVEN_METRICS, because "which platforms
+     * should be fresh" is a question about what we promise to ingest, not about
+     * which metric list happens to be populated today. Adding Facebook here
+     * should be a deliberate act by whoever makes it actually ingest.
+     */
+    .in('platform', INGESTED_PLATFORMS);
 
   // A failed read must not read as "everything is fresh". Same rule as
   // fetchNotes: returning ok on an error is how a broken check becomes

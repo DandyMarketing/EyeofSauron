@@ -1,11 +1,7 @@
 import '../tests/env.js';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import {
-  classifyFreshness,
-  describeStale,
-  MAX_SOCIAL_AGE_HOURS,
-} from './social-freshness.js';
+import { INGESTED_PLATFORMS, MAX_SOCIAL_AGE_HOURS, classifyFreshness, describeStale } from './social-freshness.js';
 
 /**
  * The check exists because Ingest-Meta crashed on startup and nobody was told.
@@ -96,4 +92,22 @@ test('the message names the venue, the gap, and what was lost', () => {
 
 test('a healthy check produces no message', () => {
   assert.equal(describeStale(classifyFreshness([account('X', hoursAgo(1))], NOW)), '');
+});
+
+describe('platforms nobody ingests are not stale', () => {
+  test('only ingested platforms are listed', () => {
+    // discoverAccounts() records the Facebook page behind every Instagram
+    // account, and nothing fetches Facebook -- its proven-metric list is
+    // deliberately empty. The watchdog reported three feeds as NEVER INGESTED,
+    // in red, forever. A monitor that is permanently red is one nobody reads,
+    // and it takes the real alarm down with it.
+    assert.deepEqual(INGESTED_PLATFORMS, ['instagram']);
+  });
+
+  test('adding a platform here is a deliberate act, not a side effect', () => {
+    // Listed rather than derived from whichever metric list is populated, so
+    // that "we promise this feed is fresh" and "this metric array has entries"
+    // stay separate decisions.
+    assert.ok(!INGESTED_PLATFORMS.includes('facebook'));
+  });
 });
