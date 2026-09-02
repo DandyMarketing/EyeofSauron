@@ -62,15 +62,29 @@ const END = process.argv.find(a => a.startsWith('--end='))?.split('=')[1] ?? wee
 
 interface Probe { ok: boolean; status: number; body: any; note?: string }
 
-async function call(path: string, query: Record<string, string | undefined> = {}): Promise<Probe> {
+async function call(
+  path: string,
+  query: Record<string, string | undefined> = {},
+  payload?: unknown,
+): Promise<Probe> {
   const qs = Object.entries(query)
     .filter(([, v]) => v !== undefined)
     .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`)
     .join('&');
 
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
+  // The v1 read endpoints take their filters in a POST body rather than a query
+  // string. They are still reads -- `POST /workspace/v1/timesheets` is
+  // documented as "Retrieve timesheet attendance data" -- so the method says
+  // nothing about whether anything is written.
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${KEY}`, Accept: 'application/json' },
+    method: payload === undefined ? 'GET' : 'POST',
+    headers: {
+      Authorization: `Bearer ${KEY}`,
+      Accept: 'application/json',
+      ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
   });
 
   const text = await res.text();
@@ -135,6 +149,58 @@ for (const r of items(roles)) {
   console.log(`  ${r.name}`);
 }
 console.log(`  (${items(roles).length} role(s) — this is what the BOH/FOH mapping table must cover)\n`);
+
+const sectionName = new Map<string, string>(items(sections).map((s: any) => [s.id, s.name]));
+
+// --- does a roster exist at all --------------------------------------------
+/**
+ * `shifts` is a DIFFERENT endpoint from `shift-slots`, and the first probe
+ * never called it.
+ *
+ * The spec is explicit that they are siblings: "This endpoint returns shift
+ * records only; use GET /workspace/v2/shift-slots to retrieve staff assignments
+ * and unassigned slots." A shift is the box on the roster; a slot is a person
+ * put in it.
+ *
+ * That distinction is what makes this worth asking. `shift-slots` came back 200
+ * with zero rows for a full week, published and unpublished, which has two
+ * completely different explanations -- nobody is rostered, or assignments are
+ * withheld from this token -- and the two lead opposite ways. Shifts with no
+ * slots means the roster exists and we cannot see who is in it, which is a
+ * permission conversation. No shifts either means the week genuinely was not
+ * built here, which is a conversation with the business instead.
+ */
+const shifts = await call('/workspace/v2/shifts', {
+  start: `${START}T00:00:00Z`,
+  end: `${END}T23:59:59Z`,
+  limit: '100',
+  includeUnpublished: 'true',
+});
+console.log(`shifts (incl. unpublished): ${verdict(shifts)} — ${items(shifts).length} shift(s)`);
+
+if (shifts.ok) {
+  const rows = items(shifts);
+  const published = rows.filter((r: any) => r.isPublished).length;
+  console.log(`  ${published} published, ${rows.length - published} unpublished`);
+  console.log(`  hasMore=${shifts.body?.data?.meta?.hasMore}`);
+
+  // Per SECTION, because section IS the BOH/FOH split in this organisation --
+  // Fat Prince BOH and Fat Prince FOH are separate sections, not a role
+  // attribute. A section with no shifts is the thing worth seeing.
+  const bySection = new Map<string, number>();
+  for (const r of rows as any[]) {
+    const key = sectionName.get(r.sectionId) ?? `unmapped:${String(r.sectionId).slice(0, 8)}`;
+    bySection.set(key, (bySection.get(key) ?? 0) + 1);
+  }
+  for (const [name, n] of [...bySection].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${n.toString().padStart(4)}  ${name}`);
+  }
+  if (rows.length > 0) {
+    console.log('  → the roster EXISTS. If shift-slots is empty below, assignments are');
+    console.log('    being withheld from this token, not absent from the business.');
+  }
+}
+console.log('');
 
 // --- shifts and the role link ----------------------------------------------
 /**
@@ -261,7 +327,111 @@ if (!firstSection) {
   }
 }
 
-console.log('\nNot called, deliberately: /payroll, /compensation, /compensation-history,');
-console.log('/compensation-snapshots, and /staff. The first four are personal pay. The last');
-console.log('carries date of birth, address, phone and next of kin, and the ingest does not');
-console.log('need it — roleId is on the shift slot.');
+// --- the ungated fallback ---------------------------------------------------
+/**
+ * WHAT IS ACTUALLY GATED, measured rather than assumed.
+ *
+ * The whole plan was declared blocked on `workspaceApiV2ExperimentalEnabled`.
+ * Reading the published spec end to end, exactly TWO of its forty-three
+ * endpoints mention the flag: `GET /workspace/v2/schedule-costs` and
+ * `POST /workspace/v2/timesheets/work-data`. Everything else is free, including
+ * the entire v1 surface, which the first probe never tried at all.
+ *
+ * `POST /workspace/v1/timesheets` is the one that matters. It returns CLOCKED
+ * ATTENDANCE rather than the roster -- hours somebody actually worked, not
+ * hours somebody was scheduled for -- which is the better input regardless, and
+ * it carries `sectionId`. Since BOH and FOH are separate SECTIONS here, the
+ * split falls out of the data structurally and needs no role mapping and no
+ * apportionment.
+ *
+ * What stays gated is COST. So if this works and schedule-costs does not, the
+ * BOH/FOH split is hours-weighted, and CLAUDE.md is unambiguous about what that
+ * obliges: a chef and a runner do not cost the same hour, so it is an ESTIMATE
+ * and must be labelled one everywhere it appears, for as long as it is one.
+ */
+const day = 86_400_000;
+const fromMs = Date.parse(`${START}T00:00:00Z`);
+const toMs = Date.parse(`${END}T00:00:00Z`) + day - 1000;
+
+/**
+ * Three encodings, because the spec has already been wrong about this once.
+ *
+ * `range.from`/`range.to` are declared `type: integer` here -- the same
+ * declaration schedule-costs makes, where the API then demanded YYYY-MM-DD in
+ * plain words. So the document cannot be trusted on this field, and guessing
+ * one form would come back as an empty week rather than as an error. All three
+ * are tried and the working one is reported, which is the finding.
+ */
+const encodings: Array<[string, number | string, number | string]> = [
+  ['epoch ms', fromMs, toMs],
+  ['epoch seconds', Math.floor(fromMs / 1000), Math.floor(toMs / 1000)],
+  ['YYYY-MM-DD', START, END],
+];
+
+for (const [label, from, to] of encodings) {
+  const ts = await call('/workspace/v1/timesheets', {}, {
+    range: { from, to },
+    includes: ['shiftRecords', 'workHours'],
+    limit: 100,
+  });
+  console.log(`timesheets v1 (${label}): ${verdict(ts)}`);
+
+  if (!ts.ok) continue;
+
+  const workHours: any[] = Array.isArray(ts.body?.data?.workHours) ? ts.body.data.workHours : [];
+  const records: any[] = Array.isArray(ts.body?.data?.shiftRecords) ? ts.body.data.shiftRecords : [];
+
+  console.log(`  ${records.length} shift record(s), ${workHours.length} work-hour row(s)`);
+  console.log(`  hasMore=${ts.body?.data?.meta?.hasMore}`);
+
+  /**
+   * KEYS, never values.
+   *
+   * The spec's response schema for a work-hour row lists startTime and no end
+   * and no duration, which cannot be the whole of it -- and the spec has
+   * already been caught understating this endpoint family. The real field list
+   * decides whether hours are a subtraction or have to be reconstructed from
+   * clock attempts. Printing the names is enough to learn that; printing a row
+   * would put a person's shift on a terminal, which this probe does not do.
+   */
+  if (workHours[0]) console.log(`  work-hour fields: ${Object.keys(workHours[0]).join(', ')}`);
+  if (records[0]) console.log(`  shift-record fields: ${Object.keys(records[0]).join(', ')}`);
+
+  // Distinct people COUNTED, never listed. The count answers "is this the whole
+  // team or a handful", which is the only thing about it we need to know.
+  console.log(`  ${new Set(workHours.map(w => w.userId).filter(Boolean)).size} distinct staff appear`);
+
+  const bySection = new Map<string, number>();
+  for (const w of workHours) {
+    const key = sectionName.get(w.sectionId) ?? `unmapped:${String(w.sectionId).slice(0, 8)}`;
+    bySection.set(key, (bySection.get(key) ?? 0) + 1);
+  }
+  for (const [name, n] of [...bySection].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${n.toString().padStart(4)}  ${name}`);
+  }
+
+  const unmapped = [...bySection.keys()].filter(k => k.startsWith('unmapped:'));
+  if (unmapped.length > 0) {
+    // The Revel venue-key rule: an id with no name is flagged, never guessed.
+    console.log(`  ${unmapped.length} sectionId(s) have no matching section — flag, do not guess`);
+  }
+
+  if (workHours.length > 0) {
+    console.log('  → HOURS ARE REACHABLE WITHOUT THE EXPERIMENTAL FLAG, and they arrive');
+    console.log('    already split by section, which is the BOH/FOH split. Cost is still');
+    console.log('    gated, so a split built on this alone is an ESTIMATE and stays labelled one.');
+  }
+  break;
+}
+
+console.log('\nNot called, deliberately: /workspace/v1/payroll, /workspace/v1/compensation,');
+console.log('/workspace/v2/compensation-history, /workspace/v2/compensation-snapshots,');
+console.log('/workspace/v2/payroll/payruns/search, and /staff on both versions. The payroll');
+console.log('and compensation endpoints are personal pay. /staff carries date of birth,');
+console.log('address, phone and next of kin, and the ingest does not need it — the section');
+console.log('carries the BOH/FOH split and the slot carries the role.');
+console.log('');
+console.log('NONE OF THOSE IS GATED. Every one is on the free surface of this API, reachable');
+console.log('with the token we already hold. With Xero the protection is a scope we refused');
+console.log('and therefore cannot use by accident; here there is no scope to refuse, so not');
+console.log('writing the call is the entire protection. Anyone adding one should know that.');
