@@ -14,6 +14,11 @@
  * finding, and the reason the percentage is computed here and returned with
  * every response rather than left to the model to remember.
  *
+ * A MISSING DENOMINATOR IS USUALLY NOT A PROBLEM AT ALL, which is the other
+ * thing this had wrong. Bills coded to Prepayments or Renovation have no P&L
+ * line because an asset is not a cost -- and reporting that as "coverage
+ * cannot be measured" reads as cost we failed to capture. See caveatFor().
+ *
  * ABOVE 100% IS ALSO REAL, and means the opposite problem: the bill side claims
  * more was spent than the ledger recorded. COGS Food measured 109%. The cause
  * WAS un-ingested credit notes, and no longer is -- migration 031 pulls
@@ -86,16 +91,44 @@ export function coverageByAccount(
       ledger_total: ledger !== undefined ? round2(ledger) : null,
       coverage_pct: pct,
       bill_lines: entry.bill_lines,
-      caveat: caveatFor(pct),
+      caveat: caveatFor(pct, ledger ?? null),
     });
   }
 
   return out.sort((a, b) => b.bills_total - a.bills_total);
 }
 
-export function caveatFor(pct: number | null): string | null {
+export function caveatFor(pct: number | null, ledgerTotal?: number | null): string | null {
   if (pct === null) {
-    return 'No P&L figure for this account in the period, so coverage cannot be measured. Do not describe this breakdown as complete.';
+    /**
+     * A ZERO ledger line and a MISSING one both give a null percentage and are
+     * not the same fact. Zero means the P&L reported this account and it came
+     * to nothing -- so bills coded to it are in the wrong period, or the
+     * account nets off within it. Missing means the account is not on the
+     * report at all, which is the balance-sheet case below. Collapsing them
+     * would send someone looking for an asset that is really a timing error.
+     */
+    if (ledgerTotal === 0) {
+      return 'The P&L reports this account at ZERO for the period, yet bills were coded to it. A percentage is meaningless against zero. Either those bills belong to a different period, or the account nets off within this one. The P&L total is the authority.';
+    }
+    /**
+     * "Unmeasurable" was read as "missing", and they are opposite things.
+     *
+     * Investigated 2 Sep 2026. Four Neon Pigeon accounts carried $22,641 of
+     * June bills with no P&L line, which this reported as coverage that could
+     * not be measured -- indistinguishable, to a reader, from cost we had
+     * failed to capture. Two of the four were 620 Prepayments and 730
+     * Renovation: a Current Asset and a Fixed Asset. That spend is correctly
+     * absent from a profit and loss report, and nothing was wrong.
+     *
+     * Since migration 8a19fa5 the P&L is fetched with standardLayout=true and
+     * reports every account with activity, so a bill coded to an account with
+     * no P&L line is now most likely a balance-sheet account. Most likely is
+     * not certain -- a P&L account with no activity in the period looks the
+     * same -- so this says which is probable and names the other rather than
+     * asserting one.
+     */
+    return 'No P&L line for this account in this period. The P&L reports every account with activity, so this is most likely a BALANCE-SHEET account — a prepayment, an asset purchase, stock — which is real spend that correctly never appears in a profit and loss. Do not describe it as missing cost or as a gap in coverage. It can also mean a P&L account with no activity this period.';
   }
   if (pct > 100) {
     /**

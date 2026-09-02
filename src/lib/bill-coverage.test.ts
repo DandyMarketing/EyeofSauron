@@ -64,13 +64,42 @@ test('no P&L line means unmeasurable, never 100%', () => {
   const [cov] = coverageByAccount([line('acct-x', 'Something', 500)], new Map());
   assert.equal(cov.coverage_pct, null);
   assert.equal(cov.ledger_total, null);
-  assert.match(cov.caveat!, /cannot be measured/);
+  assert.match(cov.caveat!, /No P&L line for this account/);
+});
+
+test('a missing denominator points at the balance sheet, not at missing cost', () => {
+  // 620 Prepayments and 730 Renovation carried $6,214 of June bills between
+  // them with no P&L line, and that is correct: an asset is not a cost. The
+  // old wording, "coverage cannot be measured", read as cost we had failed to
+  // capture — the opposite of the truth.
+  const caveat = caveatFor(null)!;
+
+  assert.match(caveat, /BALANCE-SHEET/);
+  assert.match(caveat, /never appears in a profit and loss/);
+  assert.doesNotMatch(caveat, /gap in coverage(?!\.)/);
+  // And it does not overclaim: the other reading is named, not hidden.
+  assert.match(caveat, /no activity this period/);
 });
 
 test('a zero ledger total is unmeasurable, not a division by zero', () => {
   const [cov] = coverageByAccount([line('acct-x', 'Something', 500)], new Map([['acct-x', 0]]));
   assert.equal(cov.coverage_pct, null);
-  assert.match(cov.caveat!, /cannot be measured/);
+  assert.match(cov.caveat!, /ZERO for the period/);
+});
+
+test('a zero ledger line and a missing one are told apart', () => {
+  // Both give a null percentage and they are different facts. Zero means the
+  // P&L reported the account and it came to nothing — a timing error, or an
+  // account that nets off. Missing means it is not on the report at all, which
+  // is usually the balance sheet. One message for both would send somebody
+  // hunting an asset that is really a period problem.
+  const zero = caveatFor(null, 0)!;
+  const missing = caveatFor(null)!;
+
+  assert.match(zero, /belong to a different period/);
+  assert.doesNotMatch(zero, /BALANCE-SHEET/);
+  assert.match(missing, /BALANCE-SHEET/);
+  assert.doesNotMatch(missing, /ZERO for the period/);
 });
 
 test('lines with no account still count toward the total', () => {

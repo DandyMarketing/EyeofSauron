@@ -212,6 +212,76 @@ the human turnaround is, in working days, before writing the comparison.
 
 ---
 
+### 2.6 A report layout merged two accounts, and the reconciliation gate could not see it
+
+**Symptom.** None, for a year. Neon Pigeon's stored P&L carried `COGS - Beverages`
+at 13,079.52 every month and no `COGS - Alcohol` line at all. Xero's own report
+for the same month showed 11,246.00 and 1,833.52 — two accounts, both Direct
+Costs, both with their own code. Every beverage-cost figure the system had ever
+produced for that venue was a blend of two accounts.
+
+**Cause.** `Reports/ProfitAndLoss` takes a `standardLayout` parameter and we
+passed neither value. The default returns the *organisation's custom layout*,
+and that layout merges the two accounts into one line. `standardLayout=true`
+returns the accounts. Proven by asking all three ways in one probe rather than
+by reading the documentation.
+
+**Why nothing caught it.** `reconcileSections()` is the gate CLAUDE.md requires
+before a figure is trusted: detail lines must sum to the total the report
+states. It passed, every month, correctly. Total Cost of Sales is 45,166.87
+under every variant — **a merge inside a section preserves the section total.**
+
+That is the lesson, and it generalises past this bug: *the reconciliation gate
+proves the total and never the composition.* Anything that redistributes value
+within a section is invisible to it by construction. A second check — account
+count, or account names against a known set — would be a different question and
+would have caught this one.
+
+**Two further things the fix needed.**
+
+A warehouse must ask for **accounts, not a presentation**. Any grouping can be
+rebuilt from accounts; a merged line can never be un-merged. The custom layout's
+own groupings are the cost of this, and `account_map` is where they belong.
+
+And switching layout required a **delete the ingest did not have**. An upsert
+cannot remove a line that has stopped existing, and changing layout makes
+several stop at once. `Total Staff Costs` would have remained in
+`profit_and_loss` forever: never updated, never obviously wrong, a summary row
+with a real figure carrying a grouping that no longer exists — which
+`query_profit_and_loss` would have happily summed. Rows are now deleted per
+period where the current report did not write them, keyed on `fetched_at`
+rather than on a diff of names, because the question is not which names went
+but which rows this run did not write.
+
+**Recurs at every customer.** Any organisation with a custom report layout in
+Xero has this, and the symptom is a plausible number rather than an error.
+
+---
+
+### 2.7 "Cannot be measured" read as "missing", and meant the opposite
+
+**Symptom.** `query_supplier_bills` reported four Neon Pigeon accounts holding
+$22,641 of June bills as coverage that could not be measured — which a reader
+takes as cost we failed to capture.
+
+**Cause.** Two of the four were 620 Prepayments and 730 Renovation: a Current
+Asset and a Fixed Asset. That spend is *correctly* absent from a profit and
+loss. Nothing was missing; the caveat was describing a normal accounting fact
+in the vocabulary of a fault.
+
+**Fix.** The caveat now says a missing P&L line most likely means a
+balance-sheet account and is not a gap, while naming the other possibility
+rather than asserting one. A *zero* ledger line is now a separate message
+again: zero means the account was reported and came to nothing, so the bills
+are in the wrong period or the account nets off — a different problem entirely
+from not being on the report.
+
+**The general shape.** A caveat is a sentence a person acts on. One that
+describes a correct state in the language of an error costs exactly as much
+attention as a real finding, and spends it on nothing.
+
+---
+
 ## 3. Analysis that misleads
 
 ### 3.1 Partial buckets read as a collapse
@@ -312,6 +382,51 @@ shape. Test the empty case explicitly; it is the one nobody tries by hand.
 
 ---
 
+### 4.4 Two tables had no row-level security, and one held revenue
+
+**Symptom.** None from inside. Found by Supabase's own security advisor:
+`rls_disabled_in_public` on `public.reconciliation_alerts` and
+`public.ingestion_log`.
+
+**Why it mattered.** The anon key is **public by design** — the web app fetches
+it from `/api/config` so the browser can authenticate. RLS is the only thing
+between that key and a table. `reconciliation_alerts` carries `monday_gross`,
+`revel_gross` and `difference`: daily revenue, per venue, per day. Anyone who
+could load the login page could read every venue's takings, and edit or delete
+them. That is section 4.1 defeated at a level below the tools — not a manager
+seeing a sister venue, but anybody at all seeing all of them.
+
+`ingestion_log` holds no money and failed the other way: readable, and the
+entire watchdog history **deletable** by a stranger. A watchdog whose record can
+be erased is not a watchdog.
+
+**Cause.** Every other table in the schema had RLS from creation. These two
+arrived in migrations 004 and 008 without it, and nothing in the repo, the
+tests, or a year of use asked the question. RLS is invisible when absent: the
+app works identically either way, because the server uses the service role,
+which bypasses RLS entirely.
+
+**Also fixed alongside.** `handle_new_user()` was SECURITY DEFINER with a
+mutable `search_path` *and* EXECUTE granted to public. Those two compound into
+the textbook Postgres escalation: a caller who controls `search_path` can make
+a definer function resolve a call to code of their own. DEFINER is correct here
+— the trigger writes a profile for a user who does not exist yet — so the path
+is pinned and execute revoked from public, anon and authenticated. A trigger
+needs EXECUTE granted to nobody.
+
+**Not fixed, deliberately.** `xero_connections` has RLS enabled with no policy,
+which the advisor reports as information. No policy means it denies every
+client while the service role still reads it — the correct state for a table of
+encrypted OAuth tokens. Clearing the notice would be a regression.
+
+**Recurs at every customer, and is the reason to automate it.** A table added
+without RLS is silent, and the only thing that found it was a vendor's periodic
+scan. **Before customer #2: a test that enumerates every table in `public` and
+fails on any without RLS enabled.** It is cheap, and it is the only form of
+this check that runs before the data is exposed rather than after.
+
+---
+
 ## 5. Presentation and delivery
 
 Lower stakes, but each one made real data unusable or invisible.
@@ -392,7 +507,12 @@ Ordered by how much damage the absence causes.
    enumerate the actual shift names from their data, map venue keys, confirm
    trading days per venue, verify credential length after paste (see below),
    confirm which feeds are live.
-4. **Ingestion watchdogs per customer.** `src/scripts/ingestion-status.ts`
+4. **A test that every table in `public` has RLS enabled.** Section 4.4: two
+   tables went a year without it, one of them holding daily revenue, and a
+   vendor's scan found it rather than anything of ours. This is a single query
+   against `pg_tables` and it is the only version of the check that runs before
+   the exposure rather than after.
+5. **Ingestion watchdogs per customer.** `src/scripts/ingestion-status.ts`
    exists for one company. Silence — a cron that stopped firing — looks
    identical to a quiet day, and is the failure mode most likely to go
    unnoticed across many tenants.
