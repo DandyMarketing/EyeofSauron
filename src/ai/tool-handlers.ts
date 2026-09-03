@@ -13,6 +13,7 @@ import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
+import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 
 async function getVenueId(slug: string): Promise<string> {
@@ -103,6 +104,8 @@ export async function handleToolCall(
       return queryGuestCohorts(input);
     case 'query_visit_distribution':
       return queryVisitDistribution(input);
+    case 'query_booking_lead_time':
+      return queryBookingLeadTime(input);
     case 'check_booking_channels':
       return checkBookingChannels(input);
     case 'query_hourly_sales':
@@ -1787,6 +1790,76 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * How far ahead people book, month by month.
+ *
+ * WHY THIS TOOL EXISTS AT ALL, and it is a defect report. Asked on 3 Sep 2026
+ * how many days ahead each booking came in, the chat replied that we hold no
+ * reservation creation timestamp and that it would need a new field from
+ * SevenRooms. Both halves were false. `source_created_at` has been on the table
+ * since migration 009, the ingest has always populated it, and it is present on
+ * 142,623 of 142,623 rows back to April 2022. The real fault was that
+ * `query_reservations` never SELECTED the column -- so the model could not see
+ * it, and filled the gap with a plausible reason instead of saying it could not
+ * tell. A missing column produced a confident wrong claim about our own schema,
+ * which is worse than the missing column.
+ *
+ * The lesson generalises past this one field: the tool layer decides what the
+ * model can know, and a column omitted there is indistinguishable, from inside
+ * the conversation, from a column that does not exist.
+ */
+async function queryBookingLeadTime(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  const { data, error } = await supabase.rpc('booking_lead_time', {
+    p_start: input.start_date,
+    p_end: input.end_date,
+  });
+
+  if (error) {
+    // Named rather than swallowed: an unapplied migration would otherwise look
+    // exactly like a period in which nobody booked ahead.
+    return JSON.stringify({
+      error: `Could not compute booking lead time: ${error.message}. If this says the function does not exist, migration 036_booking_lead_time.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as LeadTimeRow[];
+  const forVenue = (id: string | null) => monthlyLeadTime(rows.filter(r => r.venue_id === id));
+
+  const byVenue = venues.map(v => {
+    const months = forVenue(v.id);
+    return { venue: v.name, slug: v.slug, months, change: medianChange(months) };
+  });
+
+  /**
+   * The group row only when the caller can see the whole group -- the same
+   * boundary as `query_visit_distribution`, and easy to miss for the same
+   * reason: the group row carries a null venue_id and so survives any filter
+   * written in terms of venues.
+   */
+  const seesEverything = venues.length === allVenues.length && !input.venue_slug;
+  const groupMonths = seesEverything ? forVenue(null) : null;
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    unit: 'days between the booking being created and the date it was for',
+    venues: byVenue,
+    group: groupMonths ? { months: groupMonths, change: medianChange(groupMonths) } : null,
+    caveats: leadTimeCaveats(groupMonths ?? byVenue.flatMap(v => v.months)),
   });
 }
 

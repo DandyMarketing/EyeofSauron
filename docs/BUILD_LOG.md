@@ -324,6 +324,45 @@ The permanent fix is the read-only SQL tool recorded in `CLAUDE.md` — Postgres
 still performs every calculation, so the model chooses the *question* and never
 produces the *answer*.
 
+### 3.4 An answerable question declared impossible, with an invented reason
+**Symptom.** Asked on 3 Sep 2026 how many days ahead each booking came in, the
+chat replied that we do not hold a reservation creation timestamp, and that
+answering would need a booking-created field pulled through from SevenRooms
+"which isn't ingested". It then offered to raise it with the vendor.
+**Root cause.** Every part of that was false. `reservations.source_created_at`
+has been on the table since migration 009, `src/ingest/sevenrooms.ts` has always
+mapped SevenRooms' `created` onto it, and it is populated on **142,623 of
+142,623 rows** going back to April 2022. What was actually missing is that
+`query_reservations` selects eleven columns and this was not one of them.
+**Fix.** Migration 036 `booking_lead_time()` plus `query_booking_lead_time`. An
+aggregate rather than an extra column on the existing tool, because handing the
+model 142,623 rows to subtract dates across is the arithmetic-in-the-model
+failure the warehouse exists to prevent, and PostgREST caps a page at 1,000 rows
+anyway.
+**Recurs?** **Every customer, and at every new column.**
+
+**This is 3.3's failure with the sign flipped, and it is the worse of the two.**
+There, a question outside the menu produced a chart that looked like an answer.
+Here, a question inside the data produced a confident denial that the data
+exists. A wrong chart invites argument; "we don't have that" ends the
+conversation, and the person who asked walks away believing something false
+about their own system. Nobody re-asks a question they have been told is
+impossible.
+
+**The generalisable lesson: the tool layer defines what the model can know, and
+an omitted column is indistinguishable from a column that does not exist.** The
+model had no way to tell those apart and no reason to doubt itself — the
+absence was total from where it was standing. So a `SELECT` list is not an
+implementation detail, it is the boundary of the system's self-knowledge.
+
+**A model that cannot find something must say it cannot find it.** The specific
+harm here was not the gap, it was the *explanation* — a mechanism ("not
+ingested"), a remedy ("would need a field pulling through") and an action
+("worth raising"), none of which existed. Fluent, checkable, and wrong. The
+tool description for `query_reservations` now states outright that lead time is
+held and names the tool that returns it, because the correction has to live
+where the model is looking.
+
 ---
 
 ## 4. Security
