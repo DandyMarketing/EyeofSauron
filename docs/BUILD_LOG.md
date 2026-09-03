@@ -421,9 +421,38 @@ encrypted OAuth tokens. Clearing the notice would be a regression.
 
 **Recurs at every customer, and is the reason to automate it.** A table added
 without RLS is silent, and the only thing that found it was a vendor's periodic
-scan. **Before customer #2: a test that enumerates every table in `public` and
-fails on any without RLS enabled.** It is cheap, and it is the only form of
-this check that runs before the data is exposed rather than after.
+scan.
+
+**Now automated, 3 Sep 2026.** Migration 035 adds `rls_audit()`, a service-role
+function returning every ordinary table in `public` with its RLS state and
+policy count. `classifyTables()` reads it, `npm run audit:rls` exits non-zero on
+any exposure, and the result is rendered on the admin console beside the ingest
+health.
+
+**It reads the live catalogue, never the migrations directory**, which is the
+only version worth having: an un-run migration has been a defect here more than
+once, and a check on what we INTENDED would have passed on every one of those
+days.
+
+**The check turns on a distinction that is easy to collapse and ruinous either
+way.** RLS OFF is a hole. RLS ON with no policy is a locked door, and
+`xero_connections` is deliberately in that state. Faulting on deny-all would
+make the card permanently red, which is the Firangi Sunday lesson for the
+fourth time in this codebase; ignoring it would hide a table nobody meant to
+seal. It is reported in muted text and never counted as a failure. There is no
+allowlist of expected deny-all tables, because an allowlist on a security check
+rots and a stale one is worse than none.
+
+**Policies are counted but never used as the test.** A table can carry policies
+with RLS never enabled, and they do nothing at all — so counting policies
+instead of reading `relrowsecurity` would report exactly that table as the best
+protected one on the page. There is a test for it.
+
+**The function is SECURITY INVOKER and granted only to `service_role`.** Making
+a catalogue reader run as its owner, in order to close a hole about visibility,
+would be the wrong shape of fix. The catalogue is world-readable inside
+Postgres but PostgREST does not expose `pg_class`, so this function is the only
+route to it from a client and the grants are the whole of the control.
 
 ---
 
@@ -507,11 +536,12 @@ Ordered by how much damage the absence causes.
    enumerate the actual shift names from their data, map venue keys, confirm
    trading days per venue, verify credential length after paste (see below),
    confirm which feeds are live.
-4. **A test that every table in `public` has RLS enabled.** Section 4.4: two
-   tables went a year without it, one of them holding daily revenue, and a
-   vendor's scan found it rather than anything of ours. This is a single query
-   against `pg_tables` and it is the only version of the check that runs before
-   the exposure rather than after.
+4. ~~**A test that every table in `public` has RLS enabled.**~~ **Built 3 Sep
+   2026** — migration 035, `npm run audit:rls`, and a card on the admin console.
+   Section 4.4 has the detail. It stays on this list as an onboarding STEP
+   rather than a build item: run it once against a new customer's schema before
+   any of their data is loaded, because it is the only version of the check that
+   runs before the exposure rather than after.
 5. **Ingestion watchdogs per customer.** `src/scripts/ingestion-status.ts`
    exists for one company. Silence — a cron that stopped firing — looks
    identical to a quiet day, and is the failure mode most likely to go

@@ -750,6 +750,53 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   }
   sysSection.appendChild(socialCard);
 
+  /**
+   * Table protection, read from the live catalogue.
+   *
+   * Placed with the other absence-watchers rather than with the error lists,
+   * because it reports a thing that never happened: reconciliation_alerts and
+   * ingestion_log were created without row-level security and stayed that way
+   * for about a year, one of them holding daily revenue per venue. The anon key
+   * is public by design, so RLS is the only barrier between it and a table, and
+   * the thing that eventually noticed was a vendor's scanner.
+   *
+   * Deny-all is shown in muted text and never in red. xero_connections is
+   * correctly configured that way, and a card that is permanently red is a card
+   * nobody reads.
+   */
+  const rlsCard = el('div', 'system-card');
+  rlsCard.innerHTML = '<h4>Table Protection</h4>';
+  const rls = system.rls;
+  if (!rls) {
+    const unknown = el('div', 'gap-item');
+    unknown.textContent = 'Not reported — the server may be running an older build.';
+    rlsCard.appendChild(unknown);
+  } else {
+    if (rls.ok) {
+      const ok = el('div', 'no-gaps');
+      ok.textContent = `All ${rls.checked} table(s) in public have row-level security.`;
+      rlsCard.appendChild(ok);
+    } else {
+      for (const f of rls.exposed) {
+        const row = el('div', 'gap-item');
+        row.textContent = `public.${f.table}: ${f.detail}`;
+        rlsCard.appendChild(row);
+      }
+      const fix = el('div', 'gap-item');
+      fix.style.color = 'var(--text-muted)';
+      fix.textContent = 'Fix in a migration: alter table ... enable row level security, plus a policy. Until then these rows are readable and writable by anyone who loads the login page.';
+      rlsCard.appendChild(fix);
+    }
+
+    if (rls.deny_all && rls.deny_all.length > 0) {
+      const note = el('div', 'gap-item');
+      note.style.color = 'var(--text-muted)';
+      note.textContent = `${rls.deny_all.length} table(s) deny every client and are readable only by the server: ${rls.deny_all.map(f => f.table).join(', ')}. Correct for secrets; check each is meant to be invisible.`;
+      rlsCard.appendChild(note);
+    }
+  }
+  sysSection.appendChild(rlsCard);
+
   const errCard = el('div', 'system-card');
   errCard.innerHTML = '<h4>Recent Errors</h4>';
   if (system.recent_errors && system.recent_errors.length > 0) {

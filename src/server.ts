@@ -18,6 +18,7 @@ import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf } from './ai/data-domains.js';
 import { socialFreshness } from './lib/social-freshness.js';
+import { rlsAudit } from './lib/rls-audit.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -807,7 +808,21 @@ app.get('/admin/api/system', async (c) => {
    */
   const social = await socialFreshness();
 
-  return c.json({ ...report, recent_ingestions: recentLogs ?? [], social });
+  /**
+   * Is every table still protected?
+   *
+   * Surfaced beside the ingest health for the same reason that check is here:
+   * this is the only page an owner reliably looks at. It is also the answer to
+   * how reconciliation_alerts and ingestion_log went a year without RLS -- the
+   * convention was so consistent that nobody thought to verify it, and the
+   * thing that eventually noticed belonged to a vendor.
+   *
+   * One catalogue query, and the audit reads the live database rather than the
+   * migrations we believe we ran.
+   */
+  const rls = await rlsAudit();
+
+  return c.json({ ...report, recent_ingestions: recentLogs ?? [], social, rls });
 });
 
 // --- Watchdog (public for monitoring) ---
