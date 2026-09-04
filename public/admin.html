@@ -1067,6 +1067,104 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     '<div id="meta-result" style="margin-top:16px"></div>';
   app.appendChild(metaSection);
 
+  // StaffAny. Same shape as the Meta probes above and here for the same reason:
+  // it is nine calls to a third party, so it runs on a click rather than on
+  // page load. It replaced a terminal script that needed a local clone and a
+  // CLI login, which was the one diagnostic in this system that did not ship
+  // through GitHub.
+  const staffSection = el('div', 'section');
+  staffSection.innerHTML = '<h2>StaffAny (rosters &amp; labour)</h2>' +
+    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Asks StaffAny what this token can actually reach, for the last complete week. Reads only &mdash; nothing is written, and no payroll, compensation or staff endpoint is called. Re-run it whenever StaffAny change something on their side; the answer is expected to move.</p>' +
+    '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
+    '<div id="staffany-result" style="margin-top:16px"></div>';
+  app.appendChild(staffSection);
+
+  document.getElementById('staffany-probe-btn').addEventListener('click', async () => {
+    const out = document.getElementById('staffany-result');
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking StaffAny. Nine calls, so give it a few seconds&hellip;</p>';
+
+    const r = await api('GET', '/admin/api/staffany/probe');
+    if (r.error) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error);white-space:normal">' + escapeHtml(r.error) + '</p>';
+      return;
+    }
+
+    // A refusal is an ANSWER, not a failure, so a non-OK line is coloured as a
+    // finding rather than as a fault. A 403 on schedule-costs settles a design
+    // decision and is worth more than most successes.
+    function status(o, label, extra) {
+      const state = o.ok
+        ? '<span style="color:var(--success)">OK</span>'
+        : '<span style="color:var(--error)">' + escapeHtml(String(o.status)) + '</span>';
+      return '<tr><td style="padding:4px 12px 4px 0">' + escapeHtml(label) + '</td>' +
+        '<td style="padding:4px 12px 4px 0">' + state + '</td>' +
+        '<td style="padding:4px 0;color:var(--text-muted);white-space:normal">' +
+        escapeHtml(o.ok ? (extra || '') : (o.error || '')) + '</td></tr>';
+    }
+
+    const counts = function (rows) {
+      return (rows || []).map(function (s) {
+        return escapeHtml(s.name) + ' ' + s.count;
+      }).join(' &middot; ');
+    };
+
+    const ts = r.timesheets_v1;
+    const cost = r.schedule_costs;
+
+    out.innerHTML =
+      '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">' +
+        escapeHtml(r.organisation || 'organisation not named') + ' &middot; week of ' +
+        escapeHtml(r.window.start) + ' to ' + escapeHtml(r.window.end) +
+      '</div>' +
+
+      // The conclusions first. The counts below are the evidence for them, and
+      // a reader who stops after the first block should still have the answer.
+      (r.verdicts.length
+        ? '<div style="margin-bottom:16px">' + r.verdicts.map(function (v) {
+            return '<div class="gap-item" style="white-space:normal;margin-bottom:6px">' + escapeHtml(v) + '</div>';
+          }).join('') + '</div>'
+        : '<div class="gap-item" style="margin-bottom:16px">Nothing conclusive. Read the counts below.</div>') +
+
+      '<table style="font-size:13px;border-collapse:collapse;width:100%">' +
+        status(r.me, 'me', r.organisation || '') +
+        status(r.sections, 'sections', r.sections.items.length + ' section(s)') +
+        status(r.roles, 'roles', r.roles.names.length + ' role(s)') +
+        status(r.shifts, 'shifts', r.shifts.total + ' shift(s): ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
+        status(r.shift_slots, 'shift-slots', r.shift_slots.published_only + ' published-only, ' + r.shift_slots.incl_unpublished + ' incl. unpublished; ' + r.shift_slots.assigned + ' assigned') +
+        status(cost, 'schedule-costs', cost.rows + ' row(s), section total ' + (cost.total === null ? 'n/a' : cost.total.toFixed(2))) +
+        status(ts, 'timesheets v1' + (ts.encoding ? ' (' + escapeHtml(ts.encoding) + ')' : ''), ts.work_hours + ' work-hour row(s), ' + ts.distinct_staff + ' distinct staff') +
+      '</table>' +
+
+      (r.shifts.by_section.length
+        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Shifts by section:</strong> ' + counts(r.shifts.by_section) + '</div>'
+        : '') +
+      (ts.by_section.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work hours by section:</strong> ' + counts(ts.by_section) + '</div>'
+        : '') +
+      // The real field list decides whether hours are a subtraction or must be
+      // rebuilt from clock attempts, and the published spec understates it.
+      (ts.work_hour_fields.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work-hour fields:</strong> ' + escapeHtml(ts.work_hour_fields.join(', ')) + '</div>'
+        : '') +
+      (r.sections.items.length
+        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Sections:</strong> ' +
+          r.sections.items.map(function (s) { return escapeHtml(s.name + (s.tag ? ' [' + s.tag + ']' : '')); }).join(' &middot; ') + '</div>'
+        : '') +
+      (r.roles.names.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Roles:</strong> ' + escapeHtml(r.roles.names.join(', ')) + '</div>'
+        : '') +
+
+      // Stated on the page, not only in the code. With Xero the protection is a
+      // scope we refused and cannot use by accident; here every payroll
+      // endpoint is on the free surface and reachable with this token, so not
+      // calling them is the whole of it, and the next person to edit this
+      // should know that before they add one.
+      '<div style="margin-top:16px;font-size:12px;color:var(--text-muted);white-space:normal">' +
+        '<strong>Never called:</strong> ' + escapeHtml(r.not_called.join(', ')) + '. ' +
+        'None of them is gated &mdash; every one is reachable with this token. Not calling them is the entire protection.' +
+      '</div>';
+  });
+
   document.getElementById('meta-discover-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
     out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking Meta&hellip;</p>';

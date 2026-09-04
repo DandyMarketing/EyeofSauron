@@ -19,6 +19,7 @@ import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf } from './ai/data-domains.js';
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
+import { probeStaffAny } from './lib/staffany-probe.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -921,6 +922,44 @@ app.get('/admin/api/meta/discover', async (c) => {
     // A missing token throws rather than returning an empty list, and the
     // message says what to do about it -- surface it as-is.
     return c.json({ accounts: [], errors: [String(e?.message ?? e)] });
+  }
+});
+
+/**
+ * What does StaffAny give us today?
+ *
+ * A button rather than a terminal command, and that is the whole reason it
+ * exists here. Everything else in this system ships through GitHub and runs on
+ * Railway; this was the one diagnostic that needed a local clone, a CLI login
+ * and a key on somebody's laptop. Railway has no clean way to run a one-off --
+ * a service with no cron restarts on exit and crash-loops, and repointing a
+ * scheduled service's start command is what left Ingest-Meta running the
+ * classifier for eleven days while showing green.
+ *
+ * Not on page load: it is nine calls to a third party. It is run when setting
+ * up, and each time StaffAny changes something -- which they have said they
+ * will, since the v2 experimental endpoints are untested on their side and they
+ * are planning that testing now.
+ */
+app.get('/admin/api/staffany/probe', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const key = process.env.STAFFANY_API_KEY;
+  // Named plainly. A missing variable and a refused token produce the same
+  // empty page otherwise, and only one of them is fixed on Railway.
+  if (!key) {
+    return c.json({ error: 'STAFFANY_API_KEY is not set on this service. Add it as a sealed variable on the web service, not only on the job that first used it.' }, 400);
+  }
+
+  try {
+    return c.json(await probeStaffAny({
+      key,
+      start: c.req.query('start'),
+      end: c.req.query('end'),
+    }));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message ?? e) }, 500);
   }
 });
 
