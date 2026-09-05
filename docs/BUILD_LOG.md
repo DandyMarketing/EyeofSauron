@@ -86,6 +86,52 @@ errors so genuine data errors still fail fast.
 
 ---
 
+### 1.5 A permissions boundary that returns an empty success
+**Symptom.** StaffAny's `shifts`, `shift-slots` and `timesheets` endpoints
+returned **HTTP 200 with zero rows** for three separate complete weeks at a
+group with seven configured sections and thirty-seven roles. The probe
+concluded, in writing, that the weeks had probably not been rostered. Khai
+could see those shifts on his screen.
+**Root cause.** The requests named no `sectionIds`. **The API silently scopes
+to the sections the caller belongs to**, and the token's user belongs to
+exactly one — `The Dandy Collection`, the group section, which has no shifts in
+it. Passing the six venue section ids explicitly turned three weeks of clean
+green results into `403 insufficientPermission — You are not allowed to view
+the timesheets for these sections: <six ids>. Please contact the respective
+section's owner`.
+**Fix.** Always name the sections. The probe now sends `sectionIds` on every
+roster and timesheet call, reports the request form that actually returned
+rows, and compares the caller's section memberships against the full section
+list.
+**Recurs?** **Every customer, and on any multi-tenant source.**
+
+**This is section 1's pattern with a new cause.** Every other entry there is a
+*pagination* limit that drops rows. This one is a *permissions* limit that
+drops rows, and it is worse in one specific way: a truncated page still returns
+something, so a total of zero at least looks odd. Here the correct answer for
+the scope requested genuinely *was* zero, so the response was accurate,
+successful, and useless.
+
+**An org-level `owner` with thirty-seven permission scopes read nothing.**
+`accessLevel` was `owner` and the scope list included `STAFF_VIEW`,
+`TIMESHEET_EDIT_ALL` and `PAYROLL_VIEW`. Section membership is a **separate
+axis** that those scopes do not satisfy, so every signal we would naturally
+check said full access. That is the trap: the permission model has two
+dimensions and only one of them is visible on the thing called "permissions".
+
+**The rule this leaves.** On any source where the caller has a scope of its
+own, an empty success is a fault until proven otherwise — and the way to prove
+it is to **name the scope explicitly and see whether the answer changes from
+silence to a refusal**. A 403 is a good outcome here. It is the only response
+that told us the truth.
+
+**What it would have cost unfixed.** The ingest would have run nightly, logged
+success, and written zero labour rows for ever. `checkDataGaps` watches for
+missing *days*, not for a source that consistently returns nothing, so the
+watchdog would have been green too.
+
+---
+
 ## 2. Data that is valid but wrong
 
 ### 2.1 Implausible year passed date validation

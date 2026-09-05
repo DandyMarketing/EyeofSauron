@@ -516,14 +516,47 @@ export async function probeStaffAny(opts: {
   const referenceOk = sectionRows.length > 0 && roleNames.length > 0;
   const nothingTransactional = shiftRows.length === 0 && slotRows.length === 0 && workHours.length === 0;
 
-  if (referenceOk && nothingTransactional) {
+  /**
+   * A REFUSAL naming sections is not a guess, so it is not worded as one.
+   *
+   * Confirmed 5 Sep 2026. Naming the sections turned three weeks of silent
+   * empty successes into `403 insufficientPermission: You are not allowed to
+   * view the timesheets for these sections: <six ids>. Please contact the
+   * respective section's owner`. That is the venue sections, all of them, and
+   * it settles what the counts alone never could.
+   */
+  const refused = tsOutcome.status === 403 || /insufficientPermission|not allowed to view/i.test(tsOutcome.error ?? '');
+  const refusedSectionIds = (tsOutcome.error ?? '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) ?? [];
+
+  if (refused) {
+    verdicts.push(
+      `CONFIRMED: this token is REFUSED on ${refusedSectionIds.length || 'several'} section(s). StaffAny returned 403 insufficientPermission naming them, so the records exist and we cannot read them. Nothing here is a question for the venues or for StaffAny support — someone with rights over each venue section adds this integration user to it, on a StaffAny admin screen, and the probe starts returning rows.`,
+    );
+    verdicts.push(
+      'Note what happened WITHOUT the section ids: 200 with zero rows, three weeks running. The API scopes silently to the sections you belong to, so an ingest that omits sectionIds would run green every night and write nothing. Always name the sections, and treat an empty success on this API as a fault until proven otherwise.',
+    );
+  } else if (referenceOk && nothingTransactional) {
     verdicts.push(
       `Reference data reads perfectly (${sectionRows.length} sections, ${roleNames.length} roles) and every transactional endpoint is empty: no shifts, no assignments, no clocked hours. Nobody configures an organisation this thoroughly without rostering in it, so the likelier reading is that this token cannot SEE the records rather than that they do not exist. Check the access level and section memberships below before asking the venues.`,
     );
   }
 
-  if (meV1.ok && mySections.length === 0) {
-    verdicts.push('This token\'s user belongs to NO sections. StaffAny tie data access to permission groups, so a user attached to no section is the straightforward explanation for empty rosters and empty timesheets. Ask StaffAny to attach the integration user to every venue section, which needs no experimental flag.');
+  /**
+   * Belonging to SOME sections is as much a problem as belonging to none, and
+   * the first version only checked for none. This token's user is an
+   * org-level owner attached to exactly one section -- the group one, which
+   * has no shifts in it -- which reads as access until you compare the two
+   * lists.
+   */
+  if (meV1.ok && sections.ok) {
+    const missing = sectionRows.filter(s => !mySections.includes(s.name));
+    if (mySections.length === 0) {
+      verdicts.push('This token\'s user belongs to NO sections. StaffAny tie data access to permission groups, so this alone explains empty rosters and empty timesheets. Attach the integration user to every venue section; it needs no experimental flag.');
+    } else if (missing.length > 0) {
+      verdicts.push(
+        `This token's user belongs to ${mySections.length} of ${sectionRows.length} sections and is NOT a member of: ${missing.map(s => s.name).join(', ')}. Access level is "${accessLevel ?? 'unknown'}" at organisation level, and section membership is a SEPARATE axis that gates roster and timesheet reads — so an org owner can hold every scope and still read nothing.`,
+      );
+    }
   }
 
   if (missingCostScopes.length > 0) {
