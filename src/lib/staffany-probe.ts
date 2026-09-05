@@ -76,6 +76,8 @@ export interface StaffAnyProbeResult {
   sections: Outcome & { items: SectionRow[] };
   roles: Outcome & { names: string[] };
   shifts: Outcome & {
+    /** Which of the four request forms actually returned rows. */
+    attempt: string | null;
     total: number;
     published: number;
     unpublished: number;
@@ -152,12 +154,15 @@ export async function probeStaffAny(opts: {
 
   async function call(
     path: string,
-    query: Record<string, string | undefined> = {},
+    query: Record<string, string | string[] | undefined> = {},
     payload?: unknown,
   ): Promise<Probe> {
+    // An array becomes a repeated key -- sectionIds=a&sectionIds=b -- which is
+    // OpenAPI's default `form` style with explode true, and the only encoding
+    // the spec's array parameters can be read as.
     const qs = Object.entries(query)
       .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`)
+      .flatMap(([k, v]) => (Array.isArray(v) ? v : [v as string]).map(one => `${k}=${encodeURIComponent(one)}`))
       .join('&');
 
     // The v1 read endpoints take their filters in a POST body rather than a
@@ -252,13 +257,66 @@ export async function probeStaffAny(opts: {
    * a permission question. Nothing at all means the week genuinely was not
    * built here, which is a question for the venues.
    */
-  const shifts = await call('/workspace/v2/shifts', {
-    start: `${START}T00:00:00Z`,
-    end: `${END}T23:59:59Z`,
-    limit: '100',
-    includeUnpublished: 'true',
-  });
+  /**
+   * FOUR COMBINATIONS, because two independent things could each explain zero.
+   *
+   * Observed 5 Sep 2026: shifts, shift-slots and timesheets all returned 200
+   * with zero rows for three separate weeks that were certainly worked, at an
+   * organisation with seven configured sections and thirty-seven roles.
+   *
+   * Candidate one: SECTION SCOPE. `GET /workspace/v1/groups` says this token's
+   * user belongs to exactly one section -- The Dandy Collection, the group
+   * section -- and not to any of the six venue sections where shifts live. The
+   * spec says of the sibling sales endpoint that "sectionIds must be a strict
+   * subset of the caller-visible section IDs", so caller-visibility is a real
+   * concept here, and omitting the parameter may resolve to the caller's own
+   * sections rather than to everything.
+   *
+   * Candidate two: DATE FORMAT. The parameters are declared `date-time`, and
+   * this spec has now been wrong three times about this API -- schedule-costs
+   * declared its dates `integer` and demanded YYYY-MM-DD, shift-slots capped
+   * `limit` at 100 without saying so, and timesheets required a member of
+   * `includes` the spec presents as optional. A plain date is worth trying
+   * before believing an empty week.
+   *
+   * Both are cheap and neither can be reasoned out from the document, so all
+   * four are tried and the combination that returns rows is reported. Guessing
+   * one and getting a 200 with nothing in it is indistinguishable from a
+   * business that does not roster, which is exactly the wrong conclusion this
+   * probe has already drawn once.
+   */
+  const allSectionIds: string[] = items(sections).map((s: any) => s.id);
+
+  const attempts: Array<{ label: string; start: string; end: string; sectionIds?: string[] }> = [
+    { label: 'ISO + all sectionIds', start: `${START}T00:00:00Z`, end: `${END}T23:59:59Z`, sectionIds: allSectionIds },
+    { label: 'ISO, no sectionIds',   start: `${START}T00:00:00Z`, end: `${END}T23:59:59Z` },
+    { label: 'plain date + all sectionIds', start: START, end: END, sectionIds: allSectionIds },
+    { label: 'plain date, no sectionIds',   start: START, end: END },
+  ];
+
+  let shifts: Probe = { ok: false, status: 0, body: null };
+  let shiftAttempt: string | null = null;
+
+  for (const a of attempts) {
+    const got = await call('/workspace/v2/shifts', {
+      start: a.start,
+      end: a.end,
+      limit: '100',
+      includeUnpublished: 'true',
+      sectionIds: a.sectionIds,
+    });
+    // The first attempt is kept as the reported outcome so a total failure
+    // still shows a status and a body rather than the last thing tried.
+    if (shiftAttempt === null) { shifts = got; shiftAttempt = a.label; }
+    if (got.ok && items(got).length > 0) { shifts = got; shiftAttempt = a.label; break; }
+  }
+
   const shiftRows = items(shifts);
+  const winning = attempts.find(a => a.label === shiftAttempt) ?? attempts[0];
+
+  if (shiftRows.length > 0 && shiftAttempt !== attempts[0].label) {
+    verdicts.push(`Shifts only came back with "${shiftAttempt}". The first form returned nothing, so the earlier empty weeks were our request and not an empty roster. Whatever this says must be carried into the ingest exactly.`);
+  }
   const publishedShifts = shiftRows.filter((r: any) => r.isPublished).length;
 
   const shiftsBySection = new Map<string, number>();
@@ -272,20 +330,25 @@ export async function probeStaffAny(opts: {
    * Asked BOTH ways, because `includeUnpublished` defaults to false and an
    * empty week is indistinguishable from an unpublished one from outside.
    */
+  // Whatever form worked for shifts, on the assumption the sibling endpoint
+  // behaves the same way. If shifts found nothing either, this is the first
+  // attempt, which is the form the ingest would have used.
   const slotsPublished = await call('/workspace/v2/shift-slots', {
-    start: `${START}T00:00:00Z`,
-    end: `${END}T23:59:59Z`,
+    start: winning.start,
+    end: winning.end,
     limit: '100',  // the spec caps this at 100; 500 was rejected outright
+    sectionIds: winning.sectionIds,
   });
 
   let slots = slotsPublished;
   let inclUnpublishedCount = 0;
   if (slotsPublished.ok && items(slotsPublished).length === 0) {
     slots = await call('/workspace/v2/shift-slots', {
-      start: `${START}T00:00:00Z`,
-      end: `${END}T23:59:59Z`,
+      start: winning.start,
+      end: winning.end,
       limit: '100',
       includeUnpublished: 'true',
+      sectionIds: winning.sectionIds,
     });
     inclUnpublishedCount = items(slots).length;
   } else {
@@ -402,6 +465,14 @@ export async function probeStaffAny(opts: {
        */
       includes: ['shiftRecords', 'clockAttempts', 'workHours'],
       limit: 100,
+      /**
+       * Named explicitly for the same reason as the roster endpoints above.
+       * This token's user belongs to one section, the group one, and every
+       * shift lives in the six venue sections it does not belong to -- so a
+       * request that lets the server choose the scope may be choosing an empty
+       * one.
+       */
+      sectionIds: allSectionIds.length > 0 ? allSectionIds : undefined,
     });
     tsOutcome = outcome(ts);
     if (!ts.ok) continue;
@@ -477,6 +548,7 @@ export async function probeStaffAny(opts: {
     roles: { ...outcome(roles), names: roleNames },
     shifts: {
       ...outcome(shifts),
+      attempt: shiftAttempt,
       total: shiftRows.length,
       published: publishedShifts,
       unpublished: shiftRows.length - publishedShifts,

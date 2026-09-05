@@ -1143,7 +1143,10 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
         status(r.groups, 'my sections', r.groups.sections.length ? r.groups.sections.join(', ') : 'NONE') +
         status(r.sections, 'sections', r.sections.items.length + ' section(s)') +
         status(r.roles, 'roles', r.roles.names.length + ' role(s)') +
-        status(r.shifts, 'shifts', r.shifts.total + ' shift(s): ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
+        // Which request form worked is carried on the row, because it is what
+        // the ingest has to copy exactly and it is invisible otherwise.
+        status(r.shifts, 'shifts' + (r.shifts.attempt ? ' (' + escapeHtml(r.shifts.attempt) + ')' : ''),
+          r.shifts.total + ' shift(s): ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
         status(r.shift_slots, 'shift-slots', r.shift_slots.published_only + ' published-only, ' + r.shift_slots.incl_unpublished + ' incl. unpublished; ' + r.shift_slots.assigned + ' assigned') +
         status(cost, 'schedule-costs', cost.rows + ' row(s), section total ' + (cost.total === null ? 'n/a' : cost.total.toFixed(2))) +
         status(ts, 'timesheets v1' + (ts.encoding ? ' (' + escapeHtml(ts.encoding) + ')' : ''), ts.work_hours + ' work-hour row(s), ' + ts.distinct_staff + ' distinct staff') +
