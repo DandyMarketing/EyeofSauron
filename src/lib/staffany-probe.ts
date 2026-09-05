@@ -339,7 +339,22 @@ export async function probeStaffAny(opts: {
   for (const [label, from, to] of encodings) {
     const ts = await call('/workspace/v1/timesheets', {}, {
       range: { from, to },
-      includes: ['shiftRecords', 'workHours'],
+      /**
+       * All three, because the API requires it and the spec does not say so.
+       *
+       * `includes` is documented as an optional array with an enum of three
+       * values, which reads as "pick the ones you want". Asking for
+       * shiftRecords and workHours returned 500 with `"clockAttempts" is
+       * required`. So the members are not independent: leave one out and the
+       * request is rejected, with a server error rather than a validation
+       * error, which is the sort of thing you only learn by asking.
+       *
+       * clockAttempts is a person clocking in and out. It is requested because
+       * the endpoint will not answer otherwise, and it is NOT read -- only
+       * workHours and shiftRecords are counted below, and neither the times nor
+       * the people reach the caller.
+       */
+      includes: ['shiftRecords', 'clockAttempts', 'workHours'],
       limit: 100,
     });
     tsOutcome = outcome(ts);
