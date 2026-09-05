@@ -57,6 +57,22 @@ export interface StaffAnyProbeResult {
   window: { start: string; end: string };
   organisation: string | null;
   me: Outcome;
+  /**
+   * What this token is ALLOWED to do, from the API rather than from our notes.
+   *
+   * `GET /workspace/v1/me` returns accessLevel and a list of RBAC permission
+   * scopes. That is the difference between "the week was not rostered" and
+   * "this token cannot see rosters", which three endpoints returning 200 with
+   * zero rows cannot distinguish on their own -- and which StaffAny named
+   * themselves: access is tied to the user's permission groups.
+   *
+   * The endpoint also returns the user's NAME and EMAIL. Neither is read. The
+   * whole point of the probe is that a person's details never reach a screen,
+   * and the token holder is a person too.
+   */
+  permissions: Outcome & { access_level: string | null; scopes: string[] };
+  /** Which sections, teams and roles this token's user actually belongs to. */
+  groups: Outcome & { sections: string[]; teams: string[]; roles: string[] };
   sections: Outcome & { items: SectionRow[] };
   roles: Outcome & { names: string[] };
   shifts: Outcome & {
@@ -170,6 +186,38 @@ export async function probeStaffAny(opts: {
   const me = await call('/workspace/v2/me');
   const org = me.body?.data?.organisation ?? me.body?.data?.org ?? {};
 
+  // --- what is this token allowed to do -------------------------------------
+  /**
+   * Asked FIRST, because it reframes everything below it.
+   *
+   * On 5 Sep 2026 shifts, shift-slots and timesheets all returned 200 with zero
+   * rows for a week that was certainly worked, while sections and roles came
+   * back complete. Nobody configures seven sections and thirty-seven job titles
+   * for a business that does not roster, so "the week was not built" was the
+   * weaker reading and the probe was asserting it. This is the call that tells
+   * the two apart instead of guessing between them.
+   */
+  const meV1 = await call('/workspace/v1/me');
+  // NAME and EMAIL are deliberately not read. See the interface comment.
+  const accessLevel: string | null = meV1.body?.data?.accessLevel ?? null;
+  const scopes: string[] = Array.isArray(meV1.body?.data?.permissions) ? meV1.body.data.permissions : [];
+
+  /**
+   * The three scopes schedule-costs names as its requirements.
+   *
+   * Worth checking even while the endpoint is flag-gated, because when StaffAny
+   * turn the flag on it will fail a second time if these are absent -- and a
+   * second round trip of days is the cost of not having asked now.
+   */
+  const COST_SCOPES = ['STAFF_VIEW', 'EMPLOYEE_WAGE_VIEW', 'COST_DATA_VIEW'];
+  const missingCostScopes = meV1.ok ? COST_SCOPES.filter(s => !scopes.includes(s)) : [];
+
+  const groups = await call('/workspace/v1/groups');
+  const groupRows: any[] = Array.isArray(groups.body?.data) ? groups.body.data : [];
+  const groupNames = (type: string): string[] =>
+    groupRows.filter(g => g.groupType === type).map(g => g.groupDetails?.name).filter(Boolean);
+  const mySections = groupNames('section');
+
   // --- outlets --------------------------------------------------------------
   const sections = await call('/workspace/v2/sections');
   const sectionRows: SectionRow[] = items(sections).map((s: any) => ({
@@ -261,8 +309,6 @@ export async function probeStaffAny(opts: {
 
   if (shiftRows.length > 0 && slotRows.length === 0) {
     verdicts.push('The roster EXISTS but no assignments came back. Shifts are present and shift-slots is empty, so assignments are being withheld from this token rather than absent from the business. That is a permission question for StaffAny, not a question for the venues.');
-  } else if (shiftRows.length === 0 && slotRows.length === 0) {
-    verdicts.push('No shifts and no assignments for this week, published or unpublished. The week was most likely not built in StaffAny at all. Check with the venues before asking StaffAny again.');
   } else if (slotRows.length > 0) {
     const multi = [...rolesPerPersonDay.values()].filter(s => s.size > 1).length;
     verdicts.push(multi === 0
@@ -381,6 +427,38 @@ export async function probeStaffAny(opts: {
     verdicts.push(`${unmappedSections} sectionId(s) in the timesheet have no matching section definition. Flag these, do not guess them.`);
   }
 
+  /**
+   * EVERY transactional endpoint empty while the reference data reads perfectly.
+   *
+   * Judged across all three -- shifts, assignments and clocked attendance --
+   * rather than on the roster alone, which is what the earlier version got
+   * wrong. One empty endpoint is ambiguous. Three empty endpoints beside seven
+   * sections and thirty-seven roles is a shape: somebody configured this
+   * organisation carefully, so the records almost certainly exist and this
+   * token cannot see them.
+   *
+   * Stated as the likelier of two readings rather than as a fact, and the
+   * cheaper thing to check is named first, because a week spent waiting on a
+   * vendor for something a permission group would have fixed is the expensive
+   * way to be wrong.
+   */
+  const referenceOk = sectionRows.length > 0 && roleNames.length > 0;
+  const nothingTransactional = shiftRows.length === 0 && slotRows.length === 0 && workHours.length === 0;
+
+  if (referenceOk && nothingTransactional) {
+    verdicts.push(
+      `Reference data reads perfectly (${sectionRows.length} sections, ${roleNames.length} roles) and every transactional endpoint is empty: no shifts, no assignments, no clocked hours. Nobody configures an organisation this thoroughly without rostering in it, so the likelier reading is that this token cannot SEE the records rather than that they do not exist. Check the access level and section memberships below before asking the venues.`,
+    );
+  }
+
+  if (meV1.ok && mySections.length === 0) {
+    verdicts.push('This token\'s user belongs to NO sections. StaffAny tie data access to permission groups, so a user attached to no section is the straightforward explanation for empty rosters and empty timesheets. Ask StaffAny to attach the integration user to every venue section, which needs no experimental flag.');
+  }
+
+  if (missingCostScopes.length > 0) {
+    verdicts.push(`The token is missing ${missingCostScopes.join(', ')}, which schedule-costs lists as its requirements. Even once the experimental flag is on, that endpoint will refuse until these are granted — worth raising in the same message rather than a week later.`);
+  }
+
   const toRows = (m: Map<string, number>): CountRow[] =>
     [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 
@@ -388,6 +466,13 @@ export async function probeStaffAny(opts: {
     window: { start: START, end: END },
     organisation: org.name ?? org.id ?? null,
     me: outcome(me),
+    permissions: { ...outcome(meV1), access_level: accessLevel, scopes },
+    groups: {
+      ...outcome(groups),
+      sections: mySections,
+      teams: groupNames('team'),
+      roles: groupNames('role'),
+    },
     sections: { ...outcome(sections), items: sectionRows },
     roles: { ...outcome(roles), names: roleNames },
     shifts: {

@@ -1075,7 +1075,13 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const staffSection = el('div', 'section');
   staffSection.innerHTML = '<h2>StaffAny (rosters &amp; labour)</h2>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Asks StaffAny what this token can actually reach, for the last complete week. Reads only &mdash; nothing is written, and no payroll, compensation or staff endpoint is called. Re-run it whenever StaffAny change something on their side; the answer is expected to move.</p>' +
+    // Dates, because a single empty week proves nothing on its own. The
+    // endpoint has always accepted them; only the button did not pass them, so
+    // testing another week meant shipping a commit.
+    '<input type="date" id="staffany-start" style="margin-right:6px"> ' +
+    '<input type="date" id="staffany-end" style="margin-right:10px"> ' +
     '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
+    '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Leave the dates blank for the last complete week.</div>' +
     '<div id="staffany-result" style="margin-top:16px"></div>';
   app.appendChild(staffSection);
 
@@ -1083,7 +1089,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     const out = document.getElementById('staffany-result');
     out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking StaffAny. Nine calls, so give it a few seconds&hellip;</p>';
 
-    const r = await api('GET', '/admin/api/staffany/probe');
+    const s = document.getElementById('staffany-start').value;
+    const e = document.getElementById('staffany-end').value;
+    const qs = s && e ? '?start=' + encodeURIComponent(s) + '&end=' + encodeURIComponent(e) : '';
+
+    const r = await api('GET', '/admin/api/staffany/probe' + qs);
     if (r.error) {
       out.innerHTML = '<p style="font-size:13px;color:var(--error);white-space:normal">' + escapeHtml(r.error) + '</p>';
       return;
@@ -1127,6 +1137,10 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
       '<table style="font-size:13px;border-collapse:collapse;width:100%">' +
         status(r.me, 'me', r.organisation || '') +
+        status(r.permissions, 'access level', (r.permissions.access_level || 'none reported') + ' · ' + (r.permissions.scopes.length + ' scope(s)')) +
+        // NONE in the section column is the whole answer when the rosters come
+        // back empty, so it is stated rather than left as an absent list.
+        status(r.groups, 'my sections', r.groups.sections.length ? r.groups.sections.join(', ') : 'NONE') +
         status(r.sections, 'sections', r.sections.items.length + ' section(s)') +
         status(r.roles, 'roles', r.roles.names.length + ' role(s)') +
         status(r.shifts, 'shifts', r.shifts.total + ' shift(s): ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
@@ -1152,6 +1166,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
         : '') +
       (r.roles.names.length
         ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Roles:</strong> ' + escapeHtml(r.roles.names.join(', ')) + '</div>'
+        : '') +
+      // The scope list is what StaffAny will ask for by name if any are
+      // missing, so it is printed in full rather than counted.
+      (r.permissions.scopes.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Permission scopes:</strong> ' + escapeHtml(r.permissions.scopes.join(', ')) + '</div>'
         : '') +
 
       // Stated on the page, not only in the code. With Xero the protection is a

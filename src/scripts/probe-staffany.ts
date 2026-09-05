@@ -33,6 +33,13 @@ console.log('Reads only. Nothing is written, no payroll or compensation endpoint
 console.log(line('me', r.me));
 console.log(`  organisation: ${r.organisation ?? '(not named in response)'}\n`);
 
+console.log(line('permissions (v1/me)', r.permissions));
+console.log(`  access level: ${r.permissions.access_level ?? '(none reported)'}`);
+console.log(`  scopes: ${r.permissions.scopes.join(', ') || '(none)'}`);
+console.log(line('groups', r.groups));
+console.log(`  sections this user belongs to: ${r.groups.sections.join(', ') || 'NONE'}`);
+console.log(`  teams: ${r.groups.teams.join(', ') || 'none'} · roles: ${r.groups.roles.join(', ') || 'none'}\n`);
+
 console.log(line('sections', r.sections));
 for (const s of r.sections.items) console.log(`  ${s.id_prefix}…  ${s.name}${s.tag ? `  [${s.tag}]` : ''}`);
 console.log('');
