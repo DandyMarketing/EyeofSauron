@@ -1086,6 +1086,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     // The mapping, on the same panel as the probe, because the probe is what
     // tells you a new section exists and this is where you act on it.
     '<h4 style="margin-top:24px">Section mapping</h4>' +
+    '<button id="staffany-refresh-btn" class="btn" style="margin-bottom:10px">Refresh sections from StaffAny</button>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
     '<div id="staffany-sections">Loading&hellip;</div>';
   app.appendChild(staffSection);
@@ -1150,6 +1151,17 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     }
   }
   loadStaffAnySections();
+
+  document.getElementById('staffany-refresh-btn').addEventListener('click', async () => {
+    const out = document.getElementById('staffany-sections');
+    out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">Asking StaffAny&hellip;</p>';
+    const r = await api('POST', '/admin/api/staffany/sections/refresh');
+    if (r.error) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(r.error) + '</p>';
+      return;
+    }
+    loadStaffAnySections();
+  });
 
   document.getElementById('staffany-probe-btn').addEventListener('click', async () => {
     const out = document.getElementById('staffany-result');

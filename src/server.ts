@@ -20,6 +20,7 @@ import { effectiveRole, mayRead, sensitivityOf } from './ai/data-domains.js';
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
+import { fetchSections } from './lib/staffany-client.js';
 import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -984,6 +985,45 @@ app.get('/admin/api/staffany/sections', async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
   return c.json({ sections: data ?? [] });
+});
+
+/**
+ * Pull the section list from StaffAny so it can be mapped.
+ *
+ * A BUTTON rather than a side effect of loading the page, and rather than
+ * something only the ingest does. The ingest records sections too, but that
+ * created a circle: nothing can be mapped until the sections exist, the ingest
+ * is what creates them, and the ingest refuses to run with nothing mapped. The
+ * way out should not be "run the job and ignore the error it prints".
+ *
+ * Not folded into the probe either, which says on its own face that it writes
+ * nothing. A diagnostic that quietly wrote would make its own claim false.
+ *
+ * It updates the NAME and TAG only. venue_id and area are never touched here,
+ * so a rename in StaffAny cannot silently unmap a section somebody confirmed.
+ */
+app.post('/admin/api/staffany/sections/refresh', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const key = process.env.STAFFANY_API_KEY;
+  if (!key) return c.json({ error: 'STAFFANY_API_KEY is not set on this service.' }, 400);
+
+  try {
+    const sections = await fetchSections(key);
+    for (const s of sections) {
+      const { error } = await supabaseAdmin
+        .from('staffany_sections')
+        .upsert(
+          { staffany_section_id: s.id, section_name: s.name, section_tag: s.tag },
+          { onConflict: 'staffany_section_id' },
+        );
+      if (error) return c.json({ error: error.message }, 500);
+    }
+    return c.json({ ok: true, recorded: sections.length });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message ?? e) }, 500);
+  }
 });
 
 app.put('/admin/api/staffany/sections', async (c) => {
