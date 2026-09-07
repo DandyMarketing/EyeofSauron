@@ -122,7 +122,7 @@ const result = aggregateWorkHours(page.rows, mappings);
 const rows = result.rows.filter(r => r.business_date >= START && r.business_date <= END);
 
 console.log(`${rows.length} venue-section-day row(s) to write`);
-console.log(`${result.skipped_rows} row(s) skipped, ${result.costless_rows} row(s) carried no cost`);
+console.log(`${result.skipped_rows} row(s) skipped, ${result.costless_rows} carried no cost, ${result.hourless_rows} carried no hours`);
 
 if (result.unmapped_sections.length > 0) {
   const names = result.unmapped_sections
@@ -158,11 +158,37 @@ const totals = rows.reduce(
     hours: a.hours + r.actual_hours,
     cost: a.cost + r.total_cost,
     overtime: a.overtime + r.overtime_cost,
+    otHours: a.otHours + r.overtime_hours,
   }),
-  { hours: 0, cost: 0, overtime: 0 },
+  { hours: 0, cost: 0, overtime: 0, otHours: 0 },
 );
 
 console.log(`Rostered labour: ${totals.hours.toFixed(1)} hours, ${totals.cost.toFixed(2)} cost, of which ${totals.overtime.toFixed(2)} overtime.`);
+
+/**
+ * The implied overtime rate, as ONE blended figure.
+ *
+ * Cost over hours, across everybody, so the rate can be checked against what
+ * the business believes it pays without any individual's pay going anywhere
+ * near this system. A per-person rate is that person's pay; a group average
+ * over dozens of people is a business parameter.
+ *
+ * Worth watching rather than merely confirming once: if it drifts, either the
+ * rate changed or the mix of who works overtime did, and both are worth a
+ * question the week they happen rather than at year end.
+ */
+if (totals.otHours > 0) {
+  const rate = totals.overtime / totals.otHours;
+  console.log(`Implied overtime rate: ${rate.toFixed(2)} per hour over ${totals.otHours.toFixed(1)} overtime hour(s).`);
+}
+
+// A zero denominator looks like an answer, which is why it fails rather than
+// warns. Sales per labour hour and every rung above it divide by this.
+if (totals.hours === 0 && rows.length > 0) {
+  console.error('\nHOURS ARE ZERO across every row while cost is not. The hours field did not parse.');
+  console.error('Do not use this data — sales per labour hour would divide by zero and report nothing wrong.');
+  process.exit(1);
+}
 
 // Reported separately, because it is deliberately absent from every venue's
 // labour percentage and a reader comparing this against the P&L needs to know

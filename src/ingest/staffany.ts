@@ -63,6 +63,14 @@ export interface LabourDay {
   area: string;
   scheduled_hours: number;
   actual_hours: number;
+  /**
+   * Overtime hours, so the implied rate can be CHECKED rather than trusted.
+   *
+   * Without it, overtime_cost is a number nothing in the system can verify.
+   * With it, cost over hours is a division that would show a rate change the
+   * week it happened.
+   */
+  overtime_hours: number;
   basic_cost: number;
   overtime_cost: number;
   weekend_cost: number;
@@ -81,6 +89,14 @@ export interface AggregateResult {
   skipped_rows: number;
   /** Rows carrying no usable cost at all, which would understate a total. */
   costless_rows: number;
+  /**
+   * Rows whose HOURS did not parse, counted separately from costless ones.
+   *
+   * The first ingest wrote 46,318.00 of cost against 0.0 hours and reported
+   * success. Hours are the denominator of sales per labour hour and of every
+   * rung above it, so a silent zero there is worse than a missing figure.
+   */
+  hourless_rows: number;
 }
 
 const num = (v: unknown): number => {
@@ -119,20 +135,31 @@ export function businessDateOf(startTimeUtc: string, tz: string = VENUE_TZ): str
   return d.toISOString().slice(0, 10);
 }
 
+export interface Components {
+  basic: number; overtime: number; weekend: number; event: number; other: number; total: number;
+}
+
 /**
- * Sum a cost field, whatever shape it arrives in.
+ * Split a component field, whatever shape it arrives in.
  *
- * Measured as `{ basicCost, eventCost, weekendCost, overtimeCost }`. The four
- * are named because the split is the useful half -- a total says labour was
- * expensive and the components say why -- but anything else numeric lands in
- * `other_cost` rather than being dropped, so an unknown fifth member added by
- * StaffAny later shows up as an unexplained bucket instead of silently
+ * COST AND HOURS ARE THE SAME SHAPE, and finding that out cost a run. The cost
+ * field was known to be an object -- `{ basicCost, eventCost, weekendCost,
+ * overtimeCost }` -- and `actualHours` was assumed to be a plain number because
+ * its name is singular and hours are a number. The first real ingest wrote
+ * 46,318.00 of cost against 0.0 hours: every hours field had failed to parse,
+ * silently, and a zero denominator is worse than a missing one because it looks
+ * like an answer.
+ *
+ * So this matches on the KEYWORD rather than the exact key, and handles both a
+ * bare number and an object. `basicCost` and `basicHours` classify the same
+ * way, and a plain number still totals.
+ *
+ * Anything unrecognised lands in `other` rather than being dropped, so a member
+ * StaffAny adds later shows up as an unexplained bucket instead of quietly
  * shrinking the total.
  */
-export function splitCost(raw: unknown): {
-  basic: number; overtime: number; weekend: number; event: number; other: number; total: number;
-} {
-  const out = { basic: 0, overtime: 0, weekend: 0, event: 0, other: 0, total: 0 };
+export function splitComponents(raw: unknown): Components {
+  const out: Components = { basic: 0, overtime: 0, weekend: 0, event: 0, other: 0, total: 0 };
 
   if (typeof raw === 'number' || typeof raw === 'string') {
     const n = num(raw);
@@ -143,17 +170,19 @@ export function splitCost(raw: unknown): {
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const n = num(value);
     if (n === 0) continue;
-    switch (key) {
-      case 'basicCost': out.basic += n; break;
-      case 'overtimeCost': out.overtime += n; break;
-      case 'weekendCost': out.weekend += n; break;
-      case 'eventCost': out.event += n; break;
-      default: out.other += n; break;
-    }
+    const k = key.toLowerCase();
+    if (k.includes('overtime')) out.overtime += n;
+    else if (k.includes('weekend')) out.weekend += n;
+    else if (k.includes('event')) out.event += n;
+    else if (k.includes('basic')) out.basic += n;
+    else out.other += n;
     out.total += n;
   }
   return out;
 }
+
+/** Kept as a name because cost is what most callers mean. */
+export const splitCost = splitComponents;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -167,6 +196,7 @@ export function aggregateWorkHours(
   const unmapped = new Set<string>();
   let skipped = 0;
   let costless = 0;
+  let hourless = 0;
 
   for (const row of rows) {
     /**
@@ -196,7 +226,7 @@ export function aggregateWorkHours(
         business_date: businessDate,
         staffany_section_id: mapping.staffany_section_id,
         area: mapping.area,
-        scheduled_hours: 0, actual_hours: 0,
+        scheduled_hours: 0, actual_hours: 0, overtime_hours: 0,
         basic_cost: 0, overtime_cost: 0, weekend_cost: 0, event_cost: 0, other_cost: 0,
         total_cost: 0, staff_count: 0,
         people: new Set<string>(),
@@ -204,8 +234,13 @@ export function aggregateWorkHours(
       acc.set(key, day);
     }
 
-    day.scheduled_hours += num(row.scheduledHours);
-    day.actual_hours += num(row.actualHours);
+    // Hours are an object of the same shape as cost. Reading them as a plain
+    // number wrote a whole fortnight at zero hours.
+    const actualH = splitComponents(row.actualHours);
+    const hours = actualH.total !== 0 ? actualH : splitComponents(row.scheduledHours);
+    day.scheduled_hours += splitComponents(row.scheduledHours).total;
+    day.actual_hours += actualH.total;
+    day.overtime_hours += hours.overtime;
 
     // Actual where we have it, scheduled as the fallback, and counted when
     // neither exists -- a row silently contributing zero would understate the
@@ -213,6 +248,7 @@ export function aggregateWorkHours(
     const actual = splitCost(row.actualCosts);
     const cost = actual.total !== 0 ? actual : splitCost(row.scheduledCosts);
     if (cost.total === 0) costless++;
+    if (actualH.total === 0 && splitComponents(row.scheduledHours).total === 0) hourless++;
 
     day.basic_cost += cost.basic;
     day.overtime_cost += cost.overtime;
@@ -245,5 +281,6 @@ export function aggregateWorkHours(
     unmapped_sections: [...unmapped],
     skipped_rows: skipped,
     costless_rows: costless,
+    hourless_rows: hourless,
   };
 }

@@ -676,9 +676,26 @@ export async function probeStaffAny(opts: {
     if (hrs !== null) hoursBySectionActual.set(key, (hoursBySectionActual.get(key) ?? 0) + hrs);
   }
 
-  // The TYPE of the field, when nothing summed. `actualCosts` is plural and
-  // could be an object; saying so beats reporting a total of zero, which would
-  // read as "these people cost nothing".
+  /**
+   * The TYPE of a field when nothing summed, because a total of zero reads as
+   * an answer.
+   *
+   * `actualHours` is reported the same way for the same reason, and that is not
+   * hypothetical: the first ingest wrote a fortnight of cost against zero hours
+   * because the hours field is an object too and was read as a number.
+   */
+  const shapeOf = (v: any): string | null =>
+    v === undefined || v === null ? null
+      : Array.isArray(v) ? 'array'
+      : typeof v === 'object' ? `object{${Object.keys(v).join(',')}}`
+      : typeof v;
+
+  const hoursField = workHours.find(w => w.actualHours !== undefined && w.actualHours !== null)?.actualHours;
+  const hoursFieldType = shapeOf(hoursField);
+  if (hoursFieldType && !hoursFieldType.startsWith('number')) {
+    verdicts.push(`actualHours is ${hoursFieldType}, not a number. Anything reading it as one records zero hours against real cost — which is a denominator that looks like an answer.`);
+  }
+
   const costField = workHours.find(w => w.actualCosts !== undefined && w.actualCosts !== null)?.actualCosts;
   const costFieldType = costField === undefined ? null
     : Array.isArray(costField) ? 'array'

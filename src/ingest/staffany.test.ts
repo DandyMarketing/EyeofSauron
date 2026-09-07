@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { aggregateWorkHours, businessDateOf, splitCost, DAY_ENDS_AT_HOUR, type SectionMapping } from './staffany.js';
+import { aggregateWorkHours, businessDateOf, splitCost, splitComponents, DAY_ENDS_AT_HOUR, type SectionMapping } from './staffany.js';
 
 /**
  * These pin the three things that decide whether a labour figure is honest:
@@ -165,4 +165,48 @@ test('a group section is mapped, not unmapped', () => {
   );
   assert.deepEqual(result.unmapped_sections, []);
   assert.equal(result.skipped_rows, 0);
+});
+
+test('hours arrive as an object and must not read as zero', () => {
+  // The bug that wrote a fortnight at 46,318.00 cost and 0.0 hours. `actualHours`
+  // is singular and sounds like a number, and it is the same object shape as
+  // cost. A zero denominator looks like an answer, which is what makes it worse
+  // than a missing one.
+  const { rows } = aggregateWorkHours(
+    [row({
+      actualHours: { basicHours: 8, overtimeHours: 2 },
+      scheduledHours: { basicHours: 8 },
+    })],
+    MAPPINGS,
+  );
+
+  assert.equal(rows[0].actual_hours, 10);
+  assert.equal(rows[0].overtime_hours, 2);
+  assert.equal(rows[0].scheduled_hours, 8);
+});
+
+test('a plain numeric hours field still works', () => {
+  const { rows } = aggregateWorkHours([row({ actualHours: 7.5, scheduledHours: 8 })], MAPPINGS);
+  assert.equal(rows[0].actual_hours, 7.5);
+  assert.equal(rows[0].scheduled_hours, 8);
+});
+
+test('components classify on the keyword, not the exact key', () => {
+  // basicCost and basicHours must land in the same bucket, or one of the two
+  // fields silently becomes all-other.
+  assert.equal(splitComponents({ overtimeCost: 5 }).overtime, 5);
+  assert.equal(splitComponents({ overtimeHours: 5 }).overtime, 5);
+  assert.equal(splitComponents({ weekendHours: 3 }).weekend, 3);
+  assert.equal(splitComponents({ somethingNew: 9 }).other, 9);
+});
+
+test('rows with no hours are counted apart from rows with no cost', () => {
+  // They are different faults. Cost missing understates the total; hours
+  // missing destroys every rate built on top of it.
+  const r = aggregateWorkHours(
+    [row({ actualHours: null, scheduledHours: null })],
+    MAPPINGS,
+  );
+  assert.equal(r.hourless_rows, 1);
+  assert.equal(r.costless_rows, 0);
 });
