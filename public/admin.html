@@ -1082,8 +1082,74 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     '<input type="date" id="staffany-end" style="margin-right:10px"> ' +
     '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
     '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Leave the dates blank for the last complete week.</div>' +
-    '<div id="staffany-result" style="margin-top:16px"></div>';
+    '<div id="staffany-result" style="margin-top:16px"></div>' +
+    // The mapping, on the same panel as the probe, because the probe is what
+    // tells you a new section exists and this is where you act on it.
+    '<h4 style="margin-top:24px">Section mapping</h4>' +
+    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
+    '<div id="staffany-sections">Loading&hellip;</div>';
   app.appendChild(staffSection);
+
+  async function loadStaffAnySections() {
+    const out = document.getElementById('staffany-sections');
+    const res = await api('GET', '/admin/api/staffany/sections');
+    const list = res.sections || [];
+
+    if (res.error) {
+      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      return;
+    }
+    if (list.length === 0) {
+      // Sections are recorded by the ingest, so an empty list means it has not
+      // run rather than that StaffAny has none.
+      out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">No sections recorded yet. They appear the first time the labour ingest runs.</p>';
+      return;
+    }
+
+    const opts = '<option value="">— unmapped —</option>' +
+      venues.map(function (v) { return '<option value="' + v.id + '">' + escapeHtml(v.name) + '</option>'; }).join('');
+
+    out.innerHTML = list.map(function (s) {
+      const mapped = s.venue_id && s.area;
+      return '<div class="file-item" style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<span style="min-width:200px">' + escapeHtml(s.section_name) +
+          (s.section_tag ? ' <span style="color:var(--text-muted)">[' + escapeHtml(s.section_tag) + ']</span>' : '') + '</span>' +
+        '<select data-section="' + escapeHtml(s.staffany_section_id) + '" class="sa-venue" style="min-width:150px">' + opts + '</select>' +
+        '<select data-section="' + escapeHtml(s.staffany_section_id) + '" class="sa-area" style="min-width:110px">' +
+          '<option value="">— area —</option>' +
+          '<option value="BOH">BOH</option><option value="FOH">FOH</option><option value="GROUP">Group</option>' +
+        '</select>' +
+        (mapped
+          ? '<span style="color:var(--success);font-size:12px">mapped</span>'
+          : '<span style="color:var(--error);font-size:12px">NOT INGESTED</span>') +
+        '</div>';
+    }).join('');
+
+    // Selects are populated after insertion rather than by marking `selected`
+    // in the markup, which keeps the option strings identical for every row.
+    for (const s of list) {
+      const v = out.querySelector('.sa-venue[data-section="' + s.staffany_section_id + '"]');
+      const a = out.querySelector('.sa-area[data-section="' + s.staffany_section_id + '"]');
+      if (v) v.value = s.venue_id || '';
+      if (a) a.value = s.area || '';
+    }
+
+    for (const el2 of out.querySelectorAll('.sa-venue, .sa-area')) {
+      el2.addEventListener('change', async function () {
+        const id = this.getAttribute('data-section');
+        const venueEl = out.querySelector('.sa-venue[data-section="' + id + '"]');
+        const areaEl = out.querySelector('.sa-area[data-section="' + id + '"]');
+        const r = await api('PUT', '/admin/api/staffany/sections', {
+          staffany_section_id: id,
+          venue_id: venueEl.value || null,
+          area: areaEl.value || null,
+        });
+        if (r.error) alert(r.error);
+        loadStaffAnySections();
+      });
+    }
+  }
+  loadStaffAnySections();
 
   document.getElementById('staffany-probe-btn').addEventListener('click', async () => {
     const out = document.getElementById('staffany-result');

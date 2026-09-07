@@ -964,6 +964,59 @@ app.get('/admin/api/staffany/probe', async (c) => {
 });
 
 /**
+ * The StaffAny section mapping: which venue, and kitchen or floor.
+ *
+ * The same shape as the Xero tenant mapping and `revel_venue_keys`, and here
+ * for the same reason. Two of the three legal entities behind these venues are
+ * called "Potus" and "20 Craig Road", so nothing in this system resolves a
+ * source key to a venue by matching on a name -- and a section guessed into the
+ * wrong venue would put another venue's labour cost onto this venue's margin
+ * comparison, which is a wrong number that looks entirely reasonable.
+ */
+app.get('/admin/api/staffany/sections', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data, error } = await supabaseAdmin
+    .from('staffany_sections')
+    .select('staffany_section_id, section_name, section_tag, venue_id, area, confirmed_at')
+    .order('section_name');
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ sections: data ?? [] });
+});
+
+app.put('/admin/api/staffany/sections', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { staffany_section_id, venue_id, area } = await c.req.json();
+  if (!staffany_section_id) return c.json({ error: 'staffany_section_id is required' }, 400);
+
+  // GROUP is a real answer, not a fallback. The Dandy Collection section
+  // carries group staff, and folding it into either half of a venue would
+  // corrupt the very split it exists to measure.
+  if (area !== null && !['BOH', 'FOH', 'GROUP'].includes(area)) {
+    return c.json({ error: 'area must be BOH, FOH or GROUP' }, 400);
+  }
+
+  const { error } = await supabaseAdmin
+    .from('staffany_sections')
+    .update({
+      venue_id: venue_id || null,
+      area: area || null,
+      // Who confirmed it and when, because this is a judgement rather than a
+      // fact and somebody may need to ask them about it later.
+      confirmed_at: venue_id && area ? new Date().toISOString() : null,
+      confirmed_by: venue_id && area ? user.id : null,
+    })
+    .eq('staffany_section_id', staffany_section_id);
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
+});
+
+/**
  * Ask Meta which metric names it will accept, per mapped account.
  *
  * One call per candidate per form, so it is slow and deliberately manual. It is
