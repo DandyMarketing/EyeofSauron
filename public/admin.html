@@ -1146,17 +1146,33 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
         // Which request form worked is carried on the row, because it is what
         // the ingest has to copy exactly and it is invisible otherwise.
         status(r.shifts, 'shifts' + (r.shifts.attempt ? ' (' + escapeHtml(r.shifts.attempt) + ')' : ''),
-          r.shifts.total + ' shift(s): ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
+          r.shifts.total + ' shift(s) over ' + r.shifts.pages + ' page(s)' + (r.shifts.truncated ? ' — TRUNCATED' : '') +
+          ': ' + r.shifts.published + ' published, ' + r.shifts.unpublished + ' unpublished') +
         status(r.shift_slots, 'shift-slots', r.shift_slots.published_only + ' published-only, ' + r.shift_slots.incl_unpublished + ' incl. unpublished; ' + r.shift_slots.assigned + ' assigned') +
         status(cost, 'schedule-costs', cost.rows + ' row(s), section total ' + (cost.total === null ? 'n/a' : cost.total.toFixed(2))) +
-        status(ts, 'timesheets v1' + (ts.encoding ? ' (' + escapeHtml(ts.encoding) + ')' : ''), ts.work_hours + ' work-hour row(s), ' + ts.distinct_staff + ' distinct staff') +
+        status(ts, 'timesheets v1' + (ts.encoding ? ' (' + escapeHtml(ts.encoding) + ')' : ''),
+          ts.work_hours + ' work-hour row(s) over ' + ts.pages + ' page(s)' + (ts.truncated ? ' — TRUNCATED' : '') +
+          ', ' + ts.distinct_staff + ' distinct staff') +
+        // Cost on the ungated endpoint, which the spec does not document. The
+        // row says how many carried a number, never what any person earned.
+        status(ts, 'labour cost', ts.cost_rows > 0
+          ? ts.cost_rows + ' of ' + ts.work_hours + ' rows carry a cost'
+          : (ts.cost_field_type ? 'field present, type ' + ts.cost_field_type + ', did not sum' : 'no cost field')) +
       '</table>' +
 
       (r.shifts.by_section.length
         ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Shifts by section:</strong> ' + counts(r.shifts.by_section) + '</div>'
         : '') +
       (ts.by_section.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work hours by section:</strong> ' + counts(ts.by_section) + '</div>'
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work-hour rows by section:</strong> ' + counts(ts.by_section) + '</div>'
+        : '') +
+      (ts.hours_by_section.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Hours by section:</strong> ' + counts(ts.hours_by_section) + '</div>'
+        : '') +
+      // SECTION totals only. A per-person figure is that person's earnings and
+      // never reaches this page.
+      (ts.cost_by_section.length
+        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Cost by section:</strong> ' + counts(ts.cost_by_section) + '</div>'
         : '') +
       // The real field list decides whether hours are a subtraction or must be
       // rebuilt from clock attempts, and the published spec understates it.

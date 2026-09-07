@@ -78,6 +78,9 @@ export interface StaffAnyProbeResult {
   shifts: Outcome & {
     /** Which of the four request forms actually returned rows. */
     attempt: string | null;
+    /** Pages read, and whether we stopped at our own ceiling rather than the end. */
+    pages: number;
+    truncated: boolean;
     total: number;
     published: number;
     unpublished: number;
@@ -103,6 +106,15 @@ export interface StaffAnyProbeResult {
   };
   timesheets_v1: Outcome & {
     encoding: string | null;
+    pages: number;
+    truncated: boolean;
+    /** Cost totalled per section. Never per person -- see the aggregation. */
+    cost_by_section: CountRow[];
+    /** Hours totalled per section, on the same basis. */
+    hours_by_section: CountRow[];
+    /** How many rows carried a numeric cost, and what the field looks like. */
+    cost_rows: number;
+    cost_field_type: string | null;
     shift_records: number;
     work_hours: number;
     distinct_staff: number;
@@ -142,6 +154,15 @@ function outcome(p: Probe): Outcome {
 }
 
 const items = (p: Probe): any[] => (Array.isArray(p.body?.data?.items) ? p.body.data.items : []);
+
+/**
+ * A ceiling on pages, so a cursor that never terminates cannot spin for ever.
+ *
+ * Fifty pages of 100 is 5,000 rows, comfortably more than a week of rosters at
+ * three venues. Hitting it is reported rather than treated as the end of the
+ * data -- that distinction is the entire subject of BUILD_LOG section 1.
+ */
+const MAX_PAGES = 50;
 
 export async function probeStaffAny(opts: {
   key: string;
@@ -186,6 +207,50 @@ export async function probeStaffAny(opts: {
   }
 
   const verdicts: string[] = [];
+
+  /**
+   * Every page, not the first one.
+   *
+   * The first run with working permissions returned exactly 100 shifts, exactly
+   * 100 slots and exactly 100 work-hour rows, and the section breakdowns summed
+   * to precisely 100 in each case. That is the page cap wearing the costume of
+   * a total. `limit` is capped at 100 by the API, so a week of three venues is
+   * always several pages, and reading one of them is how a job reports success
+   * while holding a third of the data.
+   *
+   * This is BUILD_LOG section 1 -- four separate entries, all the same shape --
+   * arriving at a fifth source. The response carries `nextCursor` and `hasMore`
+   * and the earlier version of this probe followed neither.
+   *
+   * `pages` and `truncated` come back with the rows because "we read 3 pages
+   * and the server said there were no more" and "we stopped at our own ceiling"
+   * are different facts, and only one of them means the count is complete.
+   */
+  async function pageAll(
+    path: string,
+    query: Record<string, string | string[] | undefined>,
+  ): Promise<{ probe: Probe; rows: any[]; pages: number; truncated: boolean }> {
+    const rows: any[] = [];
+    let cursor: string | undefined;
+    let first: Probe | null = null;
+    let pages = 0;
+
+    for (; pages < MAX_PAGES; pages++) {
+      const p = await call(path, { ...query, cursor });
+      if (first === null) first = p;
+      if (!p.ok) return { probe: first, rows, pages, truncated: false };
+
+      rows.push(...items(p));
+      const meta = p.body?.data?.meta ?? {};
+      // hasMore is the authority. A nextCursor with hasMore false would loop.
+      if (!meta.hasMore || !meta.nextCursor) {
+        return { probe: first, rows, pages: pages + 1, truncated: false };
+      }
+      cursor = meta.nextCursor;
+    }
+
+    return { probe: first!, rows, pages, truncated: true };
+  }
 
   // --- who are we -----------------------------------------------------------
   const me = await call('/workspace/v2/me');
@@ -296,9 +361,12 @@ export async function probeStaffAny(opts: {
 
   let shifts: Probe = { ok: false, status: 0, body: null };
   let shiftAttempt: string | null = null;
+  let shiftRows: any[] = [];
+  let shiftPages = 0;
+  let shiftTruncated = false;
 
   for (const a of attempts) {
-    const got = await call('/workspace/v2/shifts', {
+    const got = await pageAll('/workspace/v2/shifts', {
       start: a.start,
       end: a.end,
       limit: '100',
@@ -307,11 +375,16 @@ export async function probeStaffAny(opts: {
     });
     // The first attempt is kept as the reported outcome so a total failure
     // still shows a status and a body rather than the last thing tried.
-    if (shiftAttempt === null) { shifts = got; shiftAttempt = a.label; }
-    if (got.ok && items(got).length > 0) { shifts = got; shiftAttempt = a.label; break; }
+    if (shiftAttempt === null) {
+      shifts = got.probe; shiftAttempt = a.label;
+      shiftRows = got.rows; shiftPages = got.pages; shiftTruncated = got.truncated;
+    }
+    if (got.probe.ok && got.rows.length > 0) {
+      shifts = got.probe; shiftAttempt = a.label;
+      shiftRows = got.rows; shiftPages = got.pages; shiftTruncated = got.truncated;
+      break;
+    }
   }
-
-  const shiftRows = items(shifts);
   const winning = attempts.find(a => a.label === shiftAttempt) ?? attempts[0];
 
   if (shiftRows.length > 0 && shiftAttempt !== attempts[0].label) {
@@ -333,29 +406,30 @@ export async function probeStaffAny(opts: {
   // Whatever form worked for shifts, on the assumption the sibling endpoint
   // behaves the same way. If shifts found nothing either, this is the first
   // attempt, which is the form the ingest would have used.
-  const slotsPublished = await call('/workspace/v2/shift-slots', {
+  const slotsPublished = await pageAll('/workspace/v2/shift-slots', {
     start: winning.start,
     end: winning.end,
     limit: '100',  // the spec caps this at 100; 500 was rejected outright
     sectionIds: winning.sectionIds,
   });
 
-  let slots = slotsPublished;
+  let slotPage = slotsPublished;
   let inclUnpublishedCount = 0;
-  if (slotsPublished.ok && items(slotsPublished).length === 0) {
-    slots = await call('/workspace/v2/shift-slots', {
+  if (slotsPublished.probe.ok && slotsPublished.rows.length === 0) {
+    slotPage = await pageAll('/workspace/v2/shift-slots', {
       start: winning.start,
       end: winning.end,
       limit: '100',
       includeUnpublished: 'true',
       sectionIds: winning.sectionIds,
     });
-    inclUnpublishedCount = items(slots).length;
+    inclUnpublishedCount = slotPage.rows.length;
   } else {
-    inclUnpublishedCount = items(slotsPublished).length;
+    inclUnpublishedCount = slotsPublished.rows.length;
   }
 
-  const slotRows = items(slots);
+  const slots = slotPage.probe;
+  const slotRows = slotPage.rows;
 
   /**
    * Whether a person works more than one role in a day decides how cost
@@ -379,7 +453,7 @@ export async function probeStaffAny(opts: {
       : `${multi} person-day(s) span more than one role, so cost for those days must be apportioned and the split is not exact at the edges.`);
   }
 
-  if (slotsPublished.ok && items(slotsPublished).length === 0 && inclUnpublishedCount > 0) {
+  if (slotsPublished.probe.ok && slotsPublished.rows.length === 0 && inclUnpublishedCount > 0) {
     verdicts.push('Schedules are NOT published. The ingest must pass includeUnpublished=true or it will silently see no labour at all.');
   }
 
@@ -444,6 +518,8 @@ export async function probeStaffAny(opts: {
   let tsEncoding: string | null = null;
   let workHours: any[] = [];
   let shiftRecords: any[] = [];
+  let tsPages = 0;
+  let tsTruncated = false;
 
   for (const [label, from, to] of encodings) {
     const ts = await call('/workspace/v1/timesheets', {}, {
@@ -478,8 +554,35 @@ export async function probeStaffAny(opts: {
     if (!ts.ok) continue;
 
     tsEncoding = label;
-    workHours = Array.isArray(ts.body?.data?.workHours) ? ts.body.data.workHours : [];
-    shiftRecords = Array.isArray(ts.body?.data?.shiftRecords) ? ts.body.data.shiftRecords : [];
+
+    /**
+     * Paged by hand, because this endpoint does not look like the others.
+     *
+     * It is a POST, its cursor goes in the BODY rather than the query string,
+     * and its rows arrive in two named collections rather than a single
+     * `items` array -- so `pageAll` cannot be reused and the loop is repeated
+     * rather than abstracted over. The first working run returned exactly 100
+     * work-hour rows, which is the cap and not a week's labour.
+     */
+    let page: Probe | null = ts;
+    for (tsPages = 0; tsPages < MAX_PAGES && page !== null; tsPages++) {
+      if (Array.isArray(page.body?.data?.workHours)) workHours.push(...page.body.data.workHours);
+      if (Array.isArray(page.body?.data?.shiftRecords)) shiftRecords.push(...page.body.data.shiftRecords);
+
+      const meta = page.body?.data?.meta ?? {};
+      if (!meta.hasMore || !meta.nextCursor) { page = null; tsPages++; break; }
+
+      const next = await call('/workspace/v1/timesheets', {}, {
+        range: { from, to },
+        includes: ['shiftRecords', 'clockAttempts', 'workHours'],
+        limit: 100,
+        sectionIds: allSectionIds.length > 0 ? allSectionIds : undefined,
+        cursor: meta.nextCursor,
+      });
+      if (!next.ok) { page = null; tsPages++; break; }
+      page = next;
+    }
+    tsTruncated = tsPages >= MAX_PAGES;
     break;
   }
 
@@ -490,8 +593,66 @@ export async function probeStaffAny(opts: {
   }
   const unmappedSections = [...hoursBySection.keys()].filter(k => k.startsWith('unmapped:')).length;
 
+  /**
+   * COST, on the ungated endpoint, which the published spec does not mention.
+   *
+   * The spec's response schema for a work-hour row lists seven fields and stops
+   * at startTime. What actually came back carries scheduledHours, actualHours,
+   * scheduledCosts and actualCosts. If those hold real numbers then
+   * `schedule-costs` and its experimental flag are not needed at all, and the
+   * BOH/FOH split is a MEASUREMENT rather than the hours-weighted estimate we
+   * had accepted.
+   *
+   * SUMMED BY SECTION AND NOWHERE ELSE. A per-person cost is that person's
+   * earnings. The section total is what the warehouse would store and is safe
+   * to show; the individual figures are added up and dropped in the same
+   * expression, which is the same rule the payroll bill lines follow at ingest.
+   */
+  const numeric = (v: any): number | null => {
+    const n = typeof v === 'string' ? Number(v) : v;
+    return typeof n === 'number' && Number.isFinite(n) ? n : null;
+  };
+
+  const costBySection = new Map<string, number>();
+  const hoursBySectionActual = new Map<string, number>();
+  let costRowsPresent = 0;
+
+  for (const w of workHours) {
+    const key = sectionName.get(w.sectionId) ?? `unmapped:${String(w.sectionId).slice(0, 8)}`;
+    const cost = numeric(w.actualCosts) ?? numeric(w.scheduledCosts);
+    const hrs = numeric(w.actualHours) ?? numeric(w.scheduledHours);
+    if (cost !== null) { costBySection.set(key, (costBySection.get(key) ?? 0) + cost); costRowsPresent++; }
+    if (hrs !== null) hoursBySectionActual.set(key, (hoursBySectionActual.get(key) ?? 0) + hrs);
+  }
+
+  // The TYPE of the field, when nothing summed. `actualCosts` is plural and
+  // could be an object; saying so beats reporting a total of zero, which would
+  // read as "these people cost nothing".
+  const costField = workHours.find(w => w.actualCosts !== undefined && w.actualCosts !== null)?.actualCosts;
+  const costFieldType = costField === undefined ? null
+    : Array.isArray(costField) ? 'array'
+    : typeof costField === 'object' ? `object{${Object.keys(costField).join(',')}}`
+    : typeof costField;
+
+  if (shiftTruncated || tsTruncated) {
+    // Our own ceiling, not the server's end of data. Reported loudly, because
+    // a count that stopped early is the failure this whole section exists to
+    // prevent and it looks identical to a complete one.
+    verdicts.push(`Stopped at the ${MAX_PAGES}-page ceiling, so these counts are a FLOOR and not a total. Narrow the window or raise MAX_PAGES before drawing anything from them.`);
+  }
+
   if (workHours.length > 0) {
-    verdicts.push('HOURS ARE REACHABLE WITHOUT THE EXPERIMENTAL FLAG, and they arrive already split by section, which is the BOH/FOH split. Cost is still gated, so a split built on hours alone is an ESTIMATE and stays labelled one.');
+    verdicts.push('HOURS ARE REACHABLE WITHOUT THE EXPERIMENTAL FLAG, and they arrive already split by section, which is the BOH/FOH split.');
+  }
+
+  if (costRowsPresent > 0) {
+    verdicts.push(
+      `COST IS ALSO REACHABLE WITHOUT THE FLAG. ${costRowsPresent} of ${workHours.length} work-hour rows carry a numeric cost, on an endpoint the published spec does not document as having one. schedule-costs and its experimental flag are then unnecessary, and the BOH/FOH split is a MEASUREMENT rather than an hours-weighted estimate. Reconcile the section totals against the P&L Wages and Salaries line before trusting the level.`,
+    );
+  } else if (costFieldType !== null) {
+    verdicts.push(
+      `The work-hour rows carry an actualCosts field of type ${costFieldType}, which did not sum as a number. Look at its shape before concluding cost is unavailable — this is one field away from removing the dependency on the experimental flag entirely.`,
+    );
   }
   if (unmappedSections > 0) {
     // The Revel venue-key rule: an id with no name is flagged, never guessed.
@@ -563,8 +724,12 @@ export async function probeStaffAny(opts: {
     verdicts.push(`The token is missing ${missingCostScopes.join(', ')}, which schedule-costs lists as its requirements. Even once the experimental flag is on, that endpoint will refuse until these are granted — worth raising in the same message rather than a week later.`);
   }
 
+  // Rounded to two decimals: these carry money and hours as well as counts, and
+  // a float summed over hundreds of rows renders to twelve decimal places.
   const toRows = (m: Map<string, number>): CountRow[] =>
-    [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+    [...m]
+      .map(([name, count]) => ({ name, count: Math.round(count * 100) / 100 }))
+      .sort((a, b) => b.count - a.count);
 
   return {
     window: { start: START, end: END },
@@ -582,6 +747,8 @@ export async function probeStaffAny(opts: {
     shifts: {
       ...outcome(shifts),
       attempt: shiftAttempt,
+      pages: shiftPages,
+      truncated: shiftTruncated,
       total: shiftRows.length,
       published: publishedShifts,
       unpublished: shiftRows.length - publishedShifts,
@@ -590,7 +757,7 @@ export async function probeStaffAny(opts: {
     },
     shift_slots: {
       ...outcome(slots),
-      published_only: items(slotsPublished).length,
+      published_only: slotsPublished.rows.length,
       incl_unpublished: inclUnpublishedCount,
       with_role: slotRows.filter((r: any) => r.roleId).length,
       assigned: slotRows.filter((r: any) => r.userId).length,
@@ -611,6 +778,12 @@ export async function probeStaffAny(opts: {
     timesheets_v1: {
       ...tsOutcome,
       encoding: tsEncoding,
+      pages: tsPages,
+      truncated: tsTruncated,
+      cost_by_section: toRows(costBySection),
+      hours_by_section: toRows(hoursBySectionActual),
+      cost_rows: costRowsPresent,
+      cost_field_type: costFieldType,
       shift_records: shiftRecords.length,
       work_hours: workHours.length,
       // Distinct people COUNTED, never listed. The count answers "is this the
