@@ -112,6 +112,8 @@ export interface StaffAnyProbeResult {
     cost_by_section: CountRow[];
     /** Hours totalled per section, on the same basis. */
     hours_by_section: CountRow[];
+    /** Totals per cost component: basic, overtime, weekend, event. */
+    cost_components: CountRow[];
     /** How many rows carried a numeric cost, and what the field looks like. */
     cost_rows: number;
     cost_field_type: string | null;
@@ -613,15 +615,64 @@ export async function probeStaffAny(opts: {
     return typeof n === 'number' && Number.isFinite(n) ? n : null;
   };
 
+  /**
+   * `actualCosts` is an OBJECT, and its members are the finding.
+   *
+   * Measured 7 Sep 2026: `{ basicCost, eventCost, weekendCost, overtimeCost }`.
+   * StaffAny has already done the work of separating premium pay from ordinary
+   * pay, on an endpoint that is generally available and that the published spec
+   * does not document as carrying cost at all.
+   *
+   * That settles three things at once. Cost does not need the experimental
+   * flag. The BOH/FOH split is a MEASUREMENT rather than the hours-weighted
+   * estimate CLAUDE.md resigned itself to. And overtime does not have to be
+   * reconstructed from a weekly hours threshold and a reading of the Employment
+   * Act -- which would have needed each person's hours summed per week before
+   * their identity was discarded, and would have been wrong for anybody outside
+   * Part IV.
+   *
+   * Summed rather than picked over: an unknown fifth member added later must
+   * land in the total rather than being silently dropped, so every numeric
+   * member counts and the member NAMES are reported so a new one is visible.
+   */
+  const costOf = (v: any): { total: number; parts: Record<string, number> } | null => {
+    const flat = numeric(v);
+    if (flat !== null) return { total: flat, parts: { cost: flat } };
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+
+    const parts: Record<string, number> = {};
+    let total = 0;
+    let any = false;
+    for (const [k, raw] of Object.entries(v)) {
+      const n = numeric(raw);
+      if (n === null) continue;
+      parts[k] = n;
+      total += n;
+      any = true;
+    }
+    return any ? { total, parts } : null;
+  };
+
   const costBySection = new Map<string, number>();
   const hoursBySectionActual = new Map<string, number>();
   let costRowsPresent = 0;
 
+  const costComponents = new Map<string, number>();
+
   for (const w of workHours) {
     const key = sectionName.get(w.sectionId) ?? `unmapped:${String(w.sectionId).slice(0, 8)}`;
-    const cost = numeric(w.actualCosts) ?? numeric(w.scheduledCosts);
+    const cost = costOf(w.actualCosts) ?? costOf(w.scheduledCosts);
     const hrs = numeric(w.actualHours) ?? numeric(w.scheduledHours);
-    if (cost !== null) { costBySection.set(key, (costBySection.get(key) ?? 0) + cost); costRowsPresent++; }
+
+    if (cost !== null) {
+      costBySection.set(key, (costBySection.get(key) ?? 0) + cost.total);
+      // Basic against overtime against weekend is the part an operator can act
+      // on. A single total says labour was expensive; the split says why.
+      for (const [part, n] of Object.entries(cost.parts)) {
+        costComponents.set(part, (costComponents.get(part) ?? 0) + n);
+      }
+      costRowsPresent++;
+    }
     if (hrs !== null) hoursBySectionActual.set(key, (hoursBySectionActual.get(key) ?? 0) + hrs);
   }
 
@@ -646,9 +697,15 @@ export async function probeStaffAny(opts: {
   }
 
   if (costRowsPresent > 0) {
+    const parts = [...costComponents.keys()].join(', ');
     verdicts.push(
-      `COST IS ALSO REACHABLE WITHOUT THE FLAG. ${costRowsPresent} of ${workHours.length} work-hour rows carry a numeric cost, on an endpoint the published spec does not document as having one. schedule-costs and its experimental flag are then unnecessary, and the BOH/FOH split is a MEASUREMENT rather than an hours-weighted estimate. Reconcile the section totals against the P&L Wages and Salaries line before trusting the level.`,
+      `COST IS ALSO REACHABLE WITHOUT THE FLAG. ${costRowsPresent} of ${workHours.length} work-hour rows carry cost, broken into ${parts}, on an endpoint the published spec does not document as having any. schedule-costs and its experimental flag are unnecessary, and the BOH/FOH split is a MEASUREMENT rather than an hours-weighted estimate. Reconcile the section totals against the P&L Wages and Salaries line before trusting the level — StaffAny cost is unlikely to include employer CPF, SDL or leave accrual, so expect it to sit BELOW the ledger.`,
     );
+    if (costComponents.has('overtimeCost')) {
+      verdicts.push(
+        'Overtime arrives as its own component, already separated by StaffAny. It does not have to be reconstructed from a weekly hours threshold — which would have needed each person\'s hours summed before their identity was discarded, and would have been wrong for anybody outside Part IV of the Employment Act.',
+      );
+    }
   } else if (costFieldType !== null) {
     verdicts.push(
       `The work-hour rows carry an actualCosts field of type ${costFieldType}, which did not sum as a number. Look at its shape before concluding cost is unavailable — this is one field away from removing the dependency on the experimental flag entirely.`,
@@ -782,6 +839,7 @@ export async function probeStaffAny(opts: {
       truncated: tsTruncated,
       cost_by_section: toRows(costBySection),
       hours_by_section: toRows(hoursBySectionActual),
+      cost_components: toRows(costComponents),
       cost_rows: costRowsPresent,
       cost_field_type: costFieldType,
       shift_records: shiftRecords.length,
