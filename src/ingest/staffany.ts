@@ -42,13 +42,22 @@ export const VENUE_TZ = 'Asia/Singapore';
 
 export interface SectionMapping {
   staffany_section_id: string;
-  venue_id: string;
-  /** BOH, FOH, or GROUP for a section that is not a kitchen or a floor. */
+  /**
+   * NULL for group staff, who work across every venue.
+   *
+   * Deliberately not allocated here. An allocation is a judgement and these
+   * hours are a measurement; the basis will change, and Finance has already
+   * chosen one in Xero that ours must not silently contradict. See migration
+   * 038.
+   */
+  venue_id: string | null;
+  /** BOH, FOH, or GROUP for a section belonging to no single venue. */
   area: string;
 }
 
 export interface LabourDay {
-  venue_id: string;
+  /** NULL for group staff. Owner-visible only, and never split across venues. */
+  venue_id: string | null;
   business_date: string;
   staffany_section_id: string;
   area: string;

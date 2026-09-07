@@ -61,10 +61,19 @@ for (const s of sections) {
   if (error) console.error(`  could not record section ${s.name}: ${error.message}`);
 }
 
+/**
+ * A section is MAPPED when somebody has decided what it is, which is not the
+ * same as it having a venue.
+ *
+ * The group section is confirmed by being marked GROUP and having no venue at
+ * all -- those hours are worked across every venue and are never allocated to
+ * one here. Filtering on venue_id being present would leave the one section we
+ * HAVE decided about sitting in the unmapped list for ever, looking exactly
+ * like the one nobody had touched.
+ */
 const { data: mapRows, error: mapErr } = await supabase
   .from('staffany_sections')
   .select('staffany_section_id, section_name, venue_id, area')
-  .not('venue_id', 'is', null)
   .not('area', 'is', null);
 
 if (mapErr) {
@@ -73,13 +82,14 @@ if (mapErr) {
 }
 
 const mappings = (mapRows ?? []) as Array<SectionMapping & { section_name: string }>;
-console.log(`${mappings.length} of ${sections.length} section(s) are mapped to a venue\n`);
+const groupSections = mappings.filter(m => m.venue_id === null).length;
+console.log(`${mappings.length} of ${sections.length} section(s) are mapped (${groupSections} to no venue, as group staff)\n`);
 
 if (mappings.length === 0) {
   // Not a crash, and not a success either. Nothing can be ingested until
   // somebody maps a section, and saying so beats writing zero rows quietly.
-  console.error('NO SECTIONS ARE MAPPED. Open the admin console, map each StaffAny section');
-  console.error('to a venue and to BOH, FOH or GROUP, then run this again.');
+  console.error('NO SECTIONS ARE MAPPED. Open the admin console, give each StaffAny section');
+  console.error('an area -- BOH or FOH with a venue, or GROUP with none -- then run this again.');
   process.exit(1);
 }
 
@@ -153,6 +163,16 @@ const totals = rows.reduce(
 );
 
 console.log(`Rostered labour: ${totals.hours.toFixed(1)} hours, ${totals.cost.toFixed(2)} cost, of which ${totals.overtime.toFixed(2)} overtime.`);
+
+// Reported separately, because it is deliberately absent from every venue's
+// labour percentage and a reader comparing this against the P&L needs to know
+// it is sitting outside.
+const groupRows = rows.filter(r => r.venue_id === null);
+if (groupRows.length > 0) {
+  const groupCost = groupRows.reduce((n, r) => n + r.total_cost, 0);
+  console.log(`Of that, ${groupCost.toFixed(2)} is GROUP staff belonging to no venue — stored unallocated,`);
+  console.log('so it is excluded from every venue labour percentage until somebody allocates it.');
+}
 console.log('This is ROSTERED labour cost, not total employment cost — it excludes employer');
 console.log('CPF, SDL and leave accrual, so it should sit BELOW the Xero Wages and Salaries line.');
 

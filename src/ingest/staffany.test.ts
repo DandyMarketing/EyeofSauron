@@ -139,3 +139,30 @@ test('an unparseable timestamp is skipped, not filed under today', () => {
   assert.equal(result.rows.length, 0);
   assert.equal(result.skipped_rows, 1);
 });
+
+test('group staff keep a null venue and are never allocated', () => {
+  // The Dandy Collection carries people who work across all three venues. An
+  // allocation is a judgement and these hours are a measurement, and Finance
+  // has already chosen a split basis in Xero that ours must not contradict.
+  const { rows } = aggregateWorkHours(
+    [row({ sectionId: 'sec-group' })],
+    [{ staffany_section_id: 'sec-group', venue_id: null, area: 'GROUP' }],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].venue_id, null);
+  assert.equal(rows[0].area, 'GROUP');
+  assert.equal(rows[0].total_cost, 120);
+});
+
+test('a group section is mapped, not unmapped', () => {
+  // Confirmed-as-group and never-touched are different facts, and an unmapped
+  // section is not ingested at all — so collapsing them would silently drop the
+  // one section somebody had actually decided about.
+  const result = aggregateWorkHours(
+    [row({ sectionId: 'sec-group' })],
+    [{ staffany_section_id: 'sec-group', venue_id: null, area: 'GROUP' }],
+  );
+  assert.deepEqual(result.unmapped_sections, []);
+  assert.equal(result.skipped_rows, 0);
+});

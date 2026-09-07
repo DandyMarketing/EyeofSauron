@@ -1040,15 +1040,28 @@ app.put('/admin/api/staffany/sections', async (c) => {
     return c.json({ error: 'area must be BOH, FOH or GROUP' }, 400);
   }
 
+  /**
+   * GROUP carries no venue and is still confirmed.
+   *
+   * A section is decided when somebody has said what it IS, which for the group
+   * section means area GROUP and deliberately no venue -- those hours are
+   * worked across every venue and are never allocated to one. Requiring a venue
+   * to count as confirmed would leave the one section we have decided about
+   * looking exactly like the one nobody had touched, and an unmapped section is
+   * never ingested.
+   */
+  const isGroup = area === 'GROUP';
+  const confirmed = isGroup || Boolean(venue_id && area);
+
   const { error } = await supabaseAdmin
     .from('staffany_sections')
     .update({
-      venue_id: venue_id || null,
+      venue_id: isGroup ? null : (venue_id || null),
       area: area || null,
       // Who confirmed it and when, because this is a judgement rather than a
       // fact and somebody may need to ask them about it later.
-      confirmed_at: venue_id && area ? new Date().toISOString() : null,
-      confirmed_by: venue_id && area ? user.id : null,
+      confirmed_at: confirmed ? new Date().toISOString() : null,
+      confirmed_by: confirmed ? user.id : null,
     })
     .eq('staffany_section_id', staffany_section_id);
 

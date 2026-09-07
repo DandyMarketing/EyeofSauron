@@ -1111,7 +1111,10 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       venues.map(function (v) { return '<option value="' + v.id + '">' + escapeHtml(v.name) + '</option>'; }).join('');
 
     out.innerHTML = list.map(function (s) {
-      const mapped = s.venue_id && s.area;
+      // GROUP is mapped WITHOUT a venue. Those hours belong to every venue and
+      // are stored unallocated, so requiring one would keep the group section
+      // permanently red.
+      const mapped = s.area === 'GROUP' || (s.venue_id && s.area);
       return '<div class="file-item" style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<span style="min-width:200px">' + escapeHtml(s.section_name) +
           (s.section_tag ? ' <span style="color:var(--text-muted)">[' + escapeHtml(s.section_tag) + ']</span>' : '') + '</span>' +
@@ -1121,7 +1124,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
           '<option value="BOH">BOH</option><option value="FOH">FOH</option><option value="GROUP">Group</option>' +
         '</select>' +
         (mapped
-          ? '<span style="color:var(--success);font-size:12px">mapped</span>'
+          ? '<span style="color:var(--success);font-size:12px">' + (s.area === 'GROUP' ? 'group — no venue' : 'mapped') + '</span>'
           : '<span style="color:var(--error);font-size:12px">NOT INGESTED</span>') +
         '</div>';
     }).join('');
