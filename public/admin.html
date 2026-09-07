@@ -1258,6 +1258,15 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       // Basic against overtime against weekend. A total says labour was
       // expensive; the split says why, and overtime is the part with a lever
       // on it.
+      // What StaffAny USED, beside what we can divide. Distinct values with row
+      // counts, never a row: a rate attached to a person is their pay.
+      (ts.calculation_inputs && ts.calculation_inputs.length
+        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Calculation inputs:</strong><br>' +
+          ts.calculation_inputs.map(function (f) {
+            return escapeHtml(f.field) + ' &mdash; ' + escapeHtml(f.values.join(', ')) +
+              (f.distinct > f.values.length ? ' &hellip; (' + f.distinct + ' distinct)' : '');
+          }).join('<br>') + '</div>'
+        : '') +
       (ts.cost_components && ts.cost_components.length
         ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Cost components:</strong> ' + counts(ts.cost_components) + '</div>'
         : '') +

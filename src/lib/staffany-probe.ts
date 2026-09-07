@@ -114,6 +114,13 @@ export interface StaffAnyProbeResult {
     hours_by_section: CountRow[];
     /** Totals per cost component: basic, overtime, weekend, event. */
     cost_components: CountRow[];
+    /**
+     * The values StaffAny used, as distinct values with row counts.
+     *
+     * Never a row and never per person: a rate attached to somebody is their
+     * pay, a rate with a frequency is a business parameter.
+     */
+    calculation_inputs: Array<{ field: string; distinct: number; values: string[] }>;
     /** How many rows carried a numeric cost, and what the field looks like. */
     cost_rows: number;
     cost_field_type: string | null;
@@ -696,6 +703,60 @@ export async function probeStaffAny(opts: {
     verdicts.push(`actualHours is ${hoursFieldType}, not a number. Anything reading it as one records zero hours against real cost — which is a denominator that looks like an answer.`);
   }
 
+  /**
+   * What StaffAny actually used, rather than what we can divide.
+   *
+   * The implied overtime rate is OUR arithmetic: overtime cost over overtime
+   * hours, which came out at 20.80 against a business that believes it pays a
+   * flat 12.00. A division cannot say which of three explanations is right --
+   * time-and-a-half on a full-timer's own hourly, a blend of two populations,
+   * or our own bucketing comparing two members that do not correspond.
+   * `calculationInputs` is on every work-hour row and is the input rather than
+   * the output.
+   *
+   * DISTINCT VALUES WITH COUNTS, NEVER A ROW. A rate attached to a person is
+   * that person's pay. A rate with a count of how many rows carry it is a
+   * business parameter -- "12.00 on 34 rows, 20.80 on 18" answers the question
+   * outright and attaches nothing to anybody.
+   *
+   * Any field whose NAME suggests identity is skipped before its values are
+   * read, rather than trusted to be harmless. We do not know what is in this
+   * object, which is the whole reason for looking.
+   */
+  const IDENTIFYING = /name|email|phone|user|staff|employee|nric|id$/i;
+  const inputsByKey = new Map<string, Map<string, number>>();
+
+  for (const w of workHours) {
+    const ci = (w as any).calculationInputs;
+    if (!ci || typeof ci !== 'object' || Array.isArray(ci)) continue;
+    for (const [k, v] of Object.entries(ci)) {
+      if (IDENTIFYING.test(k)) continue;
+      // Objects and arrays are described by shape, never expanded: a nested
+      // object could carry anything and this probe does not print what it has
+      // not reasoned about.
+      const value = (v === null || typeof v === 'object') ? `(${shapeOf(v) ?? 'null'})` : String(v);
+      const counts = inputsByKey.get(k) ?? new Map<string, number>();
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+      inputsByKey.set(k, counts);
+    }
+  }
+
+  /** At most a dozen distinct values per field, commonest first. */
+  const calculationInputs = [...inputsByKey]
+    .map(([field, counts]) => ({
+      field,
+      distinct: counts.size,
+      values: [...counts]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([value, count]) => `${value} ×${count}`),
+    }))
+    .sort((a, b) => a.field.localeCompare(b.field));
+
+  if (calculationInputs.length === 0 && workHours.length > 0) {
+    verdicts.push('calculationInputs is absent or empty on every work-hour row, so StaffAny does not show its working here. The implied rate stays our own division and cannot be confirmed from this endpoint.');
+  }
+
   const costField = workHours.find(w => w.actualCosts !== undefined && w.actualCosts !== null)?.actualCosts;
   const costFieldType = costField === undefined ? null
     : Array.isArray(costField) ? 'array'
@@ -857,6 +918,7 @@ export async function probeStaffAny(opts: {
       cost_by_section: toRows(costBySection),
       hours_by_section: toRows(hoursBySectionActual),
       cost_components: toRows(costComponents),
+      calculation_inputs: calculationInputs,
       cost_rows: costRowsPresent,
       cost_field_type: costFieldType,
       shift_records: shiftRecords.length,
