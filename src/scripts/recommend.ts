@@ -350,14 +350,42 @@ for (const venue of venues as any[]) {
         ? `keys: [${Object.keys(call.input).join(', ') || 'none'}]`
         : `no tool_use block (content: ${structured.content.map(b => b.type).join(', ') || 'empty'})`;
 
-      problems.push(
+      const detail =
         `${venue.name}: could not structure the analysis — ${parsed.reason}` +
         ` — stop_reason=${structured.stop_reason}, ${shape}, analysis ${analysis.answer.length} chars` +
         (truncated
           ? ' — TRUNCATED at the 16384-token ceiling; raise max_tokens on the structuring call.'
-          : ''),
-      );
+          : '');
+
+      /**
+       * Printed HERE as well as collected for the summary.
+       *
+       * On 7 Sep 2026 all three venues produced an analysis, the briefing page
+       * stayed empty, and the log went from "analysed" straight to the next
+       * venue -- because a failure here is silent until a summary printed at
+       * the very end, which a truncated log export never reaches. The
+       * expensive half was fully narrated and the outcome was not.
+       *
+       * A job that hides its own result is the failure this codebase keeps
+       * finding, and it costs most in exactly this shape: twenty-six minutes
+       * of Opus, three analyses, nothing stored, and no line saying so.
+       */
+      console.error(`  FAILED to store — ${detail}`);
+      problems.push(detail);
       continue;
+    }
+
+    /**
+     * A recommendation that was skipped rather than the batch being lost.
+     *
+     * Visible for the same reason the cap trim is: a model routinely breaking
+     * its own schema should not look identical to one obeying it.
+     */
+    if (parsed.rejected) {
+      for (const r of parsed.rejected) {
+        console.error(`  dropped a malformed recommendation — ${r}`);
+        notices.push(`${venue.name}: ${r}`);
+      }
     }
 
     if (parsed.value.length === 0) {

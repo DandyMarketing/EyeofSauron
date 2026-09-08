@@ -364,12 +364,34 @@ describe('the cap trims rather than discards', () => {
     assert.equal(parsed.dropped, undefined);
   });
 
-  test('trimming does not rescue a malformed entry inside the kept three', () => {
-    // The cap is the ONLY thing repaired. A recommendation with no headline is
-    // still a rejection, because that would be guessing at meaning.
+  test('a malformed entry loses itself, not the whole briefing', () => {
+    // Changed 8 Sep 2026. This used to reject the batch, on the grounds that
+    // repairing an item would guess at meaning. Skipping one guesses at
+    // nothing, and rejecting cost three venues their entire briefing plus the
+    // twenty-minute Opus analysis behind it, leaving the page empty.
     const parsed = parseRecommendations({
       recommendations: [rec(1), { ...rec(2), headline: '' }, rec(3), rec(4)],
     });
+
+    assert.ok(parsed.ok);
+    // The cap trims to three, and the malformed one of those three is skipped.
+    assert.equal(parsed.value.length, 2);
+    assert.equal(parsed.dropped, 1);
+    // Reported, never silent: a model breaking its own schema must not look
+    // identical to one obeying it.
+    assert.equal(parsed.rejected?.length, 1);
+    assert.match(parsed.rejected![0], /no headline/);
+  });
+
+  test('nothing readable is still a failure, and names every reason', () => {
+    // An empty list is a quiet week and a valid outcome. Three offered and
+    // three unreadable is a defect, and conflating them would hide it.
+    const parsed = parseRecommendations({
+      recommendations: [{ ...rec(1), headline: '' }, { ...rec(2), domain: 'operations' }],
+    });
+
     assert.equal(parsed.ok, false);
+    assert.match((parsed as any).reason, /no headline/);
+    assert.match((parsed as any).reason, /operations/);
   });
 });

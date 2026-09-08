@@ -271,7 +271,7 @@ export function recommendationTool() {
  */
 export function parseRecommendations(
   raw: unknown,
-): { ok: true; value: Recommendation[]; dropped?: number } | { ok: false; reason: string } {
+): { ok: true; value: Recommendation[]; dropped?: number; rejected?: string[] } | { ok: false; reason: string } {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, reason: 'response was not an object' };
   }
@@ -303,26 +303,49 @@ export function parseRecommendations(
 
   const value: Recommendation[] = [];
 
+  /**
+   * ONE BAD ITEM LOSES ITSELF, not the whole briefing.
+   *
+   * This rejected the entire batch on any single malformed field, so a domain
+   * of "operations" instead of "cost" threw away three good recommendations and
+   * the twenty-minute Opus analysis behind them. On 7 Sep 2026 all three venues
+   * produced an analysis and the briefing page stayed empty.
+   *
+   * It is the same argument the cap trim already settled just above. The
+   * reject-rather-than-repair rule exists so nobody GUESSES at what was meant;
+   * skipping an item that failed validation guesses at nothing. Discarding two
+   * valid recommendations because a third had a bad enum is not caution, it is
+   * throwing away the work.
+   *
+   * Every rejection is returned so it is VISIBLE. A silent skip would make a
+   * model that routinely breaks its own schema indistinguishable from one that
+   * obeys it -- and if NOTHING survives, the reasons are what the run reports
+   * instead of an empty briefing nobody can explain.
+   */
+  const rejected: string[] = [];
+
   for (const [i, item] of capped.entries()) {
-    if (!item || typeof item !== 'object') {
-      return { ok: false, reason: `recommendation ${i + 1} was not an object` };
-    }
+    const at = `recommendation ${i + 1}`;
+
+    if (!item || typeof item !== 'object') { rejected.push(`${at} was not an object`); continue; }
     const r = item as Record<string, unknown>;
 
     const headline = typeof r.headline === 'string' ? r.headline.trim() : '';
-    if (!headline) return { ok: false, reason: `recommendation ${i + 1} has no headline` };
+    if (!headline) { rejected.push(`${at} has no headline`); continue; }
 
     const body = typeof r.body === 'string' ? r.body.trim() : '';
-    if (!body) return { ok: false, reason: `recommendation ${i + 1} ("${headline}") has no body` };
+    if (!body) { rejected.push(`${at} ("${headline}") has no body`); continue; }
 
     const domain = typeof r.domain === 'string' ? r.domain.trim().toLowerCase() : '';
     if (!(RECOMMENDATION_DOMAINS as readonly string[]).includes(domain)) {
-      return { ok: false, reason: `recommendation ${i + 1} has domain "${domain}", which is not one of the ${RECOMMENDATION_DOMAINS.length} defined values` };
+      rejected.push(`${at} ("${headline}") has domain "${domain}", which is not one of ${RECOMMENDATION_DOMAINS.join(', ')}`);
+      continue;
     }
 
     const confidence = Number(r.confidence);
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-      return { ok: false, reason: `recommendation ${i + 1} has confidence ${r.confidence}, expected 0 to 1` };
+      rejected.push(`${at} ("${headline}") has confidence ${r.confidence}, expected 0 to 1`);
+      continue;
     }
 
     value.push({
@@ -333,7 +356,24 @@ export function parseRecommendations(
     });
   }
 
-  return dropped > 0 ? { ok: true, value, dropped } : { ok: true, value };
+  /**
+   * Everything malformed is still a failure, and it names every reason.
+   *
+   * An empty list is a VALID outcome -- a quiet week -- so it must not be
+   * conflated with a batch that arrived and could not be read. The distinction
+   * is whether anything was offered: nothing offered is a quiet week, three
+   * offered and three unreadable is a defect.
+   */
+  if (value.length === 0 && rejected.length > 0) {
+    return { ok: false, reason: rejected.join('; ') };
+  }
+
+  return {
+    ok: true,
+    value,
+    ...(dropped > 0 ? { dropped } : {}),
+    ...(rejected.length > 0 ? { rejected } : {}),
+  };
 }
 
 /**
