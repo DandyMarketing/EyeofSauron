@@ -14,6 +14,7 @@ import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
+import { decompose, precedingPeriod, type PeriodRow } from '../lib/revenue-decomposition.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 
 async function getVenueId(slug: string): Promise<string> {
@@ -108,6 +109,8 @@ export async function handleToolCall(
       return queryBookingLeadTime(input);
     case 'query_public_holidays':
       return queryPublicHolidays(input);
+    case 'explain_revenue_change':
+      return explainRevenueChange(input);
     case 'check_booking_channels':
       return checkBookingChannels(input);
     case 'query_hourly_sales':
@@ -1792,6 +1795,90 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * What moved when revenue moved, as arithmetic rather than analysis.
+ *
+ * WHY IT IS ONE CALL. The dry run on 9 Sep 2026 assembled this by hand for Fat
+ * Prince across THIRTY-TWO queries and reached the right answer -- the dining
+ * room had its best week per head on record and the gap was private-event
+ * trade, visible as party size falling from 3.5 to 3.0. Correct, and thirty-two
+ * round trips of Opus to get there.
+ *
+ * THE BASELINE SHIPS WITH IT because the same run's real conclusion came from
+ * there rather than from the comparison: 11% below the previous week AND 17%
+ * above the four-week average, so the fortnight between was the outlier. A
+ * week-on-week figure alone would have reported a collapse.
+ */
+async function explainRevenueChange(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const venues = input.venue_slug
+    ? allVenues.filter(v => v.slug === input.venue_slug)
+    : scopeVenues(allVenues, input);
+  if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
+
+  /**
+   * The period immediately before, of the SAME LENGTH, unless one was named.
+   * Comparing unequal spans reports arithmetic as performance.
+   */
+  const prior = input.compare_start && input.compare_end
+    ? { start: input.compare_start, end: input.compare_end }
+    : precedingPeriod(input.start_date, input.end_date);
+
+  const { data, error } = await supabase.rpc('revenue_decomposition', {
+    p_start: input.start_date,
+    p_end: input.end_date,
+    p_prev_start: prior.start,
+    p_prev_end: prior.end,
+    p_trailing_weeks: Math.min(Math.max(Number(input.trailing_weeks) || 8, 0), 26),
+  });
+
+  if (error) {
+    // Named rather than swallowed: an unapplied migration would otherwise look
+    // exactly like a period in which nothing changed.
+    return JSON.stringify({
+      error: `Could not decompose the revenue change: ${error.message}. If this says the function does not exist, migration 041_revenue_decomposition.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as PeriodRow[];
+
+  const byVenue = venues.map(v => {
+    const mine = rows.filter(r => r.venue_id === v.id);
+    const current = mine.find(r => r.period === 'current');
+    const before = mine.find(r => r.period === 'prior');
+
+    if (!current || !before) {
+      // A venue with no rows in one of the periods is a data gap, and saying so
+      // beats reporting a hundred-percent fall.
+      return {
+        venue: v.name,
+        slug: v.slug,
+        error: 'No data for one of the two periods. Check the ingest before reading this as a change.',
+      };
+    }
+
+    return {
+      venue: v.name,
+      slug: v.slug,
+      ...decompose(current, before, mine),
+    };
+  });
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    compared_with: prior,
+    venues: byVenue,
+    reading_order: 'Read the baseline before the comparison. A single period against a single period is a coin toss; the trailing weeks say whether this one is unusual or the one before it was.',
+    next_step: 'This says WHAT moved, never why. Follow the branch the caveats name — check_booking_channels and query_booking_lead_time when booked covers moved, holidays and footfall when walk-ins did.',
   });
 }
 

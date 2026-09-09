@@ -462,6 +462,36 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'explain_revenue_change',
+    description:
+      'WHY REVENUE MOVED, split exactly into covers versus spend per head, with the weeks behind it for context. START HERE for any question about revenue being up or down, a bad week, a good week, or what to focus on. It is subtraction, not statistics: the parts SUM to the change with nothing left over, so it cannot produce a false finding and needs no confidence figure. ' +
+      'IT ANSWERS "WHAT MOVED", NOT "WHY". Covers fell is a fact; the event diary emptied is a hypothesis. Use the answer to pick the next tool rather than as the conclusion — the caveats name the branch. If booked covers moved, go to check_booking_channels for a channel that died and query_booking_lead_time for people booking later rather than not at all. If walk-ins moved, no booking channel explains it and you should look at holidays, weather or footfall instead. ' +
+      'ALWAYS READ THE BASELINE BEFORE THE COMPARISON. A single week against a single week is a coin toss. The response carries the trailing weeks, the average, the range and whether the run rate is rising or falling. Down on the week while ABOVE the run rate means the week before was the outlier, not this week a collapse — reporting that as a fall sends somebody to fix a venue that is performing. Up on the week while below the run rate is a recovery, not a good week. ' +
+      'SPEND PER HEAD DIVIDES TWO SYSTEMS. Revenue is Revel\'s and covers are SevenRooms\' booked party size, and they disagree slightly by design, so a move of a couple of percent is those two counting differently rather than guests behaving differently. The caveat fires automatically when that applies. ' +
+      'The third driver line, "Combined effect", is real arithmetic and not a rounding error: when covers and spend both move, part of the change belongs to neither alone. It is usually small and is reported rather than hidden inside the other two.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit for every venue the caller may see.',
+        },
+        start_date: { type: 'string', description: 'Start of the period under review (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of the period (inclusive), YYYY-MM-DD.' },
+        compare_start: {
+          type: 'string',
+          description: 'Optional start of the comparison period. Omit and it uses the period immediately before, of the SAME LENGTH — comparing unequal spans reports arithmetic as performance.',
+        },
+        compare_end: { type: 'string', description: 'Optional end of the comparison period.' },
+        trailing_weeks: {
+          type: 'number',
+          description: 'How many complete weeks of baseline to return. Default 8. Fewer than 6 cannot support a direction and the response says so.',
+        },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_public_holidays',
     description:
       'SINGAPORE PUBLIC HOLIDAYS for a date range, from the Ministry of Manpower via data.gov.sg. USE THIS INSTEAD OF SEARCHING THE WEB. Never run a web search for Singapore public holidays, school holidays or the MOE calendar — the holidays are here, and searching for them costs a dozen page fetches that then sit in context for the rest of the conversation. ' +

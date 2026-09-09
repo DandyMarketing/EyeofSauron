@@ -403,7 +403,24 @@ for (const venue of venues as any[]) {
       const leaked = namesOtherVenues(`${candidate.headline}\n${candidate.body}`, forbidden);
       if (leaked.length > 0) {
         withheldTotal++;
-        problems.push(`${venue.name}: WITHHELD "${candidate.headline}" — names ${leaked.join(', ')}, which this venue is not cleared to see`);
+        /**
+         * A NOTICE, not a problem, and the distinction decides the exit code.
+         *
+         * A withholding is the guard WORKING: it caught a recommendation naming
+         * another venue and stopped it before anything was stored. Counting it
+         * as a failure made a single-venue run exit 1 on one withholding --
+         * problems.length === venues.length === 1 -- so Railway reported
+         * "Crashed" on a run that had produced a full analysis and correctly
+         * refused to leak.
+         *
+         * This is the cap-trim mistake again, in a different branch: `problems`
+         * decides the exit code as well as the printed list, so anything that
+         * SUCCEEDED must not go in it. It is still counted and still printed on
+         * every run, because a brief being ignored is worth knowing about.
+         */
+        const line = `${venue.name}: WITHHELD "${candidate.headline}" — names ${leaked.join(', ')}, which this venue is not cleared to see`;
+        console.error(`  ${line}`);
+        notices.push(line);
         continue;
       }
       clean.push(candidate);
