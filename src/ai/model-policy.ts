@@ -98,15 +98,43 @@ const ENV_KEY: Record<Purpose, string> = {
   recovery: 'SAURON_MODEL_RECOVERY',
 };
 
+/**
+ * Models a CALLER may ask for, as opposed to ones an operator may configure.
+ *
+ * An allowlist rather than a passthrough, because this value arrives from a
+ * browser and every request against it is billed. A free-text model field would
+ * let anyone with a session point our API key at whatever is most expensive, or
+ * at a model whose behaviour nothing here has been tested against. The
+ * ENVIRONMENT override stays free-text: it is set by whoever deploys the
+ * service, who can already do worse.
+ */
+export const SELECTABLE_MODELS: Record<string, string> = {
+  opus: OPUS,
+  sonnet: SONNET,
+};
+
 export function modelFor(
   purpose: Purpose,
   env: Record<string, string | undefined> = process.env,
+  /**
+   * A model the caller explicitly chose, taking precedence over the
+   * environment. Must be a key of SELECTABLE_MODELS; anything else is IGNORED
+   * rather than rejected, so an unknown value degrades to the configured
+   * default instead of failing the question.
+   */
+  chosen?: string,
 ): ModelChoice {
   const base = DEFAULTS[purpose] ?? DEFAULTS.chat;
-  const override = env[ENV_KEY[purpose]]?.trim();
+
+  /**
+   * The caller's choice wins over the environment, and both change only the
+   * MODEL. Thinking, effort and the output ceiling stay with the purpose,
+   * because they describe the JOB rather than the engine -- so picking Sonnet
+   * buys a cheaper answer to the same question, not a shallower one.
+   */
+  const picked = chosen ? SELECTABLE_MODELS[chosen] : undefined;
+  const override = picked ?? env[ENV_KEY[purpose]]?.trim();
   if (!override) return base;
-  // Only the model is overridable. Thinking and effort stay with the purpose,
-  // because they describe the JOB rather than the engine.
   return { ...base, model: override };
 }
 

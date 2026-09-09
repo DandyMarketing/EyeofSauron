@@ -195,6 +195,19 @@ export async function askSauron(
    * the two questions genuinely differ for one caller.
    */
   noteScope?: string[],
+  /**
+   * A model the person asking explicitly chose.
+   *
+   * The tiering in model-policy.ts decides what a JOB needs; this lets the
+   * person paying decide what they are willing to spend on it. Only the model
+   * changes -- thinking, effort and the output ceiling stay with the purpose --
+   * so choosing Sonnet buys a cheaper answer to the same question rather than a
+   * deliberately worse one.
+   *
+   * Validated against an allowlist inside modelFor, because this value comes
+   * from a browser and every request against it is billed.
+   */
+  chosenModel?: string,
 ): Promise<QueryResult> {
   /**
    * Chosen ONCE, before the first call, and used for every turn.
@@ -204,7 +217,7 @@ export async function askSauron(
    * honest split available -- the tool loop's first round is routing and its
    * last is analysis, through the same call site.
    */
-  const choice = modelFor(purpose);
+  const choice = modelFor(purpose, process.env, chosenModel);
   const toolCalls: QueryResult['toolCalls'] = [];
   const charts: QueryResult['charts'] = [];
 

@@ -170,3 +170,39 @@ test('a model override does not change the ceiling', () => {
     delete process.env.SAURON_MODEL_LOOKUP;
   }
 });
+
+test('a caller may choose the model, and only the model', () => {
+  // The tiering decides what a JOB needs; the person paying decides what the
+  // question is worth. Thinking, effort and the ceiling describe the job, so
+  // choosing Sonnet buys a cheaper answer to the same question rather than a
+  // deliberately worse one.
+  const base = modelFor('chat', {});
+  const cheap = modelFor('chat', {}, 'sonnet');
+
+  assert.equal(cheap.model, SONNET);
+  assert.equal(cheap.thinking, base.thinking);
+  assert.equal(cheap.effort, base.effort);
+  assert.equal(cheap.maxTokens, base.maxTokens);
+});
+
+test('the caller wins over the environment', () => {
+  const choice = modelFor('chat', { SAURON_MODEL_CHAT: 'some-other-model' }, 'sonnet');
+  assert.equal(choice.model, SONNET);
+});
+
+test('an unknown model is ignored, never passed through', () => {
+  // This value arrives from a browser and every request against it is billed.
+  // A passthrough would let anyone with a session point our key at whatever is
+  // most expensive, or at a model nothing here has been tested against.
+  const choice = modelFor('chat', {}, 'claude-something-enormous');
+  assert.equal(choice.model, OPUS);
+
+  // And it degrades rather than failing: an unknown value must not cost
+  // somebody their question.
+  assert.equal(choice.maxTokens, modelFor('chat', {}).maxTokens);
+});
+
+test('an unknown choice still lets the environment override stand', () => {
+  const choice = modelFor('chat', { SAURON_MODEL_CHAT: 'operator-chosen' }, 'nonsense');
+  assert.equal(choice.model, 'operator-chosen');
+});

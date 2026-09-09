@@ -363,6 +363,19 @@
     flex-shrink: 0;
   }
 
+  #model-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  #model-row select {
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+  #model-note { font-size: 11px; }
   .input-row {
     max-width: 780px;
     margin: 0 auto;
@@ -523,6 +536,23 @@
   </div>
 
   <div id="input-area">
+    <!--
+      The model choice, offered rather than deduced.
+
+      The tiering in model-policy.ts decides what a JOB needs; it cannot know
+      what a given question is worth to the person paying for it. Only the
+      model changes -- thinking, effort and the output ceiling stay with the
+      purpose -- so Sonnet buys a cheaper answer to the same question rather
+      than a deliberately worse one.
+    -->
+    <div id="model-row">
+      <label for="model-select">Model</label>
+      <select id="model-select">
+        <option value="opus">Opus — deeper, slower, dearer</option>
+        <option value="sonnet">Sonnet — quicker and cheaper</option>
+      </select>
+      <span id="model-note"></span>
+    </div>
     <div class="input-row">
       <textarea id="question" rows="1" placeholder="Ask about your venues..." autofocus></textarea>
       <button id="send" title="Send">
@@ -544,6 +574,35 @@
 const chat = document.getElementById('chat');
 const input = document.getElementById('question');
 const sendBtn = document.getElementById('send');
+const modelSelect = document.getElementById('model-select');
+
+/**
+ * Remembered per browser, because a choice you have to re-make every question
+ * is one nobody uses.
+ *
+ * Wrapped because localStorage throws outright in a private window or with
+ * site data blocked, and a chat that will not load over a remembered dropdown
+ * is a poor trade.
+ */
+try {
+  const saved = localStorage.getItem('sauron-model');
+  if (saved === 'opus' || saved === 'sonnet') modelSelect.value = saved;
+} catch (e) { /* no remembered choice; the default stands */ }
+
+/**
+ * Switching mid-conversation is legitimate and is NOT free, so it says so.
+ *
+ * Prompt caches are model-scoped, so the first question after a switch pays to
+ * write a fresh prefix instead of reading the cached one. Worth knowing before
+ * somebody toggles it back and forth expecting to save money.
+ */
+modelSelect.addEventListener('change', () => {
+  try { localStorage.setItem('sauron-model', modelSelect.value); } catch (e) { /* not remembered */ }
+  const note = document.getElementById('model-note');
+  note.textContent = history.length > 0
+    ? 'Switched mid-conversation — the next answer rebuilds the cache, so it costs a little more than usual.'
+    : '';
+});
 const welcome = document.getElementById('welcome');
 
 const appShell = document.getElementById('app-shell');
@@ -902,7 +961,7 @@ async function send() {
     const res = await fetch('/ask', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, history, model: modelSelect.value }),
     });
 
     removeTyping();

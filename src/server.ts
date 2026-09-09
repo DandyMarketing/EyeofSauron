@@ -273,7 +273,7 @@ app.post('/ask', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
-  const body = await c.req.json<{ question: string; history?: ChatMessage[] }>();
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   try {
@@ -281,7 +281,24 @@ app.post('/ask', async (c) => {
     // WHO and WHAT are independent: the filter decides which venues, the role
     // decides which kinds of data. Both are enforced server-side in the tool
     // layer, never by what the model was offered.
-    const result = await askSauron(body.question, body.history ?? [], venueFilter, 'chat', effectiveRole(user));
+    /**
+     * The model the person asking chose, if they chose one.
+     *
+     * Offered because the tiering cannot know what a given question is worth to
+     * the person paying for it -- and because 'lookup', the cheap tier the
+     * brief specifies, was never wired to anything and so has never once run.
+     * An explicit choice is honest where an automatic one would need to
+     * classify the question before answering it, which costs a call on every
+     * question to save on some of them.
+     *
+     * Unvalidated here on purpose: modelFor holds the allowlist, so an unknown
+     * value degrades to the configured default rather than failing the
+     * question, and no browser can point our API key at an arbitrary model.
+     */
+    const result = await askSauron(
+      body.question, body.history ?? [], venueFilter, 'chat',
+      effectiveRole(user), undefined, body.model,
+    );
     return c.json(result);
   } catch (e: any) {
     /**
