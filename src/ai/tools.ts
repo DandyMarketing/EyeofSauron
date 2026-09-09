@@ -462,6 +462,23 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_public_holidays',
+    description:
+      'SINGAPORE PUBLIC HOLIDAYS for a date range, from the Ministry of Manpower via data.gov.sg. USE THIS INSTEAD OF SEARCHING THE WEB. Never run a web search for Singapore public holidays, school holidays or the MOE calendar — the holidays are here, and searching for them costs a dozen page fetches that then sit in context for the rest of the conversation. ' +
+      'WHY IT MATTERS FOR TRADE. A public holiday changes covers, the mix of bookings and walk-ins, and what people order, and a holiday MONDAY behaves nothing like an ordinary Monday. A week containing one is not comparable to the week before it, and saying so is usually more useful than the comparison. ' +
+      'OBSERVED DAYS ARE SEPARATE ROWS AND ARE THE ONES THAT MATTER. When a holiday falls on a Sunday the following Monday is gazetted in lieu — National Day 2026 is Sunday 9 August AND Monday 10 August. For a restaurant the Monday is the day the covers move, so read both. is_observed marks the day-in-lieu. ' +
+      'IT IS NOT A TRADING CALENDAR. It says nothing about whether a venue opened — Firangi Superstar closes every Sunday regardless — so never infer a closure from it, and never infer that a venue traded because a day is absent. ' +
+      'SCHOOL TERMS ARE NOT IN HERE. If a question needs them, say so rather than searching: it is a known gap, not something to fill from a blog.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        start_date: { type: 'string', description: 'Start of the range (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of the range (inclusive), YYYY-MM-DD.' },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_booking_lead_time',
     description:
       'HOW FAR AHEAD PEOPLE BOOK, month by month, per venue and for the group. Use this for any question about lead time, booking windows, how early or late reservations come in, or whether guests are booking further ahead than they used to. ' +

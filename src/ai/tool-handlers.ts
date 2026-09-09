@@ -106,6 +106,8 @@ export async function handleToolCall(
       return queryVisitDistribution(input);
     case 'query_booking_lead_time':
       return queryBookingLeadTime(input);
+    case 'query_public_holidays':
+      return queryPublicHolidays(input);
     case 'check_booking_channels':
       return checkBookingChannels(input);
     case 'query_hourly_sales':
@@ -1790,6 +1792,71 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * Singapore public holidays, read rather than searched.
+ *
+ * WHY THIS TOOL EXISTS. The weekly run on 7 Sep 2026 made eleven web searches
+ * across seventy-eight pages, all of them holiday calendars, once per venue,
+ * and cited none of them. Each page then sat in context and was re-read on
+ * every subsequent round of that venue's analysis, so the cost was not eleven
+ * searches but eleven searches multiplied by thirteen rounds.
+ *
+ * The data is gazetted by the Ministry of Manpower and published on
+ * data.gov.sg, so this is the source rather than a report of it -- which is
+ * the standard CLAUDE.md sets for any external figure: a warehouse row with a
+ * source and a url, not something a model read once in a blog.
+ */
+async function queryPublicHolidays(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const { data, error } = await supabase
+    .from('public_holidays')
+    .select('holiday_date, name, weekday, is_observed')
+    .gte('holiday_date', input.start_date)
+    .lte('holiday_date', input.end_date)
+    .order('holiday_date', { ascending: true });
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not read public holidays: ${error.message}. If this says the table does not exist, migration 040_public_holidays.sql has not been applied.`,
+    });
+  }
+
+  /**
+   * How far the calendar actually goes, returned with every answer.
+   *
+   * The ONLY way this table can be wrong is the far end going stale, and that
+   * failure is invisible: holidays are gazetted about a year ahead, so a query
+   * for a year nobody has ingested returns an empty list that reads exactly
+   * like a year with no public holidays.
+   */
+  const { data: newest } = await supabase
+    .from('public_holidays')
+    .select('holiday_date')
+    .order('holiday_date', { ascending: false })
+    .limit(1);
+
+  const coveredTo = newest?.[0]?.holiday_date ?? null;
+  const askedBeyond = coveredTo !== null && input.end_date > coveredTo;
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    holidays: data ?? [],
+    source: 'Ministry of Manpower via data.gov.sg',
+    calendar_covers_to: coveredTo,
+    caveats: [
+      ...(askedBeyond
+        ? [`THE CALENDAR ONLY RUNS TO ${coveredTo}, and you asked past it. Dates beyond that are NOT covered — an empty result there means nobody has ingested that year, not that there are no holidays. Say so rather than treating the period as clear.`]
+        : []),
+      'A day-in-lieu is its own row with is_observed true. For a restaurant the Monday after a Sunday holiday is usually the day covers actually move.',
+      'This is not a trading calendar. It says nothing about whether a venue opened — Firangi Superstar closes every Sunday regardless — so never read a closure from it.',
+      'School terms are not held anywhere in this system. If a question needs them, say they are missing rather than searching for them.',
+    ],
   });
 }
 
