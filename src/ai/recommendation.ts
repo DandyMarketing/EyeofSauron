@@ -295,11 +295,29 @@ export function parseRecommendations(
    * recommendations is the array with keys stapled on. Each is a container
    * mistake, not a content one.
    */
-  let list = (raw as Record<string, unknown>).recommendations;
+  let list: unknown = (raw as Record<string, unknown>).recommendations;
 
-  // A JSON string rather than a value. Parsed once, never repeatedly.
-  if (typeof list === 'string') {
-    try { list = JSON.parse(list); } catch { /* left as-is; reported below */ }
+  /**
+   * Unwrap the packaging, however many layers of it there are.
+   *
+   * Measured 10 Sep 2026: `recommendations` came back as a STRING containing
+   * `{"recommendations":[{...}]}` -- the whole payload stringified and nested
+   * inside itself. The first attempt at this parsed the string, got an object
+   * with no headline, and gave up one step short. Two layers of the same
+   * mistake need two unwraps, so it loops rather than handling one.
+   *
+   * Bounded at three, because an unbounded loop over model output is how a
+   * cheap recovery becomes a hang.
+   */
+  for (let i = 0; i < 3; i++) {
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); continue; } catch { break; }
+    }
+    if (list && typeof list === 'object' && !Array.isArray(list) && 'recommendations' in (list as any)) {
+      list = (list as any).recommendations;
+      continue;
+    }
+    break;
   }
 
   // A lone recommendation where an array of one was asked for.

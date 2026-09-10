@@ -434,3 +434,37 @@ describe('the container is coerced, the content never is', () => {
     assert.match((parsed as any).reason, /object with keys \[note\]/);
   });
 });
+
+describe('the payload nested inside itself', () => {
+  test('a stringified whole payload is unwrapped twice', () => {
+    // Measured 10 Sep 2026. recommendations came back as a STRING containing
+    // {"recommendations":[...]} — the entire payload stringified and nested
+    // inside itself. One unwrap parses the string and lands on an object with
+    // no headline, which is one step short of the array.
+    const parsed = parseRecommendations({
+      recommendations: JSON.stringify({ recommendations: [rec(1), rec(2)] }),
+    });
+
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, 2);
+    assert.equal(parsed.value[0].headline, rec(1).headline);
+  });
+
+  test('an object nested inside itself is unwrapped', () => {
+    const parsed = parseRecommendations({ recommendations: { recommendations: [rec(1)] } });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, 1);
+  });
+
+  test('unwrapping is bounded, not recursive without end', () => {
+    // An unbounded loop over model output is how a cheap recovery becomes a
+    // hang. Three unwraps is generous — the measured case needed two — so a
+    // payload buried deeper than that is refused rather than chased.
+    let deep: any = [rec(1)];
+    for (let i = 0; i < 6; i++) deep = { recommendations: deep };
+
+    const parsed = parseRecommendations(deep);
+    assert.equal(parsed.ok, false);
+    assert.match((parsed as any).reason, /not an array/);
+  });
+});
