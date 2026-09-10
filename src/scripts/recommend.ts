@@ -277,9 +277,20 @@ for (const venue of venues as any[]) {
      * is any good, which cannot be judged from a headline. Printed before the
      * structuring call so it survives a failure in it.
      */
-    if (dryRun) {
-      console.log(`\n${analysis.answer}\n`);
-    }
+    /**
+     * The prose is printed LAST, after the outcome, and that reverses an
+     * earlier decision on purpose.
+     *
+     * It used to print here so it would "survive a failure in the structuring
+     * pass". It survives; the failure does not. A 13,000-character analysis is
+     * hundreds of log lines, and both Railway log exports on 9 and 10 Sep 2026
+     * truncated inside it — so two runs in a row reported Crashed with the
+     * reason sitting just past the end of the file.
+     *
+     * A run whose outcome is only legible when the log does not truncate is a
+     * run that hides its result. The outcome is cheap to print and the prose is
+     * not, so the cheap one goes first.
+     */
 
     // Pass two: rows, not prose.
     const structured = await client.messages.create({
@@ -314,6 +325,9 @@ for (const venue of venues as any[]) {
 
     const call = structured.content.find(b => b.type === 'tool_use') as any;
     const parsed = parseRecommendations(call?.input);
+
+    /** Printed after the outcome below, so a truncated log still shows why. */
+    const printProse = () => { if (dryRun) console.log(`\n${analysis.answer}\n`); };
 
     if (parsed.ok && parsed.dropped) {
       // A NOTICE, not a problem. Visible because a model routinely ignoring
@@ -372,6 +386,7 @@ for (const venue of venues as any[]) {
        */
       console.error(`  FAILED to store — ${detail}`);
       problems.push(detail);
+      printProse();
       continue;
     }
 
@@ -393,6 +408,7 @@ for (const venue of venues as any[]) {
       // nobody believes.
       quietVenues++;
       console.log('  nothing worth raising this week.');
+      printProse();
       continue;
     }
 
@@ -435,11 +451,13 @@ for (const venue of venues as any[]) {
 
     if (kept.length === 0) {
       console.log('  nothing new after suppression.');
+      printProse();
       continue;
     }
 
     if (dryRun) {
       for (const k of kept) console.log(`  [dry run] ${k.domain} (${k.confidence}) — ${k.headline}`);
+      printProse();
       continue;
     }
 
@@ -471,6 +489,10 @@ for (const venue of venues as any[]) {
     );
 
     if (writeError) {
+      // Printed here as well as collected, for the same reason as the
+      // structuring failure: a summary at the very end is a summary a
+      // truncated log never reaches.
+      console.error(`  FAILED to store — ${venue.name}: write failed — ${writeError.message}`);
       problems.push(`${venue.name}: write failed — ${writeError.message}`);
       continue;
     }
