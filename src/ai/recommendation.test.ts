@@ -395,3 +395,42 @@ describe('the cap trims rather than discards', () => {
     assert.match((parsed as any).reason, /operations/);
   });
 });
+
+describe('the container is coerced, the content never is', () => {
+  test('a lone object is one recommendation, not a failure', () => {
+    // Measured 9 Sep 2026: stop_reason=tool_use, key present, not an array, and
+    // a 10,888-character Opus analysis thrown away over the container.
+    const parsed = parseRecommendations({ recommendations: rec(1) });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, 1);
+  });
+
+  test('a JSON string of an array is an array', () => {
+    const parsed = parseRecommendations({ recommendations: JSON.stringify([rec(1), rec(2)]) });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, 2);
+  });
+
+  test('an object keyed by index is its values', () => {
+    const parsed = parseRecommendations({ recommendations: { '0': rec(1), '1': rec(2) } });
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.length, 2);
+  });
+
+  test('an unrecoverable shape says what it actually was', () => {
+    // "no recommendations array returned" described our verdict and left
+    // nothing to act on. The type and a preview separate a string, an object,
+    // a null and a number, which send somebody to four different places.
+    const parsed = parseRecommendations({ recommendations: 42 });
+    assert.equal(parsed.ok, false);
+    assert.match((parsed as any).reason, /recommendations is number/);
+  });
+
+  test('coercion never invents content', () => {
+    // An object with no headline is not a recommendation, and wrapping it would
+    // be guessing at meaning rather than at a container.
+    const parsed = parseRecommendations({ recommendations: { note: 'nothing to say' } });
+    assert.equal(parsed.ok, false);
+    assert.match((parsed as any).reason, /object with keys \[note\]/);
+  });
+});

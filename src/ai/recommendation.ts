@@ -279,9 +279,57 @@ export function parseRecommendations(
     return { ok: false, reason: 'response was not an object' };
   }
 
-  const list = (raw as Record<string, unknown>).recommendations;
+  /**
+   * The SHAPE the model returned, coerced where it is unambiguous.
+   *
+   * Measured 9 Sep 2026: the run failed with "no recommendations array
+   * returned — stop_reason=tool_use, keys: [recommendations]". The key was
+   * present and nothing was truncated, so the value simply was not an array —
+   * and the message described our verdict rather than what arrived, which left
+   * nothing to act on. A full Opus analysis of 10,888 characters was discarded.
+   *
+   * Coercing is NOT the reject-rather-than-repair rule being broken. That rule
+   * exists so nobody guesses at what was MEANT, and none of these guesses at
+   * anything: a JSON string of an array is an array, a lone object carrying a
+   * headline is one recommendation, and an object whose values are the
+   * recommendations is the array with keys stapled on. Each is a container
+   * mistake, not a content one.
+   */
+  let list = (raw as Record<string, unknown>).recommendations;
+
+  // A JSON string rather than a value. Parsed once, never repeatedly.
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { /* left as-is; reported below */ }
+  }
+
+  // A lone recommendation where an array of one was asked for.
+  if (list && typeof list === 'object' && !Array.isArray(list) && 'headline' in (list as any)) {
+    list = [list];
+  }
+
+  // An object keyed by index or by id, whose VALUES are the recommendations.
+  if (list && typeof list === 'object' && !Array.isArray(list)) {
+    const values = Object.values(list as Record<string, unknown>);
+    if (values.length > 0 && values.every(v => v && typeof v === 'object' && 'headline' in (v as any))) {
+      list = values;
+    }
+  }
+
   if (!Array.isArray(list)) {
-    return { ok: false, reason: 'no recommendations array returned' };
+    /**
+     * SAY WHAT IT WAS, not that it was wrong.
+     *
+     * The type and a short preview are the two facts that separate a string, an
+     * object, a null and a number -- all of which read identically as "not an
+     * array" and send somebody to four different places.
+     */
+    const actual = (raw as Record<string, unknown>).recommendations;
+    const shape = actual === null ? 'null'
+      : Array.isArray(actual) ? 'array'
+      : typeof actual === 'object' ? `object with keys [${Object.keys(actual as any).join(', ')}]`
+      : typeof actual;
+    const preview = JSON.stringify(actual ?? null).slice(0, 200);
+    return { ok: false, reason: `recommendations is ${shape}, not an array — value begins: ${preview}` };
   }
 
   /**
