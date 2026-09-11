@@ -549,33 +549,56 @@ export async function askSauron(
     const assistantContent = response.content;
     messages.push({ role: 'assistant', content: assistantContent });
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of assistantContent) {
-      if (block.type === 'tool_use') {
-        toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
-        const result = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role);
-
-        // create_chart returns rendered SVG. Pull it out for the client and
-        // strip it before the result goes back to the model -- a chart is
-        // several KB of markup that would burn context to no purpose, since
-        // the model already gets a numeric summary alongside it.
-        let forModel = result;
-        if (block.name === 'create_chart') {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.__chart_svg) {
-              charts.push({ title: parsed.title ?? 'Chart', svg: parsed.__chart_svg });
-              delete parsed.__chart_svg;
-              forModel = JSON.stringify(parsed);
-            }
-          } catch {
-            // Malformed result: pass it through untouched rather than losing it.
-          }
-        }
-
-        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: forModel });
-      }
+    /**
+     * CONCURRENTLY, because these are independent and were not.
+     *
+     * A round routinely carries four or five tool calls -- sales, covers, the
+     * P&L, a chart -- and each one is a database round trip. Awaiting them in a
+     * loop made a round take as long as the sum of its queries when it only
+     * needed to take as long as the slowest, and a complex question can be eight
+     * such rounds. Nothing here shares state or depends on another's result:
+     * the model already decided what to ask before any of them ran.
+     *
+     * ORDER IS PRESERVED by mapping rather than pushing. Tool results must line
+     * up with their tool_use ids, and `toolCalls` is the stored evidence -- a
+     * recommendation whose evidence list reshuffles itself by whichever query
+     * finished first is a worse record than one that is merely slow.
+     *
+     * A rejection still fails the round, exactly as it did before.
+     * handleToolCall returns errors as JSON rather than throwing, so a throw
+     * here is our own bug and should surface rather than be swallowed by an
+     * allSettled that pretends the round succeeded.
+     */
+    const uses = assistantContent.filter((b: any) => b.type === 'tool_use') as any[];
+    for (const block of uses) {
+      toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
     }
+
+    const results = await Promise.all(
+      uses.map(block => handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role)),
+    );
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = uses.map((block, i) => {
+      // create_chart returns rendered SVG. Pull it out for the client and
+      // strip it before the result goes back to the model -- a chart is
+      // several KB of markup that would burn context to no purpose, since
+      // the model already gets a numeric summary alongside it.
+      let forModel = results[i];
+      if (block.name === 'create_chart') {
+        try {
+          const parsed = JSON.parse(results[i]);
+          if (parsed.__chart_svg) {
+            charts.push({ title: parsed.title ?? 'Chart', svg: parsed.__chart_svg });
+            delete parsed.__chart_svg;
+            forModel = JSON.stringify(parsed);
+          }
+        } catch {
+          // Malformed result: pass it through untouched rather than losing it.
+        }
+      }
+
+      return { type: 'tool_result' as const, tool_use_id: block.id, content: forModel };
+    });
 
     /**
      * Cache the conversation as it grows, by MOVING one breakpoint rather than
