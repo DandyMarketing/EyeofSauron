@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { fingerprint, parseRecommendations, suppressRepeats, analysisBrief, recommendationTool, MAX_PER_RUN, RECOMMENDATION_DOMAINS, namesOtherVenues, lastCompleteWeek, unsettledWeekNote } from './recommendation.js';
+import { fingerprint, parseRecommendations, suppressRepeats, analysisBrief, recommendationTool, chartMenu, MAX_PER_RUN, RECOMMENDATION_DOMAINS, namesOtherVenues, lastCompleteWeek, unsettledWeekNote } from './recommendation.js';
 
 const rec = (over: Partial<{ headline: string; body: string; domain: string; confidence: number }> = {}) => ({
   headline: over.headline ?? 'Move the Tuesday set menu to Wednesday',
@@ -467,4 +467,116 @@ describe('the payload nested inside itself', () => {
     assert.equal(parsed.ok, false);
     assert.match((parsed as any).reason, /not an array/);
   });
+});
+
+// --- charts belong to a recommendation, not to the venue --------------------
+
+/**
+ * Measured on the Firangi briefing of 16 Sep 2026: a marketing recommendation
+ * about filling a two-night collab and a labour recommendation about cutting
+ * the wage line each carried the SAME two charts -- weekly net sales and weekly
+ * covers -- because every recommendation was stored with every chart the
+ * analysis drew. Neither chart shows a booking window or a wage line. A chart
+ * printed under a finding reads as the evidence for it.
+ */
+test('each recommendation keeps only the charts it named', () => {
+  const parsed = parseRecommendations({
+    recommendations: [
+      { ...rec({ headline: 'Work the phone for the collab', domain: 'marketing' }), chart_indexes: [] },
+      { ...rec({ headline: 'Cut the wage line now', domain: 'labour' }), chart_indexes: [1] },
+    ],
+  }, 2);
+
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value[0].chart_indexes, []);
+  assert.deepEqual(parsed.value[1].chart_indexes, [1]);
+});
+
+test('no charts is a valid answer and the common one', () => {
+  // create_chart covers sales, covers, spend per head, walk-ins, no-shows and
+  // Instagram. Most findings are about something else, and an unrelated chart
+  // is worse than none -- it implies evidence it does not carry.
+  const parsed = parseRecommendations({ recommendations: [{ ...rec(), chart_indexes: [] }] }, 3);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value[0].chart_indexes, []);
+});
+
+test('a missing chart list means no charts, never a rejected finding', () => {
+  // Throwing away a good recommendation over an absent picture would be the
+  // discarded-analysis mistake again, one field further down.
+  const parsed = parseRecommendations({ recommendations: [rec()] }, 2);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value.length, 1);
+  assert.deepEqual(parsed.value[0].chart_indexes, []);
+});
+
+test('an index pointing at no chart loses the chart, not the recommendation', () => {
+  const parsed = parseRecommendations({
+    recommendations: [{ ...rec(), chart_indexes: [0, 7] }],
+  }, 2);
+
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value[0].chart_indexes, [0], 'the valid index survived');
+  assert.ok(parsed.badIndexes, 'the bad one must be reported, never silently dropped');
+  assert.match(parsed.badIndexes!.join(' '), /does not exist/);
+});
+
+test('a repeated index is stored once', () => {
+  const parsed = parseRecommendations({
+    recommendations: [{ ...rec(), chart_indexes: [1, 1, 1] }],
+  }, 2);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value[0].chart_indexes, [1]);
+});
+
+test('one chart may support two findings — this is not a partition', () => {
+  const parsed = parseRecommendations({
+    recommendations: [
+      { ...rec({ headline: 'A' }), chart_indexes: [0] },
+      { ...rec({ headline: 'B' }), chart_indexes: [0] },
+    ],
+  }, 1);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value.map(v => v.chart_indexes), [[0], [0]]);
+});
+
+test('a caller that forgets the chart count gets no charts rather than unchecked ones', () => {
+  // The default is zero deliberately: attaching a chart by an index nothing
+  // validated is the failure this change exists to stop.
+  const parsed = parseRecommendations({ recommendations: [{ ...rec(), chart_indexes: [0] }] });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value[0].chart_indexes, []);
+});
+
+test('the structuring pass is told which charts exist, by title', () => {
+  const menu = chartMenu([
+    { title: 'Firangi Superstar — weekly net sales, 6 Jul to 13 Sep 2026' },
+    { title: 'Firangi Superstar — weekly covers, 6 Jul to 13 Sep 2026' },
+  ]);
+
+  assert.match(menu, /0: Firangi Superstar — weekly net sales/);
+  assert.match(menu, /1: Firangi Superstar — weekly covers/);
+  // The instruction has to travel with the list, or the model will attach the
+  // charts to everything exactly as the old code did.
+  assert.match(menu, /should reference none/);
+});
+
+test('no charts drawn means no chart section in the prompt', () => {
+  // A heading with nothing under it invites the model to invent an index.
+  assert.equal(chartMenu([]), '');
+});
+
+test('the tool requires the chart list, so omitting it is a visible choice', () => {
+  const schema: any = recommendationTool().input_schema;
+  const item = schema.properties.recommendations.items;
+  assert.ok(item.properties.chart_indexes, 'chart_indexes is not in the schema');
+  assert.ok(item.required.includes('chart_indexes'));
+  assert.match(item.properties.chart_indexes.description, /EMPTY/);
 });

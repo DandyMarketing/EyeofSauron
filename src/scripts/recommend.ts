@@ -11,6 +11,7 @@ import { feeAnomalies, feeWarning, unexplained, type FeeMonth, type FeeAcknowled
 import {
   analysisBrief,
   recommendationTool,
+  chartMenu,
   parseRecommendations,
   suppressRepeats,
   namesOtherVenues,
@@ -320,11 +321,11 @@ for (const venue of venues as any[]) {
       }],
       tools: [recommendationTool() as any],
       tool_choice: { type: 'tool', name: 'record_recommendations' },
-      messages: [{ role: 'user', content: `The briefing for ${venue.name}, ${periodStart} to ${periodEnd}:\n\n${analysis.answer}` }],
+      messages: [{ role: 'user', content: `The briefing for ${venue.name}, ${periodStart} to ${periodEnd}:\n\n${analysis.answer}${chartMenu(analysis.charts)}` }],
     });
 
     const call = structured.content.find(b => b.type === 'tool_use') as any;
-    const parsed = parseRecommendations(call?.input);
+    const parsed = parseRecommendations(call?.input, analysis.charts.length);
 
     /** Printed after the outcome below, so a truncated log still shows why. */
     const printProse = () => { if (dryRun) console.log(`\n${analysis.answer}\n`); };
@@ -401,6 +402,41 @@ for (const venue of venues as any[]) {
         console.error(`  dropped a malformed recommendation — ${r}`);
         notices.push(`${venue.name}: ${r}`);
       }
+    }
+
+    /**
+     * A chart reference pointing at no chart. The finding was kept.
+     *
+     * Worth a notice rather than silence: it means the structurer was working
+     * from a chart list it misread, and the next index it invents might be in
+     * range and simply wrong -- which is the failure this whole change exists
+     * to stop, arriving by a different door.
+     */
+    if (parsed.badIndexes) {
+      for (const b of parsed.badIndexes) {
+        console.error(`  dropped a chart reference — ${b}`);
+        notices.push(`${venue.name}: ${b}`);
+      }
+    }
+
+    /**
+     * How the charts were spread, said out loud on every run.
+     *
+     * Until 16 Sep 2026 every recommendation carried EVERY chart the analysis
+     * drew, so a marketing finding and a labour finding arrived under the same
+     * pair of sales and covers charts. Now the structuring pass assigns them,
+     * and an assignment step that quietly stops working looks exactly like a
+     * week whose findings were all unchartable. Printing the split is what
+     * distinguishes the two.
+     */
+    if (analysis.charts.length > 0) {
+      const used = new Set(parsed.value.flatMap(k => k.chart_indexes));
+      const withCharts = parsed.value.filter(k => k.chart_indexes.length > 0).length;
+      console.log(
+        `  charts: ${analysis.charts.length} drawn, ${used.size} used, ` +
+        `${withCharts}/${parsed.value.length} recommendation(s) carry one` +
+        (withCharts === 0 ? ' — none matched a finding, which is a normal outcome' : ''),
+      );
     }
 
     if (parsed.value.length === 0) {
@@ -482,7 +518,20 @@ for (const venue of venues as any[]) {
          * middle, and it is worth knowing which of the two this is.
          */
         evidence: analysis.toolCalls,
-        charts: analysis.charts,
+        /**
+         * THIS recommendation's charts, not the venue's.
+         *
+         * It used to be `analysis.charts` -- every chart the analysis drew,
+         * stored against every recommendation it produced. On the Firangi
+         * briefing of 16 Sep 2026 a marketing finding about filling a two-night
+         * collab and a labour finding about cutting the wage line each carried
+         * the same weekly net sales and weekly covers charts, neither of which
+         * shows a booking window or a wage line. A chart printed under a
+         * finding reads as the evidence for it, so repeating one pair under
+         * everything either trains the reader to ignore the charts or persuades
+         * them of a link that was never claimed.
+         */
+        charts: k.chart_indexes.map(i => analysis.charts[i]).filter(Boolean),
         model: ANALYSIS_MODEL,
         fingerprint: fingerprint(k.headline),
       })),

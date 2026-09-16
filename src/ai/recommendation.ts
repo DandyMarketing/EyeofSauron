@@ -139,6 +139,31 @@ export interface Recommendation {
   body: string;
   domain: string;
   confidence: number;
+  /**
+   * Which of the analysis's charts belong to THIS recommendation, by index.
+   *
+   * WHY THIS EXISTS. The analysis pass draws charts for the venue as a whole
+   * and every recommendation was stored with ALL of them. Measured 16 Sep 2026
+   * on the Firangi briefing: a marketing recommendation about filling a
+   * two-night collab and a labour recommendation about cutting the wage line
+   * carried the identical pair of charts -- weekly net sales and weekly covers
+   * -- neither of which shows a booking window or a wage line. A chart under a
+   * finding reads as the evidence for it. Repeating the same pair under
+   * everything makes the reader either distrust the pairing or, worse, believe
+   * it.
+   *
+   * EMPTY IS THE RIGHT ANSWER OFTEN. Most findings have no chart that supports
+   * them -- create_chart covers sales, covers, spend per head, walk-ins,
+   * no-shows and Instagram, and nothing else. An unrelated chart is worse than
+   * no chart: it implies evidence it does not carry. So this is allowed to be
+   * empty and the run counts how often it is, because a structurer that
+   * silently stopped assigning charts would otherwise look exactly like a week
+   * whose findings were all unchartable.
+   *
+   * NOT A PARTITION. One chart can genuinely support two findings, so indexes
+   * may repeat across recommendations.
+   */
+  chart_indexes: number[];
 }
 
 /**
@@ -254,14 +279,43 @@ export function recommendationTool() {
                 type: 'number',
                 description: '0 to 1, and it should actually vary. An eight-week margin trend is 0.9; one unusual Tuesday is 0.4. An engine that presents everything at full confidence teaches people to discount all of it.',
               },
+              chart_indexes: {
+                type: 'array',
+                items: { type: 'integer' },
+                description:
+                  'Indexes of the charts listed above that show the figures THIS recommendation actually rests on. Usually EMPTY, and empty is the right answer: a chart printed under a finding reads as the evidence for it, so a weekly-sales chart under a recommendation about a booking window or a wage line is worse than no chart at all — it implies evidence it does not carry. Include an index only if a reader looking at that chart would see the thing the recommendation is claiming. The same chart may be used by two recommendations if it genuinely supports both. Never include an index that is not in the list.',
+              },
             },
-            required: ['headline', 'body', 'domain', 'confidence'],
+            required: ['headline', 'body', 'domain', 'confidence', 'chart_indexes'],
           },
         },
       },
       required: ['recommendations'],
     },
   };
+}
+
+/**
+ * The charts the analysis drew, listed so the structuring pass can point at one.
+ *
+ * TITLES ONLY. The structurer never sees the SVG and does not need to: a chart
+ * built by create_chart is titled with its metric, venue and period, which is
+ * exactly the information needed to decide whether it shows what a finding
+ * claims. Sending the markup would add several KB per chart to a call whose
+ * ceiling has already had to be raised once for running out mid-JSON.
+ *
+ * Returns an empty string when nothing was drawn, so the prompt gains nothing
+ * rather than gaining a heading with nothing under it.
+ */
+export function chartMenu(charts: Array<{ title: string }>): string {
+  if (charts.length === 0) return '';
+
+  return (
+    `\n\n---\nCHARTS DRAWN DURING THIS ANALYSIS. Reference them by index in ` +
+    `chart_indexes, and only where the chart shows the figures that recommendation ` +
+    `rests on. Most recommendations should reference none.\n` +
+    charts.map((c, i) => `${i}: ${c.title}`).join('\n')
+  );
 }
 
 /**
@@ -274,7 +328,16 @@ export function recommendationTool() {
  */
 export function parseRecommendations(
   raw: unknown,
-): { ok: true; value: Recommendation[]; dropped?: number; rejected?: string[] } | { ok: false; reason: string } {
+  /**
+   * How many charts the analysis drew, so an index can be range-checked.
+   *
+   * Defaults to zero, which discards every chart reference rather than trusting
+   * one. A caller that forgets to pass it gets briefings with no charts, which
+   * is visible and harmless; the alternative default would attach charts by an
+   * index nothing had validated.
+   */
+  chartCount = 0,
+): { ok: true; value: Recommendation[]; dropped?: number; rejected?: string[]; badIndexes?: string[] } | { ok: false; reason: string } {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, reason: 'response was not an object' };
   }
@@ -392,6 +455,8 @@ export function parseRecommendations(
    * instead of an empty briefing nobody can explain.
    */
   const rejected: string[] = [];
+  /** Chart references that pointed at nothing. Reported, never fatal. */
+  const badIndexes: string[] = [];
 
   for (const [i, item] of capped.entries()) {
     const at = `recommendation ${i + 1}`;
@@ -417,11 +482,36 @@ export function parseRecommendations(
       continue;
     }
 
+    /**
+     * A bad chart index loses the CHART, never the recommendation.
+     *
+     * Same argument the cap trim and the skip-one-item rule already settled in
+     * this file: reject-rather-than-repair exists so nobody guesses at what was
+     * MEANT, and dropping an index that points at no chart guesses at nothing.
+     * Throwing away a good finding because the structurer wrote `[3]` when
+     * there were two charts would be the twelve-minute-analysis mistake again,
+     * over a picture.
+     *
+     * A missing field is read as "no charts" rather than as a failure, for the
+     * same reason -- and because no charts is the common, correct answer.
+     */
+    const rawIndexes = Array.isArray(r.chart_indexes) ? r.chart_indexes : [];
+    const chart_indexes: number[] = [];
+    for (const raw of rawIndexes) {
+      const idx = Number(raw);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= chartCount) {
+        badIndexes.push(`${at} ("${headline}") referenced chart ${JSON.stringify(raw)}, which does not exist (${chartCount} chart(s) were drawn)`);
+        continue;
+      }
+      if (!chart_indexes.includes(idx)) chart_indexes.push(idx);
+    }
+
     value.push({
       headline,
       body,
       domain,
       confidence: Math.round(confidence * 100) / 100,
+      chart_indexes,
     });
   }
 
@@ -442,6 +532,7 @@ export function parseRecommendations(
     value,
     ...(dropped > 0 ? { dropped } : {}),
     ...(rejected.length > 0 ? { rejected } : {}),
+    ...(badIndexes.length > 0 ? { badIndexes } : {}),
   };
 }
 
