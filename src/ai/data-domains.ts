@@ -48,6 +48,20 @@ export const TOOL_DOMAINS: Record<string, Domain> = {
   query_social_performance: 'marketing',
   query_top_posts: 'marketing',
   query_post_patterns: 'marketing',
+  /**
+   * Listed explicitly although `operations` is also the default, because here
+   * the default is a DECISION rather than an omission and the two must be
+   * distinguishable by reading this table.
+   *
+   * Hours, headcount and the scheduled-versus-actual variance are what running
+   * a shift needs and carry no pay, so a manager gets them. The COST columns
+   * are aggregate payroll, which the security model puts behind finance and
+   * owner -- so they are withheld inside queryLabour() by the same
+   * mayRead(role, 'payroll') check the P&L uses, and the percentage is kept.
+   * Gating the whole tool as `payroll` would have taken rostering away from the
+   * people who do the rostering.
+   */
+  query_labour: 'operations',
 };
 
 /** Domains each role may read. */

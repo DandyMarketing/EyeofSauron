@@ -4,6 +4,7 @@ import {
   modelFor,
   isModelFeatureError,
   usageLine,
+  rescueChoice,
   OPUS,
   SONNET,
 } from './model-policy.js';
@@ -15,29 +16,48 @@ import {
  * is worse than one nobody made, because everyone assumes it is in force.
  */
 
-test('the analysis paths get Opus, and they think', () => {
+test('the analysis paths get Opus, and they think hardest', () => {
   // CLAUDE.md: the analytics are table stakes, the recommendations are the
   // product. This is the path that cannot be bought elsewhere.
   assert.equal(modelFor('chat', {}).model, OPUS);
-  assert.equal(modelFor('chat', {}).thinking, true);
   assert.equal(modelFor('recommendation', {}).model, OPUS);
-  assert.equal(modelFor('recommendation', {}).thinking, true);
 });
 
-test('a lookup gets Sonnet and no thinking', () => {
+/**
+ * REWRITTEN 16 Sep 2026. These three tests used to assert `thinking === false`
+ * on the cheap tiers, and that field has been removed because it never did
+ * anything: omitting `thinking` runs ADAPTIVE on both Opus 5 and Sonnet 5, so
+ * the two purposes documented as "no thinking" were thinking every time they
+ * ran. The tests passed throughout, which is the part worth keeping in mind --
+ * they asserted our intention rather than the API's behaviour.
+ *
+ * Depth is now `effort`, which is a real control, and the assertions are on
+ * that.
+ */
+test('a lookup is shallow, and shallow now means low effort', () => {
   // "What were sales yesterday" is a date and a number. Latency matters more
   // than depth, and there is nothing for reasoning to improve.
   const lookup = modelFor('lookup', {});
   assert.equal(lookup.model, SONNET);
-  assert.equal(lookup.thinking, false);
-  assert.equal(lookup.effort, undefined);
+  assert.equal(lookup.effort, 'low');
 });
 
 test('recovery is cheap and shallow on purpose', () => {
   // It only runs when a turn already failed, and it restates data already in
   // the conversation. Deep thought cannot help.
   assert.equal(modelFor('recovery', {}).model, SONNET);
-  assert.equal(modelFor('recovery', {}).thinking, false);
+  assert.equal(modelFor('recovery', {}).effort, 'low');
+});
+
+test('no purpose can express "do not think" any more', () => {
+  // Deliberate. Anthropic's guidance is to prefer low effort over disabled
+  // thinking on Opus 5: with thinking off the model occasionally writes a tool
+  // call into its visible TEXT, which succeeds, never runs, raises nothing, and
+  // then pollutes every later round of the loop.
+  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery'] as const) {
+    assert.ok(modelFor(purpose).effort, `${purpose} has no effort`);
+    assert.equal((modelFor(purpose) as any).thinking, undefined);
+  }
 });
 
 test('the proactive path thinks harder than the interactive one', () => {
@@ -50,11 +70,11 @@ test('the proactive path thinks harder than the interactive one', () => {
 });
 
 test('an env override changes the model and nothing else', () => {
-  // thinking and effort describe the JOB, not the engine, so an override that
-  // silently turned reasoning off would be a trap.
+  // Effort describes the JOB, not the engine, so an operator override that
+  // silently made every answer shallower would be a trap. The CALLER's choice
+  // is different and deliberately does move effort -- see below.
   const overridden = modelFor('chat', { SAURON_MODEL_CHAT: 'claude-sonnet-5' });
   assert.equal(overridden.model, 'claude-sonnet-5');
-  assert.equal(overridden.thinking, true);
   assert.equal(overridden.effort, 'high');
 });
 
@@ -149,14 +169,54 @@ test('the deepest-thinking purpose gets the most room', () => {
   );
 });
 
-test('a thinking purpose is never left on the pre-thinking ceiling', () => {
-  // 8192 was set before any thinking existed in this codebase. Any purpose
-  // that thinks must have moved off it.
+test('a deep-thinking purpose is never left on the pre-thinking ceiling', () => {
+  // 8192 was set before any thinking existed in this codebase. Thinking tokens
+  // count towards output, so any purpose that thinks hard must have moved off
+  // it or its answer is what gets truncated.
   for (const purpose of ['chat', 'recommendation'] as const) {
     const choice = modelFor(purpose);
-    assert.equal(choice.thinking, true);
     assert.ok(choice.maxTokens > 8192, `${purpose} still on the pre-thinking ceiling`);
   }
+});
+
+// --- the interactive clock -------------------------------------------------
+
+/**
+ * MAX_TOOL_ROUNDS caps how many rounds may run and cannot cap how long they
+ * take. On 14 Sep 2026 a question about data the warehouse deliberately does
+ * not hold sent the model hunting until the request outlived Railway's edge
+ * timeout: connection cut, HTML error page, "Error: Request failed" in the
+ * browser, every token billed, nothing delivered.
+ */
+test('the interactive path has a clock and the scheduled one does not', () => {
+  const chat = modelFor('chat');
+  assert.ok(chat.toolBudgetMs && chat.toolBudgetMs > 0, 'chat has no budget');
+
+  // Nobody is waiting on a briefing and there is no proxy in front of a cron
+  // job. Cutting one off would truncate an analysis that had all the time in
+  // the world.
+  assert.equal(modelFor('recommendation').toolBudgetMs, null);
+});
+
+test('the budget leaves room for the rescue reply, not just for the edge', () => {
+  // It is the point at which new ROUNDS stop starting; the rescue happens
+  // after it. A budget set just under the edge timeout would produce a rescue
+  // that itself times out, which is the original failure with more steps.
+  const chat = modelFor('chat');
+  assert.ok(chat.toolBudgetMs! <= 180_000, 'budget is too close to any plausible edge timeout');
+});
+
+test('the rescue keeps the model and drops the depth', () => {
+  // Same model because caches are model-scoped and the conversation may carry
+  // encrypted web-search content; low effort because latency is the entire
+  // thing being bought.
+  const chat = modelFor('chat');
+  const rescue = rescueChoice(chat);
+
+  assert.equal(rescue.model, chat.model);
+  assert.equal(rescue.effort, 'low');
+  assert.ok(rescue.maxTokens <= chat.maxTokens);
+  assert.equal(rescue.toolBudgetMs, null, 'the rescue must never be cut off by the clock that caused it');
 });
 
 test('a model override does not change the ceiling', () => {
@@ -171,18 +231,32 @@ test('a model override does not change the ceiling', () => {
   }
 });
 
-test('a caller may choose the model, and only the model', () => {
-  // The tiering decides what a JOB needs; the person paying decides what the
-  // question is worth. Thinking, effort and the ceiling describe the job, so
-  // choosing Sonnet buys a cheaper answer to the same question rather than a
-  // deliberately worse one.
+/**
+ * REWRITTEN 16 Sep 2026, and this one is a reversal rather than a tidy-up.
+ *
+ * It used to assert that choosing Sonnet changed the model and NOTHING else,
+ * on the reasoning that effort describes the job. The dropdown that selects it
+ * says "Sonnet — quicker and cheaper", and on 14 Sep a question that chose it
+ * ran with adaptive thinking at high effort, a 16,384-token ceiling and twelve
+ * tool rounds, then outlived the edge timeout and returned nothing at all. The
+ * old test was locking in a promise the product was not keeping.
+ */
+test('the cheap choice is actually cheaper — it moves effort, not just the model', () => {
   const base = modelFor('chat', {});
   const cheap = modelFor('chat', {}, 'sonnet');
 
   assert.equal(cheap.model, SONNET);
-  assert.equal(cheap.thinking, base.thinking);
-  assert.equal(cheap.effort, base.effort);
+  assert.equal(base.effort, 'high');
+  assert.equal(cheap.effort, 'medium');
+  // The ceiling is a backstop, not a tuning knob: lowering it would truncate
+  // answers mid-thought rather than making them cheaper.
   assert.equal(cheap.maxTokens, base.maxTokens);
+});
+
+test('choosing Opus explicitly leaves the job untouched', () => {
+  const base = modelFor('chat', {});
+  const chosen = modelFor('chat', {}, 'opus');
+  assert.deepEqual(chosen, base);
 });
 
 test('the caller wins over the environment', () => {

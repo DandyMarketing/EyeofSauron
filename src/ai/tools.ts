@@ -601,6 +601,39 @@ export const queryTools: Tool[] = [
       required: ['metric', 'start_date', 'end_date'],
     },
   },
+  {
+    name: 'query_labour',
+    description:
+      'Rostered labour hours and cost from StaffAny, per venue and day, split back of house vs front of house. Use this for any question about hours worked, staffing levels, labour cost, labour percentage, overtime, or whether a venue was over- or under-staffed on a given day. ' +
+      'Returns scheduled_hours and actual_hours side by side (the variance between them is the point — it is the difference between the plan and what happened), staff_count, overtime_hours, and the cost components: basic, overtime, weekend, event. ' +
+      'LABOUR PERCENTAGE IS COMPUTED HERE and is measured on FOOD & BEVERAGE SALES, the only basis cost percentages may use. It is returned as labour_pct_of_fb_sales alongside the sales figure it divided by, so the reader can see both. ' +
+      'THIS IS ROSTERED LABOUR COST AND NOT TOTAL EMPLOYMENT COST. It is what the roster generated. The Xero "Wages and Salaries" line from query_profit_and_loss adds employer CPF, the skills levy and leave accrual, so this will sit BELOW it and the two must never be presented as one figure or reconciled silently — name them apart, as ROSTERED LABOUR COST and TOTAL EMPLOYMENT COST. Salaried staff who never clock in are absent from here entirely and are often the most expensive people in the building, so a venue whose kitchen runs on salaried chefs will look cheaper here than it is. ' +
+      'NO INDIVIDUAL IS IN THIS DATA AND NONE EVER WILL BE. There are no names, no employee records, no per-person hours, no pay rates and no joining, leaving or employment dates — StaffAny rosters are aggregated by venue, date and section at ingestion and the per-person detail is discarded in memory before anything is written. staff_count is a COUNT and cannot be resolved to a person. So questions like "when did X join", "who worked Tuesday", "did hiring someone hurt sales", "what does X earn" or anything correlating an individual against trade CANNOT be answered from this warehouse at all. Say that plainly and immediately — do not go looking through other tools for it, because it is absent by design rather than missing by accident. ' +
+      'An implied overtime rate (overtime_cost / overtime_hours) is returned as one blended figure across everybody, never per person. It is a business parameter worth watching: if overtime is paid at a flat rate BELOW a full-timer\'s loaded hourly, then an overtime hour is CHEAPER than a basic one and the usual advice to cut overtime is backwards. Never recommend cutting overtime without quoting that rate. ' +
+      'Group staff (The Dandy Collection section) belong to no single venue and are deliberately never allocated to one — they are excluded unless include_group is set, which only an owner may do.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: {
+          type: 'string',
+          description: 'Optional. Omit to get every venue the caller may see, which is one call rather than three.',
+        },
+        business_date: { type: 'string', description: 'A single day, YYYY-MM-DD.' },
+        start_date: { type: 'string', description: 'Range start, YYYY-MM-DD. Use with end_date.' },
+        end_date: { type: 'string', description: 'Range end, YYYY-MM-DD.' },
+        group_by: {
+          type: 'string',
+          enum: ['total', 'area', 'day', 'day_area'],
+          description: 'How to break the period down. "area" (the default) splits BOH vs FOH for the whole period. "day" gives one row per day. "day_area" gives both and is the largest result — ask for it only when the question is about a pattern within the week.',
+        },
+        include_group: {
+          type: 'boolean',
+          description: 'Include group staff, who belong to no venue. Owner only; refused otherwise. Never folded into a venue total.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 /**

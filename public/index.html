@@ -547,9 +547,17 @@
     -->
     <div id="model-row">
       <label for="model-select">Model</label>
+      <!--
+        The labels now describe what the code does. Until 16 Sep 2026 choosing
+        Sonnet changed the model and nothing else, so "quicker and cheaper" ran
+        the same adaptive thinking at the same high effort with the same twelve
+        tool rounds -- and on 14 Sep a question that chose it outlived the edge
+        timeout and returned nothing. The depth moves with the choice now, which
+        is what makes the second label true.
+      -->
       <select id="model-select">
-        <option value="opus">Opus — deeper, slower, dearer</option>
-        <option value="sonnet">Sonnet — quicker and cheaper</option>
+        <option value="opus">Opus — thinks hardest, slower, dearer</option>
+        <option value="sonnet">Sonnet — lighter thinking, quicker and cheaper</option>
       </select>
       <span id="model-note"></span>
     </div>

@@ -59,6 +59,45 @@ describe('every tool the model is offered can actually be called', () => {
   });
 });
 
+describe('query_labour says what it cannot answer', () => {
+  /**
+   * `labour_daily` was ingested from 7 Sep 2026 and no tool referenced it, so
+   * the model could not see an hour of it. On 14 Sep a question about a staff
+   * member joining sent it hunting through twenty tools that could not answer,
+   * past the edge timeout, to "Request failed" -- with every token billed.
+   *
+   * Half the fix is the tool. The other half is the tool being explicit that
+   * the per-person question is unanswerable BY DESIGN, so the model says so
+   * instead of searching for data that was deliberately never collected.
+   */
+  test('it is registered', () => {
+    assert.ok(queryTools.find(t => t.name === 'query_labour'), 'query_labour is not registered');
+  });
+
+  test('it rules out the per-person question in its own description', () => {
+    const tool = queryTools.find(t => t.name === 'query_labour')!;
+    assert.match(tool.description!, /NO INDIVIDUAL IS IN THIS DATA/);
+    assert.match(tool.description!, /joining/);
+    assert.match(tool.description!, /CANNOT be answered/);
+  });
+
+  test('it names rostered cost apart from total employment cost', () => {
+    // Two figures for one metric is the Monday-versus-Revel problem. This one
+    // is bought voluntarily unless the names stay distinct: StaffAny's roster
+    // cost sits BELOW the Xero wages line, which adds CPF, SDL and accrual.
+    const tool = queryTools.find(t => t.name === 'query_labour')!;
+    assert.match(tool.description!, /ROSTERED LABOUR COST AND NOT TOTAL EMPLOYMENT COST/);
+    assert.match(tool.description!, /Wages and Salaries/);
+  });
+
+  test('labour percentage is pinned to the food & beverage basis', () => {
+    // Measuring against net sales puts service charge in the denominator and
+    // reports labour about 10% lower than it is, which reads as an improvement.
+    const tool = queryTools.find(t => t.name === 'query_labour')!;
+    assert.match(tool.description!, /FOOD & BEVERAGE SALES/);
+  });
+});
+
 describe('query_visit_distribution is wired', () => {
   test('it exists, and steers the model off the per-month loop', () => {
     // It was added because looping query_guest_retention once per month blew

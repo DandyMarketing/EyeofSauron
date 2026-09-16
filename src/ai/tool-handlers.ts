@@ -16,6 +16,7 @@ import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } f
 import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, precedingPeriod, type PeriodRow } from '../lib/revenue-decomposition.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
+import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -115,6 +116,8 @@ export async function handleToolCall(
       return checkBookingChannels(input);
     case 'query_hourly_sales':
       return queryHourlySales(input);
+    case 'query_labour':
+      return queryLabour(input);
     case 'list_available_data':
       return listAvailableData(input);
     case 'create_chart':
@@ -1360,6 +1363,155 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     covers_source: 'sevenrooms',
     revenue_source: 'revel',
     venues: results,
+  });
+}
+
+/**
+ * Rostered labour, from a table that was filled and then left unreachable.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS LATE. `labour_daily` has been ingested since
+ * 7 Sep 2026 and nothing in src/ai/ referenced it, so the model could not see a
+ * single hour of it. On 14 Sep somebody asked whether a staff member joining
+ * correlated with a sales drop; with no labour tool and no way to say the data
+ * was absent, the model hunted through twenty tools that could not answer,
+ * outlived the edge timeout, and returned "Request failed" having billed the
+ * lot. A table that is ingested but unreachable is worse than one that is
+ * missing -- it costs money to fill and answers nothing.
+ *
+ * WHAT IT DELIBERATELY CANNOT DO. There is no person in here. Migration 037
+ * aggregates by venue, date and section at ingest and discards the per-person
+ * detail in memory; `staff_count` is a COUNT with no way back to a name. So the
+ * question that prompted this tool still cannot be answered, and the value of
+ * the tool is that it can now say so in one call instead of twenty.
+ *
+ * THE COST IS PAYROLL-GATED, THE HOURS ARE NOT. CLAUDE.md: aggregate payroll
+ * cost is finance and owner only, managers see labour PERCENTAGE and never
+ * individual pay. Hours and headcount are what running a shift needs and carry
+ * no pay, so they go to everyone; the dollar columns are withheld from a role
+ * that may not read payroll, and the percentage is kept. Same shape as the P&L
+ * redaction above, for the same stated reason.
+ */
+async function queryLabour(input: Record<string, any>): Promise<string> {
+  /**
+   * Caught rather than thrown, and the distinction matters more than it looks.
+   *
+   * getDateFilter() THROWS when neither a date nor a range is given, and a
+   * throw from a handler rejects the whole round -- the engine treats one as
+   * our own bug and lets it surface, which is right for a bug and wrong for a
+   * model omitting an argument. "What is our labour cost?" with no period is an
+   * entirely reasonable thing to ask, and it should come back as a sentence the
+   * model can act on rather than failing the question.
+   *
+   * The same exposure exists on the older tools whose schemas require the date
+   * fields; this one's schema deliberately does not, so it has to handle it.
+   */
+  let dateFilter: ReturnType<typeof getDateFilter>;
+  try {
+    dateFilter = getDateFilter(input);
+  } catch {
+    return JSON.stringify({
+      error: 'Give me a period: either business_date for one day, or start_date and end_date for a range.',
+    });
+  }
+
+  const groupBy: string = input.group_by ?? 'area';
+  const callerRole: Role | undefined = input[CALLER_ROLE];
+  const showCost = !callerRole || mayRead(callerRole, 'payroll');
+
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const targetVenues = scopeVenues(
+    input.venue_slug ? allVenues.filter(v => v.slug === input.venue_slug) : allVenues,
+    input,
+  );
+  if (targetVenues.length === 0) {
+    return JSON.stringify({ error: `No venue matching "${input.venue_slug ?? '(all)'}" is available to you.` });
+  }
+
+  /**
+   * Group staff, and the one place a caller can reach a row belonging to no
+   * venue.
+   *
+   * Owner only, matching the RLS policy migration 038 put on these rows -- and
+   * it has to be checked HERE because handlers query with the service-role key,
+   * which bypasses RLS entirely. `undefined` is the recommendation engine
+   * running as the system, which is filtered on its output instead.
+   */
+  const wantsGroup = input.include_group === true;
+  if (wantsGroup && callerRole && callerRole !== 'owner') {
+    return JSON.stringify({
+      error: 'Group staff hours are owner-only. Ask without include_group for this venue\'s own sections.',
+    });
+  }
+
+  const venueIds = targetVenues.map(v => v.id);
+  const nameById = new Map(targetVenues.map(v => [v.id, v.name]));
+
+  let query = supabase
+    .from('labour_daily')
+    .select('venue_id, business_date, area, staffany_section_id, scheduled_hours, actual_hours, overtime_hours, basic_cost, overtime_cost, weekend_cost, event_cost, other_cost, total_cost, staff_count');
+
+  // A NULL venue_id is group staff. `.in()` never matches NULL, so the venue
+  // branch excludes them structurally rather than by remembering to.
+  query = wantsGroup
+    ? query.or(`venue_id.in.(${venueIds.join(',')}),venue_id.is.null`)
+    : query.in('venue_id', venueIds);
+
+  query = applyDateFilter(query, dateFilter).limit(5000);
+
+  const { data: rows, error } = await query;
+  if (error) return JSON.stringify({ error: error.message });
+  if (!rows || rows.length === 0) {
+    return JSON.stringify({
+      period: dateLabel(dateFilter),
+      venues: targetVenues.map(v => v.slug),
+      message: 'No labour data for this venue and period. StaffAny ingestion began 7 September 2026 — anything before that is not held.',
+    });
+  }
+
+  /**
+   * Sales for the same venues and days, so labour percentage can be computed
+   * here rather than left to the model to divide two tool results together.
+   *
+   * On FOOD & BEVERAGE SALES, because CLAUDE.md says that is the only basis a
+   * cost percentage may use. Measuring against net sales would put service
+   * charge in the denominator and report labour about 10% lower than it is,
+   * which reads as an improvement.
+   */
+  let salesQuery = supabase
+    .from('daily_operations')
+    .select('venue_id, business_date, gross_sales, item_discounts, order_discounts, net_sales')
+    .in('venue_id', venueIds);
+  salesQuery = applyDateFilter(salesQuery, dateFilter).limit(5000);
+  const { data: salesRows } = await salesQuery;
+
+  const salesByVenueDate = new Map<string, number>();
+  for (const s of salesRows ?? []) {
+    salesByVenueDate.set(`${s.venue_id}|${s.business_date}`, foodAndBevSalesOf(s as any));
+  }
+
+  const buckets = aggregateLabour(rows as LabourRow[], {
+    groupBy: groupBy as LabourGrouping,
+    venueName: id => nameById.get(id) ?? 'Unknown',
+    fbSales: (venueId, date) => salesByVenueDate.get(`${venueId}|${date}`) ?? 0,
+  });
+
+  const unexplained = buckets.some(b => b.other_cost > 0);
+  const results = showCost ? buckets : buckets.map(withoutCost);
+
+  return JSON.stringify({
+    period: dateLabel(dateFilter),
+    group_by: groupBy,
+    source: 'staffany',
+    basis: 'ROSTERED labour cost — what the roster generated. NOT total employment cost: the Xero "Wages and Salaries" line adds employer CPF, the skills levy and leave accrual and will be HIGHER. Never present the two as one figure.',
+    not_held: 'No individual is in this data. No names, no per-person hours or pay, and no joining, leaving or employment dates — the per-person detail is discarded at ingestion and cannot be recovered. Questions about a specific person, or about correlating one person against trade, cannot be answered from this warehouse at all.',
+    salaried_staff_caveat: 'Staff who do not clock in — head chef, sous, managers — are absent from this table and are often the most expensive people in the building. A venue running on salaried kitchen staff looks cheaper here than it is.',
+    percentage_basis: 'labour_pct_of_fb_sales divides rostered cost by FOOD & BEVERAGE SALES (excluding service charge), the only basis cost percentages may use.',
+    staff_count_note: 'peak_staff_count is the LARGEST single section-day in the bucket, never a sum: summing would double-count anyone working more than one day or section.',
+    ...(showCost ? {} : { role_note: 'Cost amounts are withheld for this role. Labour percentage is shown instead.' }),
+    ...(unexplained ? { unrecognised_cost_note: 'other_cost is non-zero: StaffAny returned a cost component this ingest does not recognise. Report it rather than folding it into basic.' } : {}),
+    rows: results,
   });
 }
 

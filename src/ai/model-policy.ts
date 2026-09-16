@@ -35,12 +35,49 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface ModelChoice {
   model: string;
   /**
-   * Extended reasoning. There was NONE anywhere in this codebase before now --
-   * every answer was written straight through, including the analytical ones.
-   * That was a larger gap than the choice of model.
+   * How hard it thinks, and the ONLY control over that. There is deliberately
+   * no `thinking` flag any more.
+   *
+   * There used to be one, `thinking: boolean`, and on 16 Sep 2026 it was found
+   * to do nothing on either model we run. It gated whether
+   * `thinking: {type:'adaptive'}` was sent -- and OMITTING the parameter runs
+   * adaptive anyway on Opus 5 and Sonnet 5. So `lookup` and `recovery`, both
+   * documented here as "no thinking", have been thinking at the model's own
+   * default every time they ran. A flag that reads as off while the thing it
+   * names is on is worse than no flag: it is a decision everyone believes is in
+   * force.
+   *
+   * The fix is NOT to send `{type:'disabled'}`. Anthropic's own guidance is to
+   * prefer low effort over disabled thinking on Opus 5, because with thinking
+   * off the model occasionally writes a tool call into its VISIBLE TEXT -- the
+   * turn succeeds, the call never runs, nothing errors, and in a tool loop that
+   * text pollutes every later round. That is this codebase's favourite kind of
+   * bug and there is no reason to invite it. Depth is `effort`, always.
    */
-  thinking: boolean;
-  effort?: Effort;
+  effort: Effort;
+  /**
+   * Wall-clock budget for STARTING new tool rounds, or null for no limit.
+   *
+   * WHY A CLOCK AND NOT JUST A ROUND COUNT. MAX_TOOL_ROUNDS caps how many
+   * rounds may run; it cannot cap how long they take, and those are different
+   * failures. On 14 Sep 2026 a question about staff joining dates -- data this
+   * warehouse deliberately does not hold -- sent the model hunting through
+   * tools that could not answer it until the request outlived Railway's edge
+   * timeout. The connection was cut, an HTML error page came back, and the
+   * browser showed "Error: Request failed". Every token spent on that hunt was
+   * billed and nothing reached the person who asked. Third occurrence of this
+   * shape.
+   *
+   * So the budget is the point at which the loop stops starting new work and
+   * answers with what it has. It is NOT the total turn time: the rescue reply
+   * happens after it, which is why the number is well under any edge timeout
+   * rather than just under it.
+   *
+   * null for the scheduled paths. Nobody is waiting on those and there is no
+   * edge proxy in front of a cron job -- capping them would cut off an analysis
+   * that had all the time in the world.
+   */
+  toolBudgetMs: number | null;
   /**
    * Output ceiling for this purpose, THINKING INCLUDED -- which is the part
    * that is easy to get wrong.
@@ -61,26 +98,41 @@ export interface ModelChoice {
 export const OPUS = 'claude-opus-5';
 export const SONNET = 'claude-sonnet-5';
 
+/**
+ * The interactive budget, in milliseconds.
+ *
+ * 150 seconds, and the number is a floor-of-ignorance rather than a
+ * measurement: Railway's edge timeout has never been established, only bounded
+ * -- a six-minute answer died and a two-minute one lived. So this sits far
+ * enough below any plausible edge that the rescue reply also fits inside it,
+ * and it is overridable without a deploy because the right value is something
+ * the logs will eventually tell us.
+ */
+const CHAT_TOOL_BUDGET_MS = Number(process.env.SAURON_TOOL_BUDGET_MS) || 150_000;
+
 const DEFAULTS: Record<Purpose, ModelChoice> = {
   // The surface where the product's actual value is delivered.
   //
   // 8192 was chosen before thinking existed here, and it is now shared with
   // `high` effort. Raised, but not to the recommendation ceiling: somebody is
   // waiting for this one, and a very long answer on a phone is its own failure.
-  chat: { model: OPUS, thinking: true, effort: 'high', maxTokens: 16384 },
+  chat: { model: OPUS, effort: 'high', maxTokens: 16384, toolBudgetMs: CHAT_TOOL_BUDGET_MS },
   // Nobody is waiting, and a weak proactive suggestion is worse than none --
   // it teaches people to ignore the feature.
   //
   // The largest ceiling of the four because it has the deepest thinking AND the
   // longest output: a week's briefing with tables for three findings. This is
   // a ceiling, not a target -- an analysis that needs less costs less.
-  recommendation: { model: OPUS, thinking: true, effort: 'xhigh', maxTokens: 32768 },
+  //
+  // No clock. It runs as a cron job with no proxy in front of it, and the one
+  // thing worse than a slow briefing is a truncated one.
+  recommendation: { model: OPUS, effort: 'xhigh', maxTokens: 32768, toolBudgetMs: null },
   // A date and a number. Latency matters more than depth, especially on a
   // phone, and there is nothing here for reasoning to improve.
-  lookup: { model: SONNET, thinking: false, maxTokens: 4096 },
+  lookup: { model: SONNET, effort: 'low', maxTokens: 4096, toolBudgetMs: 60_000 },
   // Restating data already in the conversation. Deep thought cannot help, and
   // this path only runs when something has already gone wrong.
-  recovery: { model: SONNET, thinking: false, maxTokens: 4096 },
+  recovery: { model: SONNET, effort: 'low', maxTokens: 4096, toolBudgetMs: null },
 };
 
 /**
@@ -108,9 +160,35 @@ const ENV_KEY: Record<Purpose, string> = {
  * ENVIRONMENT override stays free-text: it is set by whoever deploys the
  * service, who can already do worse.
  */
-export const SELECTABLE_MODELS: Record<string, string> = {
-  opus: OPUS,
-  sonnet: SONNET,
+export interface SelectableProfile {
+  model: string;
+  /** Omitted means "whatever the job asks for". */
+  effort?: Effort;
+}
+
+export const SELECTABLE_MODELS: Record<string, SelectableProfile> = {
+  // The job's own depth, on the model the job was tiered to.
+  opus: { model: OPUS },
+  /**
+   * The cheap option, and it now has to EARN that label.
+   *
+   * It used to change the model and nothing else, because effort was held to
+   * describe the job rather than the engine. That reasoning was sound and the
+   * result was not: on 14 Sep 2026 a question picked "Sonnet — quicker and
+   * cheaper" from the dropdown and ran with adaptive thinking at HIGH effort, a
+   * 16,384-token ceiling and twelve available tool rounds -- the same work as
+   * Opus on a cheaper engine. It then outlived the edge timeout and returned
+   * nothing. The label promised a speed the code did not implement.
+   *
+   * MEDIUM RATHER THAN LOW, and that is a deliberately conservative first step.
+   * Anthropic's published runs put `medium` at the default's accuracy for 70-85%
+   * of its cost on knowledge work, where `low` gives up one to three points for
+   * a third to a half off. `low` may well be right here -- this is warehouse
+   * lookup and comparison, not long-horizon coding -- but there is no eval on
+   * this path yet, so there is no way to tell a saving from a regression. One
+   * word changes it the moment there is.
+   */
+  sonnet: { model: SONNET, effort: 'medium' },
 };
 
 export function modelFor(
@@ -133,9 +211,45 @@ export function modelFor(
    * buys a cheaper answer to the same question, not a shallower one.
    */
   const picked = chosen ? SELECTABLE_MODELS[chosen] : undefined;
-  const override = picked ?? env[ENV_KEY[purpose]]?.trim();
+  if (picked) {
+    // A profile may carry an effort; if it does not, the job's own stands.
+    return { ...base, model: picked.model, effort: picked.effort ?? base.effort };
+  }
+
+  const override = env[ENV_KEY[purpose]]?.trim();
   if (!override) return base;
   return { ...base, model: override };
+}
+
+/**
+ * The same job, answered fast, for rescuing a turn that has run out of time or
+ * rounds.
+ *
+ * SAME MODEL, DELIBERATELY, and it is the one decision here worth explaining.
+ * Dropping to Sonnet would be cheaper per token and is wrong twice over: prompt
+ * caches are model-scoped, so a switch re-bills the whole accumulated
+ * conversation at full price on the one request whose job is to salvage a turn
+ * that has already cost too much -- and by this point `messages` may hold web
+ * search results carrying `encrypted_content` that the API decrypts on the way
+ * in. Handing those to a different model is untested, and the rescue is exactly
+ * where an untested failure must not happen.
+ *
+ * What changes is DEPTH. Low effort is most of the latency, and latency is the
+ * entire thing being bought: a rescue that misses the edge timeout is worth
+ * nothing at all. It costs a cache miss on the message tail -- changing effort
+ * invalidates the messages cache, though not tools and system -- and that is a
+ * price worth paying once, at the end, to turn "Request failed" into an answer.
+ */
+export function rescueChoice(choice: ModelChoice): ModelChoice {
+  return {
+    ...choice,
+    effort: 'low',
+    // A rescue restates what is already gathered. It does not need room to
+    // write a second full analysis, and a smaller ceiling is a second brake on
+    // how long this can take.
+    maxTokens: Math.min(choice.maxTokens, 4096),
+    toolBudgetMs: null,
+  };
 }
 
 /**

@@ -2,7 +2,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { queryTools } from './tools.js';
 import { handleToolCall } from './tool-handlers.js';
 import { fetchNotes, formatNotes, KNOWLEDGE_FRAMING } from './knowledge.js';
-import { modelFor, isModelFeatureError, usageLine, type Purpose } from './model-policy.js';
+import {
+  modelFor,
+  rescueChoice,
+  isModelFeatureError,
+  usageLine,
+  type Purpose,
+  type ModelChoice,
+} from './model-policy.js';
 import { isTransientCapacityError, transientReason } from '../lib/api-fatal.js';
 import type { Role } from './data-domains.js';
 import {
@@ -53,6 +60,28 @@ Transactions are BILLS, never people. Never describe a transaction count as cove
 - COGS in Revel is always 0. Cost data comes from the Xero P&L via query_profit_and_loss; ingredient-level food cost from Zeemart is not yet connected.
 - Revel/POS figures and Xero P&L figures will NOT tie exactly: different basis, and the ledger includes what the POS never sees. When both appear in one answer, say which source each came from rather than reconciling them silently.
 - Data is daily granularity from Revel POS
+
+WHAT THIS WAREHOUSE DOES NOT HOLD, AND WILL NOT. Say so at once and stop — do
+not go hunting through other tools for it. These are absent BY DESIGN, so no
+amount of looking will turn them up, and a long search that ends in "I could not
+find it" costs the person their answer and their time:
+- ANY DATA ABOUT AN INDIVIDUAL PERSON. No employee records, no names, no roster
+  by person, no pay, no rates, and no joining, leaving or employment dates.
+  Labour is aggregated to venue, date and section before it is stored and the
+  per-person detail is destroyed at that point. So "did hiring someone hurt
+  sales", "when did X join", "who was on last Tuesday" and "what does X earn"
+  are all unanswerable here — not missing, not yet to be ingested, but
+  deliberately never collected. Say that plainly, then offer what CAN be
+  measured: total hours, headcount, BOH/FOH split and labour percentage by day,
+  through query_labour.
+- Ingredient-level food cost. Zeemart is not connected yet; cost comes from the
+  Xero P&L at account level.
+- Anything a competitor does beyond their public post counts, followers, likes
+  and comments. Never their reach, impressions or sales.
+When you are asked for one of these, answer the question BEHIND it if there is
+one. "Did a new hire hurt sales" is unanswerable per person and perfectly
+answerable as "did labour hours rise while sales fell", which query_labour and
+explain_revenue_change can do together.
 
 SHOW THE DATA, DO NOT NARRATE IT. A paragraph containing six figures is the
 hardest possible way to read six figures, and this is for busy operators who
@@ -322,12 +351,19 @@ export async function askSauron(
    * written.
    */
   const send = async (
-    opts: { tools?: Anthropic.Messages.ToolUnion[]; extraSystem?: string } = {},
+    opts: {
+      tools?: Anthropic.Messages.ToolUnion[];
+      extraSystem?: string;
+      /** Overrides the turn's model choice — the rescue reply, and only it. */
+      choice?: ModelChoice;
+    } = {},
   ): Promise<Anthropic.Message> => {
+    const active = opts.choice ?? choice;
+
     const build = (withTools: Anthropic.Messages.ToolUnion[]) => {
       const params: any = {
-        model: choice.model,
-        max_tokens: choice.maxTokens,
+        model: active.model,
+        max_tokens: active.maxTokens,
         system: systemBlocks(opts.extraSystem),
         messages,
         tools: withTools,
@@ -343,11 +379,17 @@ export async function askSauron(
          * Opus 5 and Sonnet 5 -- a stale prior that would take the chat down
          * rather than degrade it.
          *
+         * SENT UNCONDITIONALLY NOW. It used to be gated on `choice.thinking`,
+         * which was a decision that had never taken effect: omitting the
+         * parameter runs adaptive anyway on both models, so the two purposes
+         * documented as "no thinking" were thinking the whole time. Depth is
+         * `effort` and nothing else -- see ModelChoice.effort.
+         *
          * Toggling thinking does not invalidate the tools+system cache, so
          * this costs nothing at the prefix.
          */
-        if (choice.thinking) params.thinking = { type: 'adaptive' };
-        if (choice.effort) params.output_config = { effort: choice.effort };
+        params.thinking = { type: 'adaptive' };
+        params.output_config = { effort: active.effort };
       }
 
       return params;
@@ -430,7 +472,7 @@ export async function askSauron(
       if (!featuresDisabled && isModelFeatureError(e)) {
         featuresDisabled = true;
         console.error(
-          `[model] ${choice.model} refused thinking/effort — retrying without them, answers will be shallower: ` +
+          `[model] ${active.model} refused thinking/effort — retrying without them, answers will be shallower: ` +
           `${String((e as any)?.message ?? e).slice(0, 300)}`,
         );
         r = await call(build(activeTools()));
@@ -481,7 +523,7 @@ export async function askSauron(
     searches += searchRequestCount(r.usage);
     // Logged on every call, because a cache that silently stopped working
     // shows up as a bill months later and nothing else.
-    console.log(usageLine(choice.model, r.usage));
+    console.log(usageLine(active.model, r.usage));
 
     /**
      * Hitting the ceiling is a TRUNCATED answer, and it looks like a finished
@@ -495,7 +537,7 @@ export async function askSauron(
      */
     if (r.stop_reason === 'max_tokens') {
       console.error(
-        `[model] TRUNCATED — hit the ${choice.maxTokens}-token ceiling for purpose "${purpose}". ` +
+        `[model] TRUNCATED — hit the ${active.maxTokens}-token ceiling for purpose "${purpose}". ` +
         `Thinking counts towards this, so raise maxTokens in model-policy.ts rather than lowering effort.`,
       );
     }
@@ -509,6 +551,16 @@ export async function askSauron(
     return r;
   };
 
+
+  /**
+   * When the loop must stop STARTING work. See ModelChoice.toolBudgetMs.
+   *
+   * Set before the first call, so the model's own thinking time counts against
+   * it. A turn that spends two minutes on round one has already used the budget
+   * whether or not it ran a single query.
+   */
+  const deadline = choice.toolBudgetMs === null ? null : Date.now() + choice.toolBudgetMs;
+  let outOfTime = false;
 
   let response = await send();
 
@@ -534,6 +586,31 @@ export async function askSauron(
 
     if (response.stop_reason !== 'tool_use') break;
     if (rounds++ >= MAX_TOOL_ROUNDS) break;
+
+    /**
+     * Out of time: stop before starting a round we cannot afford to finish.
+     *
+     * Checked HERE, after the tool_use test, so a turn that has already
+     * produced its answer is never interrupted for being slow -- only one about
+     * to spend more is.
+     *
+     * The assistant turn is deliberately NOT pushed. It holds tool_use blocks
+     * the API would then expect results for, and `messages` must stay a valid
+     * conversation for the rescue reply to send. Leaving it off means the last
+     * thing in the array is the previous round's tool results, which is exactly
+     * the state "answer from what you have" needs.
+     */
+    if (deadline !== null && Date.now() > deadline) {
+      outOfTime = true;
+      console.warn(
+        `[engine] OUT OF TIME after ${rounds - 1} tool round(s) — ` +
+        `stopping before round ${rounds} and answering from what is gathered. ` +
+        `Budget ${choice.toolBudgetMs}ms (SAURON_TOOL_BUDGET_MS). ` +
+        `This is a rescue, not a failure: the alternative is the edge timeout cutting ` +
+        `the connection and the browser showing "Request failed" with every token still billed.`,
+      );
+      break;
+    }
 
     /**
      * Pushed back UNCHANGED, and that is load-bearing now rather than merely
@@ -633,12 +710,26 @@ export async function askSauron(
   // complete tool_use turn, so a truncated final response was never added.
   let recoveryError: string | null = null;
 
+  /**
+   * Out of time forces the rescue even when the last turn carried some text.
+   *
+   * That text sits BESIDE the tool calls the model was about to run, so it is
+   * the opening of an analysis rather than an answer -- "let me check the P&L
+   * for each venue" and then nothing. A complete short reply beats a confident
+   * fragment. It is kept as a fallback rather than discarded, because if the
+   * rescue itself fails then a fragment is better than the apology below it.
+   */
+  const partial = answer;
+  if (outOfTime) answer = '';
+
   if (!answer.trim()) {
-    const reason = response.stop_reason === 'max_tokens'
-      ? 'The previous reply was cut off before it finished.'
-      : rounds >= MAX_TOOL_ROUNDS
-        ? 'You have run enough queries.'
-        : 'No reply was produced.';
+    const reason = outOfTime
+      ? 'You have run out of time for this question.'
+      : response.stop_reason === 'max_tokens'
+        ? 'The previous reply was cut off before it finished.'
+        : rounds >= MAX_TOOL_ROUNDS
+          ? 'You have run enough queries.'
+          : 'No reply was produced.';
 
     try {
       /**
@@ -652,6 +743,16 @@ export async function askSauron(
        */
       const recovery = await send({
         tools: [webSearchTool()],
+        /**
+         * Same model, low effort, smaller ceiling -- see rescueChoice().
+         *
+         * This used to run at the turn's full depth, which on the chat path
+         * meant Opus at `high` effort with a 16,384-token ceiling for the job
+         * of restating figures already on the table. On a rescue triggered by
+         * running out of TIME that is self-defeating: the slow option is being
+         * used to escape slowness.
+         */
+        choice: rescueChoice(choice),
         // Appended BELOW the cache breakpoint, so rescuing a turn does not
         // rebuild the whole cached prefix.
         extraSystem: `${reason} Answer the user now, concisely, using only the data already gathered in this conversation. Do not request more data. If you genuinely have nothing, say so plainly and suggest what to ask instead.`,
@@ -668,16 +769,24 @@ export async function askSauron(
     }
   }
 
+  // The rescue failed too. A fragment of a real analysis beats an apology, so
+  // whatever the interrupted turn had written is used before falling through.
+  if (!answer.trim() && partial.trim()) {
+    answer = `${partial}\n\n_(That answer was cut short — I ran out of time before I could finish. Ask again with one venue or a shorter period and I can complete it.)_`;
+  }
+
   if (!answer.trim()) {
     answer = toolCalls.length > 0
-      // Say which of the two it was. "Ask again" is the right advice after a
-      // transient error and useless advice after running out of query rounds,
-      // where the fix is a narrower question -- and the person on the other end
-      // cannot tell them apart.
+      // Say which of the three it was. "Ask again" is the right advice after a
+      // transient error and useless advice after running out of query rounds or
+      // time, where the fix is a narrower question -- and the person on the
+      // other end cannot tell them apart.
       ? `I queried the warehouse (${[...new Set(toolCalls.map(t => t.name.replace(/_/g, ' ')))].join(', ')}) but could not compose a reply. ${
-          rounds >= MAX_TOOL_ROUNDS
-            ? 'That question needed more separate queries than I am allowed in one go. Try asking about one venue, or a shorter period, and I can build up from there.'
-            : 'Please ask again — that looked like a temporary fault rather than a problem with the question.'
+          outOfTime
+            ? 'That question took longer than I am allowed to spend on one answer. Try asking about one venue, or a shorter period, and I can build up from there.'
+            : rounds >= MAX_TOOL_ROUNDS
+              ? 'That question needed more separate queries than I am allowed in one go. Try asking about one venue, or a shorter period, and I can build up from there.'
+              : 'Please ask again — that looked like a temporary fault rather than a problem with the question.'
         }`
       : 'I could not produce a reply to that. Please try rephrasing the question.';
   }
