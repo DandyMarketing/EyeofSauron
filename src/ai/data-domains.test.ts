@@ -8,6 +8,8 @@ import {
   mentionsPayrollAmounts,
   sensitivityOf,
   TOOL_DOMAINS,
+  describeRole,
+  describeAllRoles,
 } from './data-domains.js';
 
 // --- the wall --------------------------------------------------------------
@@ -176,4 +178,101 @@ test('cost is financial, and everything else is operations', () => {
     sensitivityOf({ domain: 'marketing', headline: 'Post more dish content', body: 'Dish out-reaches lifestyle.' }),
     'operations',
   );
+});
+
+// --- what the admin console tells you before you grant it -------------------
+
+/**
+ * The console offered four bare words — Manager, Staff, Finance, Owner — with
+ * nothing saying what any of them could see, so an access decision was made
+ * from a label. The fix is only safe if the description is COMPUTED from the
+ * rules that enforce it: a hand-written one sits in an HTML file nobody edits
+ * when ROLE_DOMAINS changes, and then the console states the opposite of the
+ * truth with total confidence. These tests pin the derivation, not the wording.
+ */
+
+const TOOLS = ['query_daily_operations', 'query_profit_and_loss', 'query_top_posts', 'query_labour'];
+
+test('what a role is told it can read matches what mayRead allows', () => {
+  // The whole point. If these ever disagree, the console is lying.
+  for (const role of ['owner', 'finance', 'manager', 'staff'] as const) {
+    const described = describeRole(role, TOOLS);
+    for (const domain of described.domains) {
+      assert.equal(mayRead(role, domain), true, `${role} is told it reads ${domain} and cannot`);
+    }
+    for (const domain of described.withheld_domains) {
+      assert.equal(mayRead(role, domain), false, `${role} is told it cannot read ${domain} and can`);
+    }
+  }
+});
+
+test('the tool split matches what the tool layer would actually refuse', () => {
+  for (const role of ['owner', 'finance', 'manager', 'staff'] as const) {
+    const described = describeRole(role, TOOLS);
+    for (const tool of described.tools) {
+      assert.equal(enforceDomainScope(tool, role), null, `${role} is offered ${tool} and would be refused`);
+    }
+    for (const tool of described.blocked_tools) {
+      assert.ok(enforceDomainScope(tool, role), `${role} is told ${tool} is refused and it is not`);
+    }
+  }
+});
+
+test('every tool is accounted for, in one list or the other', () => {
+  // A tool that appeared in neither would be invisible on the page — and an
+  // access surface nobody can see is the thing this whole panel exists against.
+  for (const role of ['owner', 'finance', 'manager', 'staff'] as const) {
+    const d = describeRole(role, TOOLS);
+    assert.equal(d.tools.length + d.blocked_tools.length, TOOLS.length);
+  }
+});
+
+test('a new tool appears by itself, with no page to update', () => {
+  const before = describeRole('manager', TOOLS);
+  const after = describeRole('manager', [...TOOLS, 'query_something_new']);
+  assert.equal(after.tools.length + after.blocked_tools.length, before.tools.length + before.blocked_tools.length + 1);
+});
+
+test('only an owner is described as seeing every venue', () => {
+  assert.match(describeRole('owner').venues, /every venue/);
+  for (const role of ['finance', 'manager', 'staff'] as const) {
+    assert.match(describeRole(role).venues, /only the venues assigned/);
+  }
+});
+
+test('the payroll wall is described the way the handlers implement it', () => {
+  // Managers see labour as a percentage and never an amount. That is the line
+  // the security model draws, and the sentence a person reads before granting
+  // the role has to draw the same one.
+  const manager = describeRole('manager');
+  assert.ok(manager.cannot.some(s => /wage or labour AMOUNT/i.test(s)));
+  assert.ok(manager.can.some(s => /PERCENTAGE/i.test(s)));
+
+  const finance = describeRole('finance');
+  assert.ok(finance.can.some(s => /AMOUNTS/i.test(s)));
+  assert.ok(!finance.cannot.some(s => /wage or labour AMOUNT/i.test(s)));
+});
+
+test('only an owner is told it can open the admin console', () => {
+  // Owner is the one choice the venue dropdown beside it cannot contain.
+  for (const role of ['finance', 'manager', 'staff'] as const) {
+    assert.ok(describeRole(role).cannot.some(s => /admin console/i.test(s)), `${role} should be told`);
+  }
+  assert.ok(!describeRole('owner').cannot.some(s => /admin console/i.test(s)));
+});
+
+test('every role produces something to read', () => {
+  // An empty panel is indistinguishable from a panel that failed to load, and
+  // the failure mode of both is granting blind.
+  for (const r of describeAllRoles(TOOLS)) {
+    assert.ok(r.can.length > 0, `${r.role} has nothing under "can"`);
+    assert.ok(r.venues.length > 0);
+  }
+});
+
+test('staff is the narrowest and owner the widest', () => {
+  const staff = describeRole('staff', TOOLS);
+  const owner = describeRole('owner', TOOLS);
+  assert.ok(staff.domains.length < owner.domains.length);
+  assert.equal(owner.blocked_tools.length, 0, 'an owner is refused nothing');
 });

@@ -16,7 +16,8 @@ import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
-import { effectiveRole, mayRead, sensitivityOf } from './ai/data-domains.js';
+import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
+import { queryTools } from './ai/tools.js';
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
@@ -330,6 +331,22 @@ app.get('/admin/api/users', async (c) => {
   if (!user) return c.json({ error: 'Admin access required' }, 403);
   const users = await listUsers();
   return c.json({ users });
+});
+
+/**
+ * What each role grants, so an access decision is not made from a word.
+ *
+ * COMPUTED, not stored. describeRole() reads ROLE_DOMAINS and mayRead() -- the
+ * same functions the tool layer enforces with -- and the tool list comes from
+ * queryTools, so a tool added tomorrow appears against every role allowed to
+ * call it without anybody remembering to update a page. A hand-written table
+ * here would drift and then state the opposite of the truth confidently, which
+ * is worse than saying nothing.
+ */
+app.get('/admin/api/roles', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  return c.json({ roles: describeAllRoles(queryTools.map(t => t.name)) });
 });
 
 app.post('/admin/api/users/invite', async (c) => {

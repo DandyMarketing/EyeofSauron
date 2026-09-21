@@ -119,6 +119,124 @@ export function enforceDomainScope(toolName: string, role: Role | undefined): st
 }
 
 /**
+ * What a role actually grants, COMPUTED from the rules that enforce it.
+ *
+ * WHY THIS IS DERIVED AND NOT WRITTEN. The admin console offered four bare
+ * options -- Manager, Staff, Finance, Owner -- with nothing saying what any of
+ * them could see, so an access decision was being made from a word. The obvious
+ * fix is to write a sentence under each. It is also the dangerous one: a
+ * hand-written "managers see cost but not payroll" sits in an HTML file that
+ * nobody edits when ROLE_DOMAINS changes, and then the console states the
+ * opposite of the truth with total confidence. A wrong label on a security
+ * control is worse than no label, because somebody acts on it.
+ *
+ * So everything below is read from ROLE_DOMAINS, from mayRead(), and from the
+ * caller's own tool list. Add a domain to a role and this changes by itself;
+ * add a tool and it appears against every role allowed to call it.
+ *
+ * WHAT IS STILL PROSE, stated plainly because a guarantee nobody knows the
+ * edges of is worse than none: the redaction lines. Whether a role gets them is
+ * derived -- it is the same mayRead(role, 'payroll') call the handlers make --
+ * but WHAT each redaction does is described in words, so a change to how
+ * queryLabour hides cost would not update this text. That is a far smaller
+ * surface than the whole matrix, and the tests pin the derived half.
+ *
+ * TOOL NAMES ARE PASSED IN rather than imported. This module imports nothing,
+ * which is how it stays unit-testable without credentials and how a reader can
+ * see the whole access model in one file. Importing the tool list to describe
+ * it would trade that for a convenience.
+ */
+export interface RoleAccess {
+  role: Role;
+  /** One line on the WHO dimension. */
+  venues: string;
+  domains: Domain[];
+  /** Domains this role may not read at all. */
+  withheld_domains: Domain[];
+  /** Tools it may call, from the list supplied. */
+  tools: string[];
+  /** Tools it may not, and why they are refused. */
+  blocked_tools: string[];
+  /** Plain sentences for the console. Derived except where noted in the file. */
+  can: string[];
+  cannot: string[];
+}
+
+export function describeRole(role: Role, toolNames: readonly string[] = []): RoleAccess {
+  const domains = ROLE_DOMAINS[role] ?? [];
+  const all: Domain[] = ['operations', 'marketing', 'financial', 'payroll'];
+  const withheld = all.filter(d => !domains.includes(d));
+
+  const sorted = [...toolNames].sort();
+  const tools = sorted.filter(t => mayRead(role, domainOf(t)));
+  const blocked = sorted.filter(t => !mayRead(role, domainOf(t)));
+
+  const isOwner = role === 'owner';
+  const seesPayroll = mayRead(role, 'payroll');
+
+  const can: string[] = [];
+  const cannot: string[] = [];
+
+  can.push(
+    isOwner
+      ? 'Every venue, including any added later — an owner is an owner everywhere.'
+      : 'Only the venues assigned to them below. A question about any other venue is refused by the tool layer, not just discouraged.',
+  );
+
+  /**
+   * Payroll is skipped in this loop and spelled out below instead.
+   *
+   * Both lines are true and saying both made a manager's panel read "Read wage
+   * and salary amounts" and "See any wage or labour AMOUNT" one under the
+   * other. A panel that repeats itself gets skimmed, and this one is read
+   * precisely once, immediately before somebody grants access on the strength
+   * of it.
+   */
+  for (const d of domains) if (d !== 'payroll') can.push(`Read ${DOMAIN_WORDS[d]}.`);
+  for (const d of withheld) if (d !== 'payroll') cannot.push(`Read ${DOMAIN_WORDS[d]}.`);
+
+  /**
+   * The payroll wall, which is the line this whole model exists to draw, and
+   * the one most likely to be got wrong when picking a role.
+   */
+  if (seesPayroll) {
+    can.push('See labour and wage AMOUNTS — the P&L payroll lines in full, and rostered labour cost per venue and day.');
+  } else {
+    cannot.push('See any wage or labour AMOUNT.');
+    can.push('See labour as a PERCENTAGE: P&L payroll lines keep their share of income with the amount removed, and labour hours, headcount and labour % are shown without the cost.');
+  }
+
+  if (!isOwner) {
+    cannot.push('Open this admin console, or add and remove anyone\'s access.');
+    cannot.push('See group staff hours, which belong to no single venue.');
+  }
+
+  return {
+    role,
+    venues: isOwner ? 'every venue' : 'only the venues assigned',
+    domains,
+    withheld_domains: withheld,
+    tools,
+    blocked_tools: blocked,
+    can,
+    cannot,
+  };
+}
+
+/** How each domain reads to somebody who has never seen the code. */
+const DOMAIN_WORDS: Record<Domain, string> = {
+  operations: 'trading data — sales, covers, bookings, product mix, labour hours',
+  marketing: 'social and content performance',
+  financial: 'the P&L and supplier bills — cost of sales, margin, overheads',
+  payroll: 'wage and salary amounts',
+};
+
+/** Every role, for the admin console's selector. */
+export function describeAllRoles(toolNames: readonly string[] = []): RoleAccess[] {
+  return (['staff', 'manager', 'finance', 'owner'] as Role[]).map(r => describeRole(r, toolNames));
+}
+
+/**
  * Payroll figures in prose, which is where the recommendation engine leaks.
  *
  * THE ENGINE RUNS AS THE SYSTEM, so the tool-layer check above does not apply

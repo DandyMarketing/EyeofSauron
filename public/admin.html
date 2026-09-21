@@ -176,6 +176,24 @@
   .role-finance { background: rgba(64, 192, 96, 0.15); color: var(--success); }
   .role-staff { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
 
+  /* What the selected role grants, shown before the Add button is pressed. */
+  .role-access {
+    margin-top: 8px; font-size: 12px; line-height: 1.55;
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 8px 10px; max-width: 520px;
+    background: rgba(0,0,0,.18);
+  }
+  .role-access .ra-venues { color: var(--text); margin-bottom: 6px; }
+  .role-access ul { margin: 0 0 6px 16px; padding: 0; }
+  .role-access li { margin: 1px 0; }
+  .role-access .ra-can { color: var(--success); }
+  .role-access .ra-cannot { color: #e88a8a; }
+  .role-access .ra-tools {
+    color: var(--text-muted); font-size: 11px;
+    border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px;
+  }
+  .role-access .ra-warn { color: var(--accent); margin-top: 6px; }
+
   .role-actions {
     display: flex;
     gap: 6px;
@@ -668,7 +686,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       <td>
         <div class="role-actions">
           <select id="venue-${user.id}">${venueOpts}</select>
-          <select id="role-${user.id}">
+          <select id="role-${user.id}" onchange="showRoleAccess('${user.id}')">
             <option value="manager">Manager</option>
             <option value="staff">Staff</option>
             <option value="finance">Finance</option>
@@ -676,6 +694,14 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
           </select>
           <button class="btn btn-small" onclick="assignRole('${user.id}')">Add</button>
         </div>
+        <!--
+          What the selected role grants, shown before it is granted.
+          Rendered from /admin/api/roles, which COMPUTES it from ROLE_DOMAINS
+          and mayRead() -- the same functions the tool layer enforces with.
+          Nothing here is hand-written, so it cannot drift away from what the
+          server actually does and tell somebody the opposite with confidence.
+        -->
+        <div class="role-access" id="role-access-${user.id}"></div>
       </td>
       <td>
         <div class="user-actions">
@@ -689,6 +715,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   tableHtml += '</tbody></table>';
   usersSection.innerHTML = tableHtml;
   app.appendChild(usersSection);
+
+  // Show what the default selection grants, rather than waiting for somebody to
+  // change the dropdown. Manager is preselected, so without this the one role
+  // most likely to be assigned by accident is the one with nothing under it.
+  for (const user of users) showRoleAccess(user.id);
 
   // System health
   const sysSection = el('div', 'section');
@@ -1599,6 +1630,62 @@ function initUpload() {
       ${warn > 0 ? `<div class="ustat"><span class="ulabel">Warnings</span><span style="color:#e8c840">${warn}</span></div>` : ''}
       ${err > 0 ? `<div class="ustat"><span class="ulabel">Errors</span><span style="color:var(--error)">${err}</span></div>` : ''}`;
   }
+}
+
+/**
+ * What each role grants, fetched once and shown under the selector.
+ *
+ * FETCHED, not hardcoded here. The server computes it from ROLE_DOMAINS and
+ * mayRead() — the same functions the tool layer refuses calls with — so this
+ * panel cannot drift away from the rules it describes. A copy written in this
+ * file would still be showing the old matrix the day after somebody changed
+ * the real one, and an access decision would be made from it.
+ */
+let roleAccess = null;
+
+async function loadRoleAccess() {
+  if (roleAccess) return roleAccess;
+  try {
+    const res = await fetch('/admin/api/roles', { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    roleAccess = {};
+    for (const r of payload.roles || []) roleAccess[r.role] = r;
+    return roleAccess;
+  } catch (e) {
+    // The panel is an aid, not a gate. Losing it must not stop somebody
+    // assigning a role, and the enforcement is server-side regardless.
+    console.warn('[admin] could not load the role descriptions', e);
+    return null;
+  }
+}
+
+async function showRoleAccess(userId) {
+  const box = document.getElementById('role-access-' + userId);
+  const select = document.getElementById('role-' + userId);
+  if (!box || !select) return;
+
+  const map = await loadRoleAccess();
+  const info = map && map[select.value];
+  if (!info) { box.innerHTML = ''; return; }
+
+  const list = (items, cls) =>
+    items.length ? '<ul class="' + cls + '">' + items.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : '';
+
+  box.innerHTML =
+    '<div class="ra-venues"><strong>' + esc(select.options[select.selectedIndex].text) +
+      '</strong> — sees ' + esc(info.venues) + '</div>' +
+    list(info.can, 'ra-can') +
+    list(info.cannot, 'ra-cannot') +
+    '<div class="ra-tools">' + info.tools.length + ' of ' + (info.tools.length + info.blocked_tools.length) +
+      ' data tools' +
+      (info.blocked_tools.length ? ' · refused: ' + esc(info.blocked_tools.join(', ')) : '') +
+    '</div>' +
+    // Owner is the one choice that cannot be contained by the venue column
+    // beside it, so it is called out rather than left to be inferred.
+    (info.role === 'owner'
+      ? '<div class="ra-warn">Owner ignores the venue chosen on the left — it grants every venue, this admin console, and the ability to change anyone\'s access.</div>'
+      : '');
 }
 
 async function assignRole(userId) {
