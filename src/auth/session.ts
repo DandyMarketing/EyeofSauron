@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { hasAcceptedCurrentTerms, TERMS_VERSION } from './terms.js';
+import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -29,19 +29,27 @@ export async function acceptTerms(
   userId: string,
   meta: { ip?: string | null; userAgent?: string | null } = {},
 ): Promise<void> {
+  /**
+   * INSERT, never upsert. Each acceptance is an event.
+   *
+   * This was an upsert keyed on (user_id, terms_version) with
+   * ignoreDuplicates, which was correct while an acceptance lasted for ever.
+   * Now that it expires annually, that shape silently defeats renewal: the
+   * insert collides with the original row, is ignored, and the 2026 timestamp
+   * stays put while the person watches the button succeed and the gate keep
+   * asking. Migration 043 drops the constraint for the same reason.
+   *
+   * A double-click writes two rows seconds apart, which is an accurate account
+   * of somebody pressing a button twice and is what the read already handles.
+   */
   const { error } = await supabaseAdmin
     .from('terms_acceptances')
-    .upsert(
-      {
-        user_id: userId,
-        terms_version: TERMS_VERSION,
-        ip: meta.ip ?? null,
-        user_agent: meta.userAgent ?? null,
-      },
-      // Pressing the button twice is not two agreements. ignoreDuplicates keeps
-      // the FIRST timestamp, which is the one that happened.
-      { onConflict: 'user_id,terms_version', ignoreDuplicates: true },
-    );
+    .insert({
+      user_id: userId,
+      terms_version: TERMS_VERSION,
+      ip: meta.ip ?? null,
+      user_agent: meta.userAgent ?? null,
+    });
   if (error) throw new Error(error.message);
 }
 
@@ -71,16 +79,41 @@ export async function validateSession(accessToken: string): Promise<SessionUser 
    * the same reason enforceDomainScope() sits at the top of handleToolCall
    * rather than inside each tool.
    */
-  const { data: acceptances } = await supabaseAdmin
+  const { data: acceptances, error: termsError } = await supabaseAdmin
     .from('terms_acceptances')
-    .select('terms_version')
+    .select('terms_version, accepted_at')
     .eq('user_id', user.id);
+
+  /**
+   * "CANNOT CHECK" AND "HAS NOT ACCEPTED" ARE DIFFERENT, and conflating them
+   * locks everybody out of a working product.
+   *
+   * The gate shipped before migration 042 was run, and until it is that table
+   * does not exist. The query then ERRORS, data comes back null, nobody looks
+   * accepted, /ask returns 403 to every person in the company, and the overlay
+   * they are shown cannot be dismissed because the insert behind the button
+   * fails against the same missing table. A dead end, on every page, for
+   * everyone -- shipped by me and caught by Khai.
+   *
+   * So a query error means the feature is not ready and costs the FEATURE, not
+   * the product: logged loudly, and the person is let through. A query that
+   * SUCCEEDS and returns no current row is a real unaccepted user and still
+   * gates. Same rule as isWebSearchConfigError() and isModelFeatureError() --
+   * a degraded app beats a dead one -- and the same rule the browser half of
+   * this gate already follows.
+   */
+  if (termsError) {
+    console.error(
+      `[terms] cannot check acceptance (${termsError.message}) — letting ${user.email} through. ` +
+      'If migration 042 has not been run, run it: until then nobody is being asked to accept anything.',
+    );
+  }
 
   return {
     id: user.id,
     email: user.email!,
     fullName: profile?.full_name ?? '',
-    acceptedTerms: hasAcceptedCurrentTerms(acceptances),
+    acceptedTerms: termsError ? true : hasAcceptedCurrentTerms(acceptances),
     venues: (roles ?? []).map((r: any) => ({
       venue_id: r.venue_id,
       slug: r.venues?.slug ?? '',
@@ -99,11 +132,31 @@ export async function listUsers() {
     .from('user_venue_roles')
     .select('id, user_id, venue_id, role, venues(name, slug)');
 
+  /**
+   * Acceptances, so the console can answer "has everybody signed?"
+   *
+   * A record only its subject can read, in a table only Supabase's SQL editor
+   * shows, is most of the way to not having a record. The point of keeping it
+   * is being able to produce it.
+   *
+   * A query error is tolerated the same way validateSession tolerates it:
+   * before migration 042 is run this table does not exist, and a missing audit
+   * column must not take down the user list.
+   */
+  const { data: acceptances, error: termsError } = await supabaseAdmin
+    .from('terms_acceptances')
+    .select('user_id, terms_version, accepted_at');
+
+  if (termsError) {
+    console.error(`[terms] cannot read acceptances for the user list: ${termsError.message}`);
+  }
+
   return (profiles ?? []).map((p: any) => ({
     id: p.id,
     email: p.email,
     full_name: p.full_name,
     created_at: p.created_at,
+    terms: termsAcceptanceSummary((acceptances ?? []).filter((a: any) => a.user_id === p.id), !!termsError),
     roles: (allRoles ?? [])
       .filter((r: any) => r.user_id === p.id)
       .map((r: any) => ({

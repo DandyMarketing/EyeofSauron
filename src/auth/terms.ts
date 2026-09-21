@@ -156,6 +156,47 @@ function isExpired(
   return now.getTime() - at > TERMS_VALIDITY_DAYS * 86_400_000;
 }
 
+/**
+ * One person's standing, for the admin console.
+ *
+ * `unknown` is a third state and not a dressed-up "no". Before migration 042 is
+ * run the table does not exist, and showing a hundred people as "never
+ * accepted" when nobody has been ASKED yet would send somebody chasing them.
+ */
+export interface AcceptanceSummary {
+  status: 'accepted' | 'expired' | 'never' | 'unknown';
+  accepted_at: string | null;
+  expires_at: string | null;
+}
+
+export function termsAcceptanceSummary(
+  acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,
+  unavailable = false,
+  now: Date = new Date(),
+): AcceptanceSummary {
+  if (unavailable) return { status: 'unknown', accepted_at: null, expires_at: null };
+
+  const latest = latestAcceptance(acceptances);
+  if (!latest) {
+    /**
+     * Never accepted the CURRENT wording. Somebody who agreed to an older one
+     * is reported the same way, deliberately: for the purpose of the question
+     * the console is answering -- may this person use Sauron -- the two are the
+     * same, and inventing a fourth state for it would be detail nobody acts on.
+     */
+    return { status: 'never', accepted_at: null, expires_at: null };
+  }
+
+  const accepted_at = latest.accepted_at ?? null;
+  const expires_at = acceptanceExpiresAt(acceptances);
+
+  return {
+    status: hasAcceptedCurrentTerms(acceptances, now) ? 'accepted' : 'expired',
+    accepted_at,
+    expires_at,
+  };
+}
+
 /** When the current acceptance runs out, or null if there is not one. */
 export function acceptanceExpiresAt(
   acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,

@@ -701,7 +701,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const usersSection = el('div', 'section');
   let tableHtml = `<h2>Users (${users.length})</h2>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Terms</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
       <tbody>`;
 
   for (const user of users) {
@@ -713,9 +713,25 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     const venueOpts = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
     const isSelf = user.id === currentUserId;
 
+    /**
+     * Has this person agreed, and is it still current?
+     *
+     * A record only Supabase's SQL editor can show is most of the way to not
+     * having one — the point of keeping it is being able to produce it. Expired
+     * is called out separately from never, because the two need different
+     * conversations.
+     */
+    const t = user.terms || { status: 'unknown' };
+    const termsCell =
+      t.status === 'accepted' ? `<span style="color:var(--success)" title="Expires ${esc((t.expires_at||'').slice(0,10))}">${esc((t.accepted_at||'').slice(0,10))}</span>`
+      : t.status === 'expired' ? `<span style="color:var(--accent)" title="Last accepted ${esc((t.accepted_at||'').slice(0,10))}">expired</span>`
+      : t.status === 'never' ? '<span style="color:var(--text-muted)">not yet</span>'
+      : '<span style="color:var(--text-muted)" title="Run migration 042">—</span>';
+
     tableHtml += `<tr>
       <td>${esc(user.full_name || '-')}</td>
       <td>${esc(user.email)}</td>
+      <td style="white-space:nowrap;font-size:12px">${termsCell}</td>
       <td><div class="role-actions">${roles || '<span style="color:var(--text-muted)">No roles</span>'}</div></td>
       <td>
         <div class="role-actions">
