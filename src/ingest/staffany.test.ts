@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { aggregateWorkHours, businessDateOf, splitCost, splitComponents, DAY_ENDS_AT_HOUR, type SectionMapping } from './staffany.js';
+import { aggregateWorkHours, businessDateOf, splitCost, splitComponents, DAY_ENDS_AT_HOUR, type SectionMapping, costCoverage, MIN_COST_COVERAGE_PCT } from './staffany.js';
 
 /**
  * These pin the three things that decide whether a labour figure is honest:
@@ -209,4 +209,72 @@ test('rows with no hours are counted apart from rows with no cost', () => {
   );
   assert.equal(r.hourless_rows, 1);
   assert.equal(r.costless_rows, 0);
+});
+
+// --- cost coverage: is the undocumented field still there? ------------------
+
+/**
+ * `actualCosts` is not in StaffAny's published contract. It was found by
+ * reading a response, the question of whether it is supported was put to them
+ * on 14 Sep 2026, and no answer has come. So it can vanish in a release note
+ * nobody sends us — and without a guard the run writes zeros OVER correct
+ * history, because the upsert keys on (section, business_date).
+ */
+
+const day = (over: Partial<{ actual_hours: number; total_cost: number }> = {}) => ({
+  actual_hours: over.actual_hours ?? 8,
+  total_cost: over.total_cost ?? 120,
+});
+
+test('complete coverage passes, which is the measured baseline', () => {
+  // 156 of 156 rows carried cost on the probed week.
+  const c = costCoverage([day(), day(), day()]);
+  assert.equal(c.pct, 100);
+  assert.equal(c.ok, true);
+});
+
+test('the field disappearing stops the run', () => {
+  // Every row keeps its hours and loses its cost. This is the shape to catch.
+  const c = costCoverage([
+    day({ total_cost: 0 }), day({ total_cost: 0 }), day({ total_cost: 0 }),
+  ]);
+  assert.equal(c.pct, 0);
+  assert.equal(c.ok, false);
+});
+
+test('one unpaid shift does not stop a night', () => {
+  // An open shift or an unpaid break carrying hours and no cost is real, and
+  // must not cost the whole ingest. The floor is set above that, not at 100%.
+  const rows = [...Array(9)].map(() => day());
+  rows.push(day({ total_cost: 0 }));
+
+  const c = costCoverage(rows);
+  assert.equal(c.pct, 90);
+  assert.equal(c.ok, true);
+});
+
+test('the floor is where it stops being plausible', () => {
+  const rows = [...Array(7)].map(() => day());
+  rows.push(day({ total_cost: 0 }), day({ total_cost: 0 }), day({ total_cost: 0 }));
+
+  const c = costCoverage(rows);
+  assert.equal(c.pct, 70);
+  assert.equal(c.ok, false, `${MIN_COST_COVERAGE_PCT}% is the floor`);
+});
+
+test('rows with no hours are not judged, in either direction', () => {
+  // A row with neither hours nor cost is an empty shift and says nothing about
+  // whether the field survived. Counting it as a miss would fail every quiet
+  // week; counting it as a hit would hide a real loss behind them.
+  const c = costCoverage([day(), day({ actual_hours: 0, total_cost: 0 })]);
+  assert.equal(c.rows_with_hours, 1);
+  assert.equal(c.pct, 100);
+});
+
+test('a closed window is nothing to judge, never a failure', () => {
+  // A venue shut for the whole period returns no hours at all. Failing there
+  // would be the Firangi-Sunday lesson: a legitimate zero read as a fault.
+  const c = costCoverage([day({ actual_hours: 0, total_cost: 0 })]);
+  assert.equal(c.pct, null);
+  assert.equal(c.ok, true);
 });

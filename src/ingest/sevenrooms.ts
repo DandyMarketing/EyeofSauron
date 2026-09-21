@@ -3,6 +3,49 @@ import { supabase } from '../lib/supabase.js';
 const API_BASE = 'https://api.sevenrooms.com/2_4';
 
 /**
+ * A gateway wobble at their end, as opposed to a refusal.
+ *
+ * WHY IT EXISTS. Until 21 Sep 2026 the fetch had no retry at all: a 502 threw
+ * and ended that venue's run. Meanwhile the Supabase upsert further down --
+ * our own infrastructure, rarely flaky -- retried three times with backoff. The
+ * resilient handling was on the call that did not need it. SevenRooms returned
+ * 502 on three consecutive nights, 16 to 18 September, two of them at the same
+ * minute, which is the shape of a maintenance window rather than a fault of
+ * ours, and each one cost a night of the forward book.
+ *
+ * SEPARATE FROM the upsert's own transient test, deliberately. That one matches
+ * a PostgREST error STRING; this reads an HTTP STATUS. They look like
+ * duplicates and are not the same input, and folding them together would mean
+ * regex-matching a number or status-matching a sentence.
+ *
+ * 401 and 403 are deliberately absent: those are answers, not wobbles, and
+ * retrying them turns a credentials problem into a slow credentials problem.
+ * 429 is included because a rate limit is precisely the case backoff exists
+ * for.
+ *
+ */
+export function isTransientHttp(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/** Attempts per page, and the first backoff. 1s, 2s, 4s. */
+const FETCH_ATTEMPTS = 4;
+const FETCH_BACKOFF_MS = 1_000;
+
+/**
+ * Wait, and SAY SO.
+ *
+ * A silent retry that eventually succeeds hides the fact that the vendor is
+ * unwell, and the first anyone knows is the night it fails four times instead
+ * of three. These lines are what will show whether the 21:00 window is a
+ * pattern.
+ */
+async function sleep(ms: number, attempt: number, why: string): Promise<void> {
+  console.warn(`  SevenRooms ${why} — retrying in ${ms}ms (attempt ${attempt}/${FETCH_ATTEMPTS})`);
+  await new Promise(r => setTimeout(r, ms));
+}
+
+/**
  * SevenRooms venue keys -> our warehouse venue_id.
  *
  * The group ("The Dandy Partnership") also contains California Republic,
@@ -119,14 +162,52 @@ async function fetchWindow(
     });
     if (cursor !== null) params.set('cursor', String(cursor));
 
-    const res = await fetch(`${API_BASE}/reservations?${params}`, {
-      headers: { Authorization: token },
-    });
+    /**
+     * RETRIED PER PAGE, so a wobble costs one page rather than the venue.
+     *
+     * A throw here used to end the whole run for that venue, and the next
+     * scheduled run was the only repair. That is survivable -- every run
+     * re-fetches seven days back to sixty forward and upserts by id, so one
+     * success heals the window -- but it means a bad night leaves the forward
+     * book stale until the following night, and the forward book is what
+     * "how does next week look" is answered from.
+     */
+    const res = await (async () => {
+      let last: Response | Error | null = null;
+
+      for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+        let response: Response;
+        try {
+          response = await fetch(`${API_BASE}/reservations?${params}`, {
+            headers: { Authorization: token },
+          });
+        } catch (networkErr: any) {
+          // DNS, reset, socket hang-up. Indistinguishable from a 502 in cause
+          // and identical in remedy.
+          last = networkErr;
+          if (attempt === FETCH_ATTEMPTS) throw networkErr;
+          await sleep(FETCH_BACKOFF_MS * 2 ** (attempt - 1), attempt, `network error: ${networkErr.message}`);
+          continue;
+        }
+
+        if (response.ok || !isTransientHttp(response.status)) return response;
+
+        last = response;
+        if (attempt === FETCH_ATTEMPTS) return response;
+        await sleep(FETCH_BACKOFF_MS * 2 ** (attempt - 1), attempt, `HTTP ${response.status}`);
+      }
+
+      // Unreachable: the loop either returns or throws. Here for the type.
+      return last as Response;
+    })();
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       if (res.status === 400 && /limited to \d+ results/i.test(body)) throw CAP_HIT;
-      throw new Error(`SevenRooms reservations failed: HTTP ${res.status}`);
+      throw new Error(
+        `SevenRooms reservations failed: HTTP ${res.status}` +
+        (isTransientHttp(res.status) ? ` after ${FETCH_ATTEMPTS} attempts` : ''),
+      );
     }
 
     const json: any = await res.json();

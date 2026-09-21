@@ -99,6 +99,64 @@ export interface AggregateResult {
   hourless_rows: number;
 }
 
+/**
+ * The floor under cost coverage, below which a run refuses to write.
+ *
+ * WHY THERE IS A FLOOR AT ALL. `actualCosts` is not in StaffAny's published
+ * contract -- it was found by reading a response, and the question of whether
+ * it is supported and stable was put to them on 14 Sep 2026 and has not been
+ * answered. So the field can disappear in a release note we never see.
+ *
+ * What that looks like without a guard: every row parses to zero cost, the run
+ * prints "330 carried no cost" in the middle of a log nobody reads to the end,
+ * exits 0, and writes real hours against $0.00 -- OVER the correct history,
+ * because the upsert keys on section and date. Not a gap. Destruction, reported
+ * as success.
+ *
+ * It is the exact mirror of the bug migration 039 exists for -- hours parsed as
+ * zero against 46,318.00 of cost -- and that direction was made fatal while
+ * this one was only counted.
+ *
+ * 80% rather than 100%: the measured baseline is complete coverage, 156 of 156
+ * rows on the probed week, but an unpaid break or an open shift carrying hours
+ * and no cost is a real thing and must not stop a night's ingest. A drop from
+ * 100% to below 80% is not that.
+ */
+export const MIN_COST_COVERAGE_PCT = 80;
+
+export interface CostCoverage {
+  /** Rows carrying hours — the only ones that SHOULD carry cost. */
+  rows_with_hours: number;
+  rows_with_cost: number;
+  pct: number | null;
+  ok: boolean;
+}
+
+/**
+ * Is cost still arriving with hours?
+ *
+ * Measured against rows carrying HOURS rather than all rows, because a row with
+ * neither is an empty shift and says nothing about whether the field survived.
+ * Null coverage on zero hours is "nothing to judge", never a failure -- a venue
+ * closed for the window would otherwise fail the run.
+ */
+export function costCoverage(rows: Array<{ actual_hours: number; total_cost: number }>): CostCoverage {
+  const withHours = rows.filter(r => r.actual_hours > 0);
+  const withCost = withHours.filter(r => r.total_cost > 0);
+
+  if (withHours.length === 0) {
+    return { rows_with_hours: 0, rows_with_cost: 0, pct: null, ok: true };
+  }
+
+  const pct = Math.round((withCost.length / withHours.length) * 1000) / 10;
+  return {
+    rows_with_hours: withHours.length,
+    rows_with_cost: withCost.length,
+    pct,
+    ok: pct >= MIN_COST_COVERAGE_PCT,
+  };
+}
+
 const num = (v: unknown): number => {
   const n = typeof v === 'string' ? Number(v) : v;
   return typeof n === 'number' && Number.isFinite(n) ? n : 0;

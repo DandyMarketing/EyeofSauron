@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/supabase.js';
 import { staffAnyKey, fetchSections, fetchWorkHours } from '../lib/staffany-client.js';
-import { aggregateWorkHours, DAY_ENDS_AT_HOUR, type SectionMapping } from '../ingest/staffany.js';
+import { aggregateWorkHours, costCoverage, MIN_COST_COVERAGE_PCT, DAY_ENDS_AT_HOUR, type SectionMapping } from '../ingest/staffany.js';
 
 /**
  * Pull clocked labour from StaffAny and store it aggregated.
@@ -130,6 +130,45 @@ if (result.unmapped_sections.length > 0) {
     .join(', ');
   console.error(`\nUNMAPPED SECTIONS carrying labour, NOT ingested: ${names}`);
   console.error('Map them in the admin console and re-run — timesheets can be re-fetched, so nothing is lost.');
+}
+
+/**
+ * Is cost still arriving at all? Checked BEFORE anything is written.
+ *
+ * `actualCosts` is not in StaffAny's published contract and they have not
+ * answered whether it is supported. If it goes, every row parses to zero cost
+ * and the upsert writes those zeros OVER correct history, because it keys on
+ * section and date. That is not a gap in new data, it is the loss of old data,
+ * reported as a successful run.
+ *
+ * So the coverage is printed on EVERY run, not only when it fails. A check
+ * nobody can see is indistinguishable from one that stopped working -- the same
+ * argument payrollAccountIds() reports its exclusions on.
+ */
+const coverage = costCoverage(rows);
+if (coverage.pct === null) {
+  console.log('Cost coverage: no rows carried hours, so there is nothing to judge.');
+} else {
+  console.log(`Cost coverage: ${coverage.pct}% (${coverage.rows_with_cost}/${coverage.rows_with_hours} rows with hours also carry cost)`);
+}
+
+if (!coverage.ok) {
+  console.error(`\nSTOPPED — NOTHING WAS WRITTEN.`);
+  console.error(`Cost coverage fell to ${coverage.pct}%, below the ${MIN_COST_COVERAGE_PCT}% floor.`);
+  console.error('');
+  console.error('  Rows are arriving with hours and no cost. The likeliest cause is that');
+  console.error('  `actualCosts` / `scheduledCosts` changed or were withdrawn — they are not');
+  console.error('  in StaffAny\'s published contract, and we asked them on 14 Sep 2026 whether');
+  console.error('  the fields are supported and stable. No answer yet.');
+  console.error('');
+  console.error('  Writing would have put zeros over correct history: the upsert keys on');
+  console.error('  (staffany_section_id, business_date), so this run would overwrite rather');
+  console.error('  than add. Nothing has been changed.');
+  console.error('');
+  console.error('  Check one raw timesheet row against src/ingest/staffany.ts splitComponents().');
+  console.error('  If StaffAny renamed the field, the fix is there. If they withdrew it, the');
+  console.error('  labour ladder needs a different source and that is a decision, not a patch.');
+  process.exit(1);
 }
 
 // --- write -------------------------------------------------------------------
