@@ -128,6 +128,16 @@
     border-top-right-radius: 4px;
   }
 
+  /* Taking an answer away with you. Sits in the same bar as "Teach Sauron
+     this", because both are things you do to a reply you have just read. */
+  .export-btn {
+    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
+    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    font-family: inherit; margin-left: 6px;
+  }
+  .export-btn:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
+  .export-btn.working { color: var(--accent); border-color: var(--accent); }
+
   .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
   .teach-btn, .teach-save, .teach-cancel {
     background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
@@ -285,6 +295,51 @@
   }
 
   .bubble h3 { font-size: 15px; }
+
+  /**
+   * PRINT: one reply, as a light document with dark chart panels.
+   *
+   * Same reasoning as the briefing's. chart-svg.ts paints its text at #e4e4ef
+   * on a background it does not draw, so on white paper it is invisible ink;
+   * giving the chart the dark panel it was drawn for is one rule that cannot
+   * rot, where recolouring it by selector would guess which <text> is a title.
+   *
+   * Only the marked reply prints. A chat is a transcript, and nobody wants to
+   * send somebody forty turns to deliver one table.
+   */
+  @media print {
+    @page { size: A4; margin: 14mm; }
+
+    html, body { background: #fff !important; color: #14181f !important; height: auto; }
+    #app-shell { position: static; overflow: visible; display: block; }
+    header, #composer, .input-row, #model-row, .teach-bar, .export-btn,
+    .tool-indicator, #chart-modal, .welcome { display: none !important; }
+
+    #chat { overflow: visible; padding: 0; display: block; }
+    .message { display: block; max-width: none; }
+    .message .avatar { display: none; }
+    .message .bubble {
+      background: #fff !important; border: none !important; max-width: none;
+      padding: 0; color: #14181f;
+    }
+    .bubble strong, .bubble h1, .bubble h2, .bubble h3, .bubble h4 { color: #14181f !important; }
+    .bubble a { color: #14181f; }
+    .bubble th { background: #f2f3f5 !important; }
+    .bubble th, .bubble td { border: 1px solid #c9ccd2 !important; }
+    .bubble table { display: table; }
+    .bubble code { background: #f2f3f5 !important; }
+
+    .chart-card {
+      background: #14141c !important; border: none !important;
+      break-inside: avoid; page-break-inside: avoid;
+    }
+    .chart-card::after { display: none !important; }
+
+    /* Only the reply that was asked for. */
+    body.print-one .message:not(.print-target) { display: none !important; }
+
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  }
   .bubble h4 { font-size: 14px; }
 
   .typing {
@@ -840,6 +895,109 @@ document.addEventListener('keydown', e => {
  * system must never write its own lessons — a confident wrong answer would
  * otherwise become a permanent stored fact.
  */
+
+/**
+ * PDF and Image, on one assistant reply.
+ *
+ * The briefing got these first and the chat needs them more: a briefing is read
+ * where it lives, while a chat answer is the thing somebody wants to forward to
+ * a manager who will never open this app. Both call the same
+ * /card-export.js, because two copies of an exporter drift and the one that
+ * drifts is the one used less.
+ */
+function addExportButtons(bar, bubble, question) {
+  const message = bubble.closest('.message');
+  if (!message) return;
+
+  const pdf = document.createElement('button');
+  pdf.className = 'export-btn';
+  pdf.textContent = 'PDF';
+  pdf.title = 'Save or print this answer — keeps tables and selectable text';
+  pdf.addEventListener('click', () => printMessage(message));
+  bar.appendChild(pdf);
+
+  const img = document.createElement('button');
+  img.className = 'export-btn';
+  img.textContent = 'Image';
+  img.title = 'An image for WhatsApp — previews in the thread, but the text stops being selectable';
+  img.addEventListener('click', () => shareMessageImage(message, bubble, question, img));
+  bar.appendChild(img);
+}
+
+/**
+ * One reply as a PDF, through the browser's own print pipeline.
+ *
+ * A class on <body> plus one on the message, so the print stylesheet holds the
+ * rule and cleanup is removing two class names rather than restoring styles a
+ * cancelled print would have left behind. afterprint fires on cancel as well as
+ * on save, which is what makes it the right place to undo it.
+ */
+function printMessage(message) {
+  message.classList.add('print-target');
+  document.body.classList.add('print-one');
+
+  const cleanup = () => {
+    message.classList.remove('print-target');
+    document.body.classList.remove('print-one');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+
+  window.print();
+}
+
+async function shareMessageImage(message, bubble, question, btn) {
+  const label = btn.textContent;
+  btn.textContent = 'Building...';
+  btn.classList.add('working');
+
+  try {
+    const { cardToPng } = await import('/card-export.js');
+
+    /**
+     * The QUESTION is the headline.
+     *
+     * A briefing recommendation carries its own headline; a chat reply does
+     * not, and an image of an answer with no sight of what was asked is a set
+     * of figures with no subject. Forwarded on, that is exactly how a number
+     * gets used for something it does not say.
+     */
+    const blob = await cardToPng(message, {
+      headline: question || 'Sauron',
+      tag: '',
+      meta: new Date().toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore' }),
+      bodyEl: bubble,
+    });
+
+    const name = 'sauron-' + (question || 'answer')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '.png';
+    const file = new File([blob], name, { type: 'image/png' });
+
+    // The share sheet first, a download second. canShare({files}) is the only
+    // honest test: navigator.share exists on desktop Chrome without file
+    // support, which is the platform the fallback matters most on.
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+  } catch (e) {
+    // AbortError is the user closing the share sheet, which is not a failure.
+    if (e && e.name !== 'AbortError') {
+      console.error('[chat] image export failed', e);
+      alert('Could not build the image. Use PDF instead — it does not depend on this.');
+    }
+  } finally {
+    btn.textContent = label;
+    btn.classList.remove('working');
+  }
+}
+
 function addTeachButton(bubble, question, answerText) {
   const bar = document.createElement('div');
   bar.className = 'teach-bar';
@@ -848,6 +1006,16 @@ function addTeachButton(bubble, question, answerText) {
   btn.className = 'teach-btn';
   btn.textContent = '+ Teach Sauron this';
   bar.appendChild(btn);
+
+  /**
+   * Taking the answer away with you.
+   *
+   * On the bar that already exists rather than a new one: both of these are
+   * things you do to a reply you have just finished reading, and a second row
+   * of controls under every message turns a conversation into a toolbar.
+   */
+  addExportButtons(bar, bubble, question);
+
   bubble.appendChild(bar);
 
   btn.addEventListener('click', () => {
