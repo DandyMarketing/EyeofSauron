@@ -76,6 +76,21 @@ By continuing you confirm you have read this, you agree to it, and you
 understand that your use of Sauron is recorded.
 `.trim();
 
+/**
+ * How long an acceptance stands before it is asked for again.
+ *
+ * A year, which is ordinary practice for a confidentiality undertaking and is
+ * here for two reasons rather than form. A three-month-old acceptance is much
+ * stronger evidence than a three-year-old one on the day you need to rely on
+ * it. And people genuinely forget what they agreed to -- somebody who signed in
+ * September 2026 and is asked in 2029 whether they knew they could not forward
+ * a P&L will answer honestly that they do not remember, and they will be right.
+ *
+ * The cost is one interruption a year per person, which is the cheapest thing
+ * in this file.
+ */
+export const TERMS_VALIDITY_DAYS = 365;
+
 export interface TermsAcceptance {
   user_id: string;
   terms_version: string;
@@ -83,15 +98,70 @@ export interface TermsAcceptance {
 }
 
 /**
- * Has this person accepted the text currently in force?
+ * Has this person accepted the text currently in force, recently enough?
  *
- * Compares the VERSION, not merely the existence of a row. Somebody who
- * accepted an earlier wording has not accepted this one, and treating them as
- * though they had is the whole failure this file's version constant exists to
- * prevent.
+ * TWO CONDITIONS, AND BOTH MATTER FOR DIFFERENT REASONS. The VERSION catches a
+ * rewrite: somebody who accepted an earlier wording has not accepted this one,
+ * and treating them as though they had is the failure the version constant
+ * exists to prevent. The AGE catches the passage of time, which no rewrite
+ * would ever surface on its own.
+ *
+ * The most recent matching row wins. Re-acceptance writes a new row rather than
+ * overwriting, so the history of who agreed to what and when survives -- which
+ * is the entire point of keeping a record instead of a flag.
  */
 export function hasAcceptedCurrentTerms(
-  acceptances: Array<{ terms_version: string }> | null | undefined,
+  acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,
+  now: Date = new Date(),
 ): boolean {
-  return (acceptances ?? []).some(a => a.terms_version === TERMS_VERSION);
+  return latestAcceptance(acceptances) !== null && !isExpired(acceptances, now);
+}
+
+/** The most recent acceptance of the CURRENT wording, or null. */
+export function latestAcceptance(
+  acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,
+): { terms_version: string; accepted_at?: string | null } | null {
+  const current = (acceptances ?? []).filter(a => a.terms_version === TERMS_VERSION);
+  if (current.length === 0) return null;
+
+  return current.reduce((newest, a) => {
+    const at = Date.parse(a.accepted_at ?? '');
+    const best = Date.parse(newest.accepted_at ?? '');
+    // A row with no timestamp is treated as the OLDEST rather than the newest,
+    // so a missing value can never make a stale acceptance look fresh.
+    if (!Number.isFinite(at)) return newest;
+    if (!Number.isFinite(best)) return a;
+    return at > best ? a : newest;
+  });
+}
+
+function isExpired(
+  acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,
+  now: Date,
+): boolean {
+  const latest = latestAcceptance(acceptances);
+  if (!latest) return true;
+
+  const at = Date.parse(latest.accepted_at ?? '');
+  /**
+   * An unparseable timestamp counts as EXPIRED, not as valid.
+   *
+   * The choice only matters in a corrupt-data case, and the two ways of being
+   * wrong are not symmetrical: asking somebody to accept again costs a click,
+   * while treating an unreadable record as a live agreement is the one claim
+   * this table exists to be able to make and the one it could not support.
+   */
+  if (!Number.isFinite(at)) return true;
+
+  return now.getTime() - at > TERMS_VALIDITY_DAYS * 86_400_000;
+}
+
+/** When the current acceptance runs out, or null if there is not one. */
+export function acceptanceExpiresAt(
+  acceptances: Array<{ terms_version: string; accepted_at?: string | null }> | null | undefined,
+): string | null {
+  const latest = latestAcceptance(acceptances);
+  const at = Date.parse(latest?.accepted_at ?? '');
+  if (!Number.isFinite(at)) return null;
+  return new Date(at + TERMS_VALIDITY_DAYS * 86_400_000).toISOString();
 }
