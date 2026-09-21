@@ -660,6 +660,14 @@ let myVenues = [];
     if (me.isOwner) document.getElementById('admin-link').style.display = '';
   }
 
+
+  /**
+   * The terms, before anything else loads. Blocking: the app is not usable
+   * until they are accepted, and /ask refuses regardless of what this does.
+   */
+  const { enforceTerms } = await import('/terms-gate.js');
+  await enforceTerms(authToken);
+
   document.getElementById('logout-link').style.display = '';
   document.getElementById('logout-link').addEventListener('click', async (e) => {
     e.preventDefault();

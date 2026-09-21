@@ -22,7 +22,8 @@ import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
 import { fetchSections } from './lib/staffany-client.js';
-import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, supabaseAdmin } from './auth/session.js';
+import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, acceptTerms, supabaseAdmin } from './auth/session.js';
+import { TERMS_VERSION, TERMS_TITLE, TERMS_BODY } from './auth/terms.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
 import type { ProductMixRow, OperationsData, HourlySalesData } from './parsers/revel/types.js';
@@ -100,6 +101,11 @@ app.get('/api/me', async (c) => {
     fullName: user.fullName,
     venues: user.venues,
     isOwner: user.isOwner,
+    // Drives the blocking screen. The browser reads this to decide whether to
+    // show the terms; the server refuses regardless, so a page that ignored it
+    // would get a 403 rather than an answer.
+    acceptedTerms: user.acceptedTerms,
+    termsVersion: TERMS_VERSION,
   });
 });
 
@@ -274,6 +280,9 @@ app.post('/ask', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
   const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
@@ -353,16 +362,73 @@ app.post('/admin/api/users/invite', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { email, full_name, password } = await c.req.json();
-  if (!email || !password) return c.json({ error: 'Email and password required' }, 400);
+  // No password. Supabase emails a one-time link and they set their own, so
+  // nobody -- including whoever is on this screen -- ever knows it.
+  const { email, full_name } = await c.req.json();
+  if (!email) return c.json({ error: 'Email required' }, 400);
 
   try {
-    const invited = await inviteUser(email, full_name ?? '', password);
-    return c.json({ user: { id: invited.id, email: invited.email } });
+    const invited = await inviteUser(email, full_name ?? '');
+    return c.json({ user: { id: invited?.id, email: invited?.email }, invited: true });
   } catch (e: any) {
     return c.json({ error: e.message }, 400);
   }
 });
+
+// --- the confidentiality terms ----------------------------------------------
+
+/**
+ * The text in force. Served rather than duplicated into the page, so there is
+ * exactly one copy and it is the one in src/auth/terms.ts that acceptances are
+ * recorded against.
+ */
+app.get('/api/terms', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated' }, 401);
+  return c.json({
+    version: TERMS_VERSION,
+    title: TERMS_TITLE,
+    body: TERMS_BODY,
+    accepted: user.acceptedTerms,
+  });
+});
+
+app.post('/api/terms/accept', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated' }, 401);
+
+  try {
+    await acceptTerms(user.id, {
+      // Best effort and never relied on. Behind Railway's proxy the header is
+      // what there is; a missing one is stored as null rather than guessed at.
+      ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+      userAgent: c.req.header('user-agent') ?? null,
+    });
+    console.log(`[terms] ${user.email} accepted ${TERMS_VERSION}`);
+    return c.json({ accepted: true, version: TERMS_VERSION });
+  } catch (e: any) {
+    console.error(`[terms] could not record acceptance for ${user.email}: ${e.message}`);
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * The gate, on the server side of it.
+ *
+ * The blocking screen in the browser is the experience; this is the control.
+ * Same split as the AI tool list against enforceDomainScope() -- what we offer
+ * is a hint, what we refuse is a boundary -- and it matters here because the
+ * whole point of the terms is to be able to say somebody agreed before they
+ * saw anything. A gate that a page reload defeats cannot support that claim.
+ */
+function requireTerms(c: any, user: SessionUser) {
+  if (user.acceptedTerms) return null;
+  return c.json({
+    error: 'You need to read and accept the confidentiality terms before Sauron will answer.',
+    terms_required: true,
+    version: TERMS_VERSION,
+  }, 403);
+}
 
 app.post('/admin/api/users/:userId/roles', async (c) => {
   const user = await requireOwner(c);
@@ -540,6 +606,11 @@ app.post('/api/notes/capture', async (c) => {
 app.get('/api/recommendations', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  // A briefing is the densest commercial document this app produces — margins,
+  // wage lines, supplier names. If anything is behind the terms, this is.
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
 
   let query = supabaseAdmin
     .from('recommendations')

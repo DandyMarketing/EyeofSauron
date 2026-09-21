@@ -260,6 +260,14 @@ let myVenues = [];
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
 
+
+  /**
+   * The terms, before the briefing renders. Blocking, and the API refuses
+   * /api/recommendations regardless of what happens here.
+   */
+  const { enforceTerms } = await import('/terms-gate.js');
+  await enforceTerms(token);
+
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();

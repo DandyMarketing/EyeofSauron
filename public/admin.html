@@ -633,14 +633,22 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
   // Add User section
   const inviteSection = el('div', 'section');
+  // No password field, deliberately. Supabase emails a one-time link and the
+  // person sets their own, so nobody on this screen ever knows it — which is
+  // what makes an action taken under an account attributable to its owner.
   inviteSection.innerHTML = `
-    <h2>Add User</h2>
+    <h2>Invite User</h2>
     <form class="invite-form" id="invite-form">
       <input type="email" id="invite-email" placeholder="Email address" required>
       <input type="text" id="invite-name" placeholder="Full name (optional)">
-      <input type="password" id="invite-password" placeholder="Password" required style="min-width:140px">
-      <button type="submit" class="btn">Create</button>
+      <button type="submit" class="btn">Send invitation</button>
     </form>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5;max-width:560px">
+      They receive an email with a link to set their own password. You never see it.
+      On first sign-in they must read and accept the confidentiality terms before
+      Sauron will answer anything — that acceptance is recorded against their name.
+      Give them a role below once they appear in the list.
+    </div>
   `;
   app.appendChild(inviteSection);
 
@@ -648,17 +656,15 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     e.preventDefault();
     const email = document.getElementById('invite-email').value.trim();
     const name = document.getElementById('invite-name').value.trim();
-    const password = document.getElementById('invite-password').value;
-    if (!email || !password) return;
+    if (!email) return;
 
-    const res = await api('POST', '/admin/api/users/invite', { email, full_name: name, password });
+    const res = await api('POST', '/admin/api/users/invite', { email, full_name: name });
     if (res.error) {
       toast('error', res.error);
     } else {
-      toast('success', 'User created: ' + email);
+      toast('success', 'Invitation sent to ' + email);
       document.getElementById('invite-email').value = '';
       document.getElementById('invite-name').value = '';
-      document.getElementById('invite-password').value = '';
       await loadAll();
     }
   });
