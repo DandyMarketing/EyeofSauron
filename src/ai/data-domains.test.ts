@@ -276,3 +276,50 @@ test('staff is the narrowest and owner the widest', () => {
   assert.ok(staff.domains.length < owner.domains.length);
   assert.equal(owner.blocked_tools.length, 0, 'an owner is refused nothing');
 });
+
+// --- said once, not a hundred times ----------------------------------------
+
+/**
+ * The first version of this panel rendered the full can/cannot lists under
+ * EVERY user row. At a hundred users that is a hundred copies of the same four
+ * descriptions, and a security note repeated a hundred times is one nobody
+ * reads. The summary and the matrix exist so the page states it once and the
+ * per-row reminder is a single line.
+ */
+test('every role has a one-line summary and it is actually one line', () => {
+  for (const r of describeAllRoles(TOOLS)) {
+    assert.ok(r.summary.length > 0, `${r.role} has no summary`);
+    assert.ok(!r.summary.includes('\n'), `${r.role}'s summary spans lines`);
+    assert.ok(r.summary.length < 120, `${r.role}'s summary is too long to sit under a dropdown`);
+  }
+});
+
+test('the summary is built from the same facts, not written alongside them', () => {
+  // A hand-written summary is a fifth copy of the access model, and the one
+  // that drifts is always the one a person actually reads.
+  for (const role of ['owner', 'finance', 'manager', 'staff'] as const) {
+    const r = describeRole(role, TOOLS);
+    assert.equal(/Every venue/.test(r.summary), role === 'owner');
+    assert.equal(/wage amounts included/.test(r.summary), mayRead(role, 'payroll'));
+    assert.equal(/the P&L/.test(r.summary), mayRead(role, 'financial'));
+  }
+});
+
+test('the comparison grid agrees with mayRead, cell by cell', () => {
+  // The grid is what somebody actually reads before choosing. If a cell and the
+  // enforcement disagree, the page is lying in the most compact possible form.
+  for (const role of ['owner', 'finance', 'manager', 'staff'] as const) {
+    const m = describeRole(role, TOOLS).matrix;
+    assert.equal(m.operations, mayRead(role, 'operations'), `${role} operations`);
+    assert.equal(m.marketing, mayRead(role, 'marketing'), `${role} marketing`);
+    assert.equal(m.financial, mayRead(role, 'financial'), `${role} financial`);
+    assert.equal(m.payroll, mayRead(role, 'payroll'), `${role} payroll`);
+    assert.equal(m.admin, role === 'owner', `${role} admin`);
+    assert.equal(m.venues, role === 'owner' ? 'Every venue' : 'Assigned only');
+  }
+});
+
+test('the label is derived, so a fifth role needs no lookup table', () => {
+  assert.equal(describeRole('manager').label, 'Manager');
+  assert.equal(describeRole('owner').label, 'Owner');
+});

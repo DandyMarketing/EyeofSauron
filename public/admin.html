@@ -176,23 +176,41 @@
   .role-finance { background: rgba(64, 192, 96, 0.15); color: var(--success); }
   .role-staff { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
 
-  /* What the selected role grants, shown before the Add button is pressed. */
+  /**
+   * Said ONCE, at the top, rather than under every user.
+   *
+   * The first version rendered the full can/cannot lists beneath every row.
+   * With a hundred users that is a hundred copies of the same four
+   * descriptions, and a security note repeated a hundred times is one nobody
+   * reads — the repeat-suppression argument from the recommendation engine,
+   * applied to a page.
+   */
+  .role-matrix { margin-bottom: 18px; }
+  .role-matrix table { width: auto; min-width: 520px; font-size: 12px; }
+  .role-matrix th, .role-matrix td { padding: 6px 12px; text-align: center; }
+  .role-matrix th:first-child, .role-matrix td:first-child { text-align: left; font-weight: 600; }
+  .role-matrix .yes { color: var(--success); }
+  .role-matrix .no  { color: #6a6a7a; }
+  .role-matrix .note {
+    font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.55; max-width: 620px;
+  }
+  .role-matrix details > summary {
+    cursor: pointer; color: var(--text-muted); font-size: 12px; margin-top: 8px;
+  }
+  .role-matrix details > summary:hover { color: var(--text); }
+  .role-matrix .detail { font-size: 12px; line-height: 1.55; padding: 8px 0 0 2px; }
+  .role-matrix .detail h4 { font-size: 12px; margin: 10px 0 2px; color: var(--text); }
+  .role-matrix .detail ul { margin: 0 0 0 16px; padding: 0; }
+  .role-matrix .ra-can { color: var(--success); }
+  .role-matrix .ra-cannot { color: #e88a8a; }
+
+  /* At the point of choosing: ONE line, and only for the row being touched. */
   .role-access {
-    margin-top: 8px; font-size: 12px; line-height: 1.55;
-    border: 1px solid var(--border); border-left: 3px solid var(--accent);
-    border-radius: 6px; padding: 8px 10px; max-width: 520px;
-    background: rgba(0,0,0,.18);
+    margin-top: 6px; font-size: 11px; line-height: 1.5;
+    color: var(--text-muted); max-width: 420px;
   }
-  .role-access .ra-venues { color: var(--text); margin-bottom: 6px; }
-  .role-access ul { margin: 0 0 6px 16px; padding: 0; }
-  .role-access li { margin: 1px 0; }
-  .role-access .ra-can { color: var(--success); }
-  .role-access .ra-cannot { color: #e88a8a; }
-  .role-access .ra-tools {
-    color: var(--text-muted); font-size: 11px;
-    border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px;
-  }
-  .role-access .ra-warn { color: var(--accent); margin-top: 6px; }
+  .role-access strong { color: var(--accent); font-weight: 600; }
+  .role-access .ra-warn { color: var(--accent); display: block; margin-top: 2px; }
 
   .role-actions {
     display: flex;
@@ -669,6 +687,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     }
   });
 
+  // The reference, once, above the list.
+  await renderRoleMatrix(app);
+
   // Users table
   const usersSection = el('div', 'section');
   let tableHtml = `<h2>Users (${users.length})</h2>
@@ -722,10 +743,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   usersSection.innerHTML = tableHtml;
   app.appendChild(usersSection);
 
-  // Show what the default selection grants, rather than waiting for somebody to
-  // change the dropdown. Manager is preselected, so without this the one role
-  // most likely to be assigned by accident is the one with nothing under it.
-  for (const user of users) showRoleAccess(user.id);
+  // Deliberately NOT pre-filled for every row any more. The grid above covers
+  // what the roles mean; a line appears under a row only once somebody touches
+  // its dropdown, so a page of a hundred users stays a page of a hundred users.
 
   // System health
   const sysSection = el('div', 'section');
@@ -1671,27 +1691,81 @@ async function showRoleAccess(userId) {
   const select = document.getElementById('role-' + userId);
   if (!box || !select) return;
 
+  /**
+   * Only the row being touched keeps its line.
+   *
+   * Otherwise a hundred users means a hundred lines, which is the thing this
+   * rewrite exists to stop. The reference table at the top is where the full
+   * picture lives; this is a reminder at the moment of the decision.
+   */
+  for (const other of document.querySelectorAll('.role-access')) {
+    if (other !== box) other.innerHTML = '';
+  }
+
   const map = await loadRoleAccess();
   const info = map && map[select.value];
   if (!info) { box.innerHTML = ''; return; }
 
-  const list = (items, cls) =>
-    items.length ? '<ul class="' + cls + '">' + items.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : '';
-
   box.innerHTML =
-    '<div class="ra-venues"><strong>' + esc(select.options[select.selectedIndex].text) +
-      '</strong> — sees ' + esc(info.venues) + '</div>' +
-    list(info.can, 'ra-can') +
-    list(info.cannot, 'ra-cannot') +
-    '<div class="ra-tools">' + info.tools.length + ' of ' + (info.tools.length + info.blocked_tools.length) +
-      ' data tools' +
-      (info.blocked_tools.length ? ' · refused: ' + esc(info.blocked_tools.join(', ')) : '') +
-    '</div>' +
-    // Owner is the one choice that cannot be contained by the venue column
-    // beside it, so it is called out rather than left to be inferred.
+    '<strong>' + esc(info.label) + '</strong> — ' + esc(info.summary) +
     (info.role === 'owner'
-      ? '<div class="ra-warn">Owner ignores the venue chosen on the left — it grants every venue, this admin console, and the ability to change anyone\'s access.</div>'
+      ? '<span class="ra-warn">Owner ignores the venue chosen on the left: every venue, plus this console.</span>'
       : '');
+}
+
+/**
+ * The reference, rendered once above the user list.
+ *
+ * Computed by the server from ROLE_DOMAINS and mayRead(), so it cannot drift
+ * from what the tool layer actually refuses. The detail is collapsed because
+ * the grid answers the question most of the time and the lists are for the one
+ * occasion somebody wants to be sure.
+ */
+async function renderRoleMatrix(container) {
+  const map = await loadRoleAccess();
+  if (!map) return;
+
+  const order = ['staff', 'manager', 'finance', 'owner'].filter(r => map[r]);
+  const cell = (on) => on ? '<td class="yes">yes</td>' : '<td class="no">no</td>';
+
+  let html =
+    '<div class="role-matrix"><h2>What each role can see</h2>' +
+    '<table><thead><tr>' +
+      '<th>Role</th><th>Venues</th><th>Trading</th><th>Social</th>' +
+      '<th>P&amp;L</th><th>Wage amounts</th><th>Admin</th>' +
+    '</tr></thead><tbody>';
+
+  for (const r of order) {
+    const m = map[r].matrix;
+    html += '<tr><td>' + esc(map[r].label) + '</td>' +
+      '<td>' + esc(m.venues) + '</td>' +
+      cell(m.operations) + cell(m.marketing) + cell(m.financial) + cell(m.payroll) + cell(m.admin) +
+      '</tr>';
+  }
+
+  html += '</tbody></table>' +
+    '<div class="note">Everyone except an owner sees only the venues assigned to them — a question about any ' +
+    'other venue is refused by the server, not just discouraged. Anyone without wage amounts still sees labour ' +
+    'as a percentage of sales, which is what running a shift needs.</div>' +
+    '<details><summary>The detail, role by role</summary><div class="detail">';
+
+  for (const r of order) {
+    const info = map[r];
+    const list = (items, cls) =>
+      items.length ? '<ul class="' + cls + '">' + items.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : '';
+    html += '<h4>' + esc(info.label) + '</h4>' + list(info.can, 'ra-can') + list(info.cannot, 'ra-cannot') +
+      (info.blocked_tools.length
+        ? '<div style="color:var(--text-muted);font-size:11px;margin-top:3px">Refused ' +
+          info.blocked_tools.length + ' of ' + (info.tools.length + info.blocked_tools.length) +
+          ' data tools: ' + esc(info.blocked_tools.join(', ')) + '</div>'
+        : '');
+  }
+
+  html += '</div></details></div>';
+
+  const section = el('div', 'section');
+  section.innerHTML = html;
+  container.appendChild(section);
 }
 
 async function assignRole(userId) {

@@ -148,6 +148,30 @@ export function enforceDomainScope(toolName: string, role: Role | undefined): st
  */
 export interface RoleAccess {
   role: Role;
+  /** Sentence case, for a heading. Derived so a fifth role needs no lookup. */
+  label: string;
+  /**
+   * The whole role in one line, for the moment somebody picks it.
+   *
+   * The full can/cannot lists are for the reference table at the top of the
+   * page, stated ONCE. Repeating them under every user in a list of a hundred
+   * is how a security note becomes wallpaper -- the same failure the
+   * recommendation engine's repeat-suppression exists to avoid, on a page
+   * instead of in a briefing.
+   */
+  summary: string;
+  /**
+   * The comparison grid, so four roles can be read against each other at a
+   * glance rather than as four paragraphs to hold in your head.
+   */
+  matrix: {
+    venues: 'Every venue' | 'Assigned only';
+    operations: boolean;
+    marketing: boolean;
+    financial: boolean;
+    payroll: boolean;
+    admin: boolean;
+  };
   /** One line on the WHO dimension. */
   venues: string;
   domains: Domain[];
@@ -211,8 +235,37 @@ export function describeRole(role: Role, toolNames: readonly string[] = []): Rol
     cannot.push('See group staff hours, which belong to no single venue.');
   }
 
+  /**
+   * The one-liner, assembled from the same facts rather than written out.
+   *
+   * Four hand-written summaries would be a fifth copy of the access model to
+   * keep in step with the other four, and the one that drifts is always the one
+   * a person actually reads.
+   */
+  const parts: string[] = [isOwner ? 'Every venue' : 'Assigned venues only'];
+
+  const kinds = [
+    domains.includes('operations') ? 'trading' : null,
+    domains.includes('marketing') ? 'social' : null,
+    domains.includes('financial') ? 'the P&L' : null,
+  ].filter(Boolean) as string[];
+  if (kinds.length) parts.push(kinds.join(', '));
+
+  parts.push(seesPayroll ? 'wage amounts included' : 'labour % but never wage amounts');
+  if (isOwner) parts.push('admin console');
+
   return {
     role,
+    label: role.charAt(0).toUpperCase() + role.slice(1),
+    summary: parts.join(' · '),
+    matrix: {
+      venues: isOwner ? 'Every venue' : 'Assigned only',
+      operations: domains.includes('operations'),
+      marketing: domains.includes('marketing'),
+      financial: domains.includes('financial'),
+      payroll: seesPayroll,
+      admin: isOwner,
+    },
     venues: isOwner ? 'every venue' : 'only the venues assigned',
     domains,
     withheld_domains: withheld,
