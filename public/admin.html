@@ -691,11 +691,17 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
    * The reference, once, above the list.
    *
    * NOT awaited: render() is synchronous and making it async would change when
-   * every caller's work completes for the sake of one panel. The grid fills in
-   * a moment later, which is invisible on a local fetch and harmless if it is
-   * slow — the table below does not depend on it.
+   * every caller's work completes for the sake of one panel.
+   *
+   * SO THE SLOT IS APPENDED NOW AND FILLED LATER. Appending inside the async
+   * function put the grid at the BOTTOM of the page, below everything render()
+   * had already added synchronously -- which is the opposite of the point, since
+   * it exists to be read BEFORE somebody picks a role. Reserving the element
+   * here fixes its position; only the contents arrive late.
    */
-  renderRoleMatrix(app);
+  const roleSlot = el('div', 'section');
+  app.appendChild(roleSlot);
+  renderRoleMatrix(roleSlot);
 
   // Users table
   const usersSection = el('div', 'section');
@@ -1746,7 +1752,9 @@ async function showRoleAccess(userId) {
  */
 async function renderRoleMatrix(container) {
   const map = await loadRoleAccess();
-  if (!map) return;
+  // The panel is an aid, not a gate. If it cannot load, the slot is removed
+  // rather than left as an empty bordered box that looks like a fault.
+  if (!map) { container.remove(); return; }
 
   const order = ['staff', 'manager', 'finance', 'owner'].filter(r => map[r]);
   const cell = (on) => on ? '<td class="yes">yes</td>' : '<td class="no">no</td>';
@@ -1786,9 +1794,9 @@ async function renderRoleMatrix(container) {
 
   html += '</div></details></div>';
 
-  const section = el('div', 'section');
-  section.innerHTML = html;
-  container.appendChild(section);
+  // Fills the slot render() already positioned, rather than appending a new one
+  // wherever the page has got to by the time the fetch returns.
+  container.innerHTML = html;
 }
 
 async function assignRole(userId) {
