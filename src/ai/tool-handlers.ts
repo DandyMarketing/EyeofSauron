@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
-import { buildChart, buildComposition, isClosedDay } from './charts.js';
+import { buildChart, buildComposition, earliestBookedDate, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { enforceDomainScope, mayRead, type Role } from './data-domains.js';
@@ -11,7 +11,7 @@ import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/accoun
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
-import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
+import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
@@ -1867,14 +1867,34 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
    * Scoping happens here, on what is returned -- the same boundary as every
    * other handler, and the reason cross-venue movement stays correct.
    */
+  /**
+   * How much booking history sits behind each venue's lookback.
+   *
+   * ANSWERED WITH A CAVEAT RATHER THAN WITHHELD, which is the opposite of what
+   * the retention CHART does with the same shortfall. The difference is what
+   * the reader is being handed: somebody asking about one period wants the
+   * figure, and a stated shortfall lets them judge it. A line implies a
+   * direction whatever is written underneath, and the shortfall shrinks month
+   * by month, so plotting it draws a rise that is the history filling up.
+   */
+  const horizons = new Map<string, string | null>();
+  await Promise.all(venues.map(async v => horizons.set(v.id, await earliestBookedDate(v.id))));
+
   const scoped = venues.map(v => {
     const counts = byVenue.get(v.id) ?? empty;
+    const coverage = lookbackCoverage(input.start_date, lookback, horizons.get(v.id) ?? null);
     return {
       venue: v.name,
       slug: v.slug,
       period: { start: input.start_date, end: input.end_date, lookback_days: lookback },
       ...counts,
       rates: retentionRates(counts),
+      lookback_coverage: {
+        needs_history_from: coverage.needed_from,
+        history_starts: coverage.data_from,
+        covered_pct: coverage.covered_pct,
+        complete: coverage.complete,
+      },
     };
   });
 
@@ -1899,7 +1919,21 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
       outlet_pct: 'returning_here / booked_guests',
       group_pct: '(returning_here + crossed_from_sister) / booked_guests',
     },
-    caveats: retentionCaveats(total),
+    caveats: [
+      // Named per venue, because one venue's history can be complete while
+      // another's is not -- a single group-level note would be wrong for one
+      // of them whichever way it was written.
+      ...scoped
+        .map(v => truncationCaveat(
+          { needed_from: v.lookback_coverage.needs_history_from,
+            data_from: v.lookback_coverage.history_starts,
+            covered_pct: v.lookback_coverage.covered_pct,
+            complete: v.lookback_coverage.complete },
+          v.venue,
+        ))
+        .filter((c): c is string => c !== null),
+      ...retentionCaveats(total),
+    ],
   });
 }
 

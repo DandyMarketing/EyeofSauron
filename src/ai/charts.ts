@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase.js';
 import { getCovers } from '../lib/covers.js';
 import { netSalesOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { normaliseChannel } from '../lib/channel-health.js';
+import { lookbackCoverage, truncationCaveat } from '../lib/retention.js';
 import {
   alignBuckets, bucketTotal, shareTrap, lowSampleBuckets, pieFitNote,
   type Slice, type Bucket,
@@ -100,6 +101,13 @@ export interface ChartSpec {
    */
   partial_first: boolean;
   partial_last: boolean;
+  /**
+   * Retention months dropped because their 365-day lookback reaches back
+   * before the booking history exists. Reported so a short line is visibly a
+   * withholding rather than a gap in trade -- an absence nobody can see is
+   * indistinguishable from one that stopped working.
+   */
+  withheld_months?: number;
 }
 
 const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; source: string }> = {
@@ -184,6 +192,32 @@ async function pagedSelect(table: string, columns: string, venueId: string, from
     if (data.length < 1000) break;
   }
   return rows;
+}
+
+
+/**
+ * The first booked visit this venue ever recorded.
+ *
+ * Lives here rather than in retention.ts because that file is pure and its
+ * tests import it directly -- pulling in the Supabase client would make the
+ * whole test file throw on a missing environment variable.
+ *
+ * PER VENUE, not per group. A venue onboarded onto SevenRooms later has a
+ * later horizon, and a single group-wide date would declare its early months
+ * fully covered when they are not.
+ */
+export async function earliestBookedDate(venueId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('reservations')
+    .select('business_date')
+    .eq('venue_id', venueId)
+    .eq('status_simple', 'Complete')
+    .eq('is_walk_in', false)
+    .not('sevenrooms_client_id', 'is', null)
+    .order('business_date', { ascending: true })
+    .limit(1);
+
+  return (data?.[0]?.business_date as string) ?? null;
 }
 
 export interface BuildChartInput {
@@ -730,9 +764,29 @@ async function buildRetentionChart(
 
   const group = input.metric === 'group_retention_rate';
 
+  /**
+   * A MONTH WHOSE LOOKBACK IS NOT COVERED IS WITHHELD, not flagged.
+   *
+   * This is the one place the truncation does real damage: the error shrinks as
+   * the history fills, so plotting the early months draws a rising line that is
+   * the database filling up rather than guests coming back more -- and a line
+   * is read as a trend whatever the caveat says. The query tool takes the other
+   * decision and answers with a caveat, because somebody asking about one
+   * period wants the number; a chart is a claim about direction.
+   */
+  const horizons = new Map<string, string | null>();
+  await Promise.all(venues.map(async v => horizons.set(v.id, await earliestBookedDate(v.id))));
+
+  let withheld = 0;
+
   const series: ChartSeries[] = venues.map(venue => ({
     name: venue.name,
     points: months.map((m, i) => {
+      if (!lookbackCoverage(m.start, 365, horizons.get(venue.id) ?? null).complete) {
+        withheld++;
+        return { label: m.key, value: null };
+      }
+
       const row = ((results[i].data ?? []) as any[]).find(r => r.venue_id === venue.id);
       const booked = Number(row?.booked_guests ?? 0);
 
@@ -752,6 +806,15 @@ async function buildRetentionChart(
     }),
   }));
 
+  if (series.every(s => s.points.every(p => p.value === null))) {
+    return {
+      error:
+        'Every month in that range sits inside the first year of booking history, where a guest whose previous ' +
+        'visit predates the ingest is counted as new. There is no retention figure to plot. Ask for a later range, ' +
+        'or use query_guest_retention for a single period, which returns the figure with the shortfall stated.',
+    };
+  }
+
   const span = `${input.start_date} to ${input.end_date}`;
   return {
     type: input.chart_type ?? 'line',
@@ -768,5 +831,6 @@ async function buildRetentionChart(
     // bucket -- fewer guests, a rate that is not comparable to the others.
     partial_first: isPartialStart(input.start_date, 'month'),
     partial_last: isPartialEnd(input.end_date, 'month'),
+    withheld_months: withheld,
   };
 }

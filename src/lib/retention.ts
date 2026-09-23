@@ -71,6 +71,23 @@ export function retentionCaveats(c: RetentionCounts): string[] {
   const notes: string[] = [
     'BOOKED GUESTS ONLY. SevenRooms issues a fresh client id for nearly every walk-in, so a walk-in can never be observed returning. Including them would understate retention by construction.',
     'Counts GUESTS (the booking), not diners. A returning regular who brings four first-timers is one returning guest — this measures relationship, not reach.',
+    /**
+     * The limit that cannot be fixed, so it is stated instead.
+     *
+     * A guest who has left Singapore is indistinguishable from one who chose
+     * not to come back. These are CBD rooms with heavy expatriate and visitor
+     * trade, and a visitor's chance of returning is near zero, so the measured
+     * rate is a FLOOR on how well the venue earns a second visit rather than an
+     * estimate of it. How much of a floor is unknown and this codebase will not
+     * guess at it.
+     *
+     * The comparison survives where the level does not: the same churn applies
+     * at all three venues and in most months, so venue against venue and month
+     * against month remain readable. What breaks it is the guest MIX changing
+     * — a hotel opening nearby, a race week — which moves the rate without
+     * anybody's hospitality changing.
+     */
+    'A FLOOR, NOT A RATE. A guest who has left Singapore looks identical to one who chose not to return, and these are CBD venues with heavy visitor and expatriate trade. The true share of returnable guests who come back is higher by an unknown amount. Use this to COMPARE — venue against venue, month against month, where the same churn applies to both sides — and never quote the level as a verdict on hospitality. If it moves sharply, ask whether the guest MIX changed before concluding that regulars were lost.',
   ];
 
   const rates = retentionRates(c);
@@ -195,5 +212,88 @@ export function totalCounts(rows: RetentionCounts[]): RetentionCounts {
       walk_in_guests: acc.walk_in_guests + r.walk_in_guests,
     }),
     { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 },
+  );
+}
+
+/**
+ * Whether the lookback window is actually covered by the data behind it.
+ *
+ * THE DEFECT THIS EXISTS FOR. To decide whether a guest is returning, the RPC
+ * looks for an earlier visit in the 365 days before the period -- IN OUR DATA.
+ * When the data does not reach back that far it finds nothing, and "I found
+ * nothing" is indistinguishable from "they had never been". Every guest whose
+ * previous visit predates the ingest is counted as new to the group.
+ *
+ * It is a guest book that started partway through. A month after you begin
+ * writing names down, almost everyone looks new.
+ *
+ * WHY IT IS WORSE THAN A ONE-OFF ERROR. The gap closes month by month as the
+ * window fills, so retention reads artificially low at the start of the data
+ * and climbs to its true level about a lookback later. Drawn as a line that is
+ * a RISING TREND for the first year which is entirely the database filling up,
+ * and it reads exactly like a venue getting better at keeping guests.
+ *
+ * Shaped like `calendar_covers_to` on the holidays tool: an answer that says
+ * when it cannot be trusted, rather than one that looks the same either way.
+ */
+export interface LookbackCoverage {
+  /** The first day the lookback needs to see. */
+  needed_from: string;
+  /** The first day the data actually holds, or null when there is none. */
+  data_from: string | null;
+  /** How much of the needed window exists, 0-100. */
+  covered_pct: number;
+  complete: boolean;
+}
+
+const DAY_MS = 86_400_000;
+const asUtc = (iso: string): number => Date.parse(`${iso}T00:00:00Z`);
+
+export function lookbackCoverage(
+  periodStart: string,
+  lookbackDays: number,
+  earliest: string | null,
+): LookbackCoverage {
+  const start = asUtc(periodStart);
+  const neededFrom = new Date(start - lookbackDays * DAY_MS).toISOString().slice(0, 10);
+
+  // No data at all is zero coverage, not full coverage. The other way round is
+  // how an empty table reports perfect confidence.
+  if (earliest === null) {
+    return { needed_from: neededFrom, data_from: null, covered_pct: 0, complete: false };
+  }
+
+  const have = asUtc(earliest);
+  if (have <= asUtc(neededFrom)) {
+    return { needed_from: neededFrom, data_from: earliest, covered_pct: 100, complete: true };
+  }
+
+  // Data beginning after the period itself covers none of the lookback.
+  const covered = Math.max(0, start - have);
+  const pct = Math.round((covered / (lookbackDays * DAY_MS)) * 1000) / 10;
+
+  return {
+    needed_from: neededFrom,
+    data_from: earliest,
+    covered_pct: Math.min(100, pct),
+    complete: false,
+  };
+}
+
+/** The sentence to print, or null when the window is genuinely covered. */
+export function truncationCaveat(c: LookbackCoverage, label?: string): string | null {
+  if (c.complete) return null;
+
+  const where = label ? `${label}: ` : '';
+
+  if (c.data_from === null) {
+    return `${where}NO BOOKING HISTORY AT ALL behind this period, so every guest is counted as new to the group by default. This is not a retention figure.`;
+  }
+
+  return (
+    `${where}THE LOOKBACK IS ONLY ${c.covered_pct}% COVERED. Deciding who is returning needs history back to ` +
+    `${c.needed_from} and the data starts ${c.data_from}, so a guest whose previous visit predates the ingest is ` +
+    `counted as NEW. Returning guests are understated and the new share is overstated — by more, the earlier the ` +
+    `period. Never read a rise across the early months as guests coming back more: it is the history filling up.`
   );
 }

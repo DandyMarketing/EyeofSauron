@@ -9,6 +9,8 @@ import {
   cohortRates,
   comparableCohorts,
   MIN_COHORT_SIZE,
+  lookbackCoverage,
+  truncationCaveat,
 } from './retention.js';
 
 /** Neon Pigeon, week of 17-23 Aug 2026. Real figures. */
@@ -186,4 +188,82 @@ test('comparableCohorts excludes exactly what must not be compared', () => {
 test('an empty cohort is null rather than 0%', () => {
   const [r] = cohortRates([cohort({ cohort_size: 0, returned: 0 })]);
   assert.equal(r.return_pct, null);
+});
+
+/**
+ * The lookback truncation. This is the defect that produced a rising retention
+ * line out of a database filling up, so the tests are about the difference
+ * between "nobody came back" and "we were not recording yet".
+ */
+
+test('a lookback fully behind the data start is complete', () => {
+  const c = lookbackCoverage('2026-09-01', 365, '2024-01-01');
+  assert.equal(c.complete, true);
+  assert.equal(c.covered_pct, 100);
+  assert.equal(truncationCaveat(c), null);
+});
+
+test('data starting exactly on the needed day still counts as complete', () => {
+  // Off by one here would caveat every well-covered period forever, and a
+  // caveat that always fires is one nobody reads.
+  const c = lookbackCoverage('2025-01-01', 365, '2024-01-01');
+  assert.equal(c.complete, true);
+});
+
+test('a lookback reaching before the data is partial, and says by how much', () => {
+  // Asking about Jul 2024 needs history to Jul 2023; the data starts Jan 2024,
+  // so roughly half the window exists.
+  const c = lookbackCoverage('2024-07-01', 365, '2024-01-01');
+  assert.equal(c.complete, false);
+  assert.ok(c.covered_pct > 40 && c.covered_pct < 60, `covered_pct was ${c.covered_pct}`);
+
+  const note = truncationCaveat(c);
+  assert.ok(note);
+  assert.match(note!, /counted as NEW/);
+  assert.match(note!, /2024-01-01/);
+  // The sentence that stops the artefact being read as a trend.
+  assert.match(note!, /history filling up/);
+});
+
+test('the month after the data begins covers almost none of its lookback', () => {
+  const c = lookbackCoverage('2024-02-01', 365, '2024-01-01');
+  assert.ok(c.covered_pct < 10, `covered_pct was ${c.covered_pct}`);
+  assert.equal(c.complete, false);
+});
+
+test('data beginning AFTER the period covers nothing, and does not go negative', () => {
+  const c = lookbackCoverage('2024-02-01', 365, '2025-06-01');
+  assert.equal(c.covered_pct, 0);
+  assert.equal(c.complete, false);
+});
+
+test('no history at all is zero coverage, not full coverage', () => {
+  // The other way round is how an empty table reports perfect confidence.
+  const c = lookbackCoverage('2026-09-01', 365, null);
+  assert.equal(c.complete, false);
+  assert.equal(c.covered_pct, 0);
+  assert.match(truncationCaveat(c)!, /NO BOOKING HISTORY AT ALL/);
+});
+
+test('the caveat names the venue when given one', () => {
+  const c = lookbackCoverage('2024-02-01', 365, '2024-01-01');
+  assert.match(truncationCaveat(c, 'Neon Pigeon')!, /^Neon Pigeon: /);
+});
+
+test('a shorter lookback is easier to cover, which is the honest trade', () => {
+  // 90 days back from Apr 2024 only needs Jan 2024, which we have.
+  assert.equal(lookbackCoverage('2024-04-01', 90, '2024-01-01').complete, true);
+  assert.equal(lookbackCoverage('2024-04-01', 365, '2024-01-01').complete, false);
+});
+
+test('the standing caveats say the rate is a floor and why', () => {
+  // The limit that cannot be engineered away, so it must always be stated.
+  const notes = retentionCaveats({
+    booked_guests: 600, returning_here: 72, crossed_from_sister: 18,
+    new_to_group: 510, walk_in_guests: 200,
+  });
+  const floor = notes.find(n => n.includes('FLOOR, NOT A RATE'));
+  assert.ok(floor, 'the floor caveat is missing');
+  assert.match(floor!, /left Singapore/);
+  assert.match(floor!, /COMPARE/);
 });
