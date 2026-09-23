@@ -1717,10 +1717,32 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
   });
 
   if (error) {
-    // Named rather than swallowed: the likely cause is migration 028 not being
-    // applied, which would otherwise look like a venue with no returning guests.
+    /**
+     * SAY WHICH FAILURE IT IS, because the two need opposite responses and the
+     * old message guessed.
+     *
+     * It appended "migration 028 has not been applied" to EVERY error. On
+     * 22 Sep 2026 the function existed and was timing out, and the chat
+     * faithfully relayed that hint -- telling Khai a migration was missing when
+     * the real cause was a query plan. A message that names a cause it has not
+     * checked sends the reader somewhere there is nothing to find, which is
+     * worse than saying only what happened.
+     *
+     * 57014 is Postgres's statement_timeout. PostgREST reports a missing
+     * function as PGRST202 or a 42883 in the text.
+     */
+    const code = (error as any).code ?? '';
+    const missing = code === 'PGRST202' || /does not exist|42883/i.test(error.message);
+    const timedOut = code === '57014' || /timeout|canceling statement/i.test(error.message);
+
     return JSON.stringify({
-      error: `Could not compute retention: ${error.message}. If this says the function does not exist, migration 028_guest_retention.sql has not been applied.`,
+      error: `Could not compute retention: ${error.message}`,
+      cause: missing
+        ? 'The function is not installed. Apply supabase/migrations/028_guest_retention.sql.'
+        : timedOut
+          ? 'The query exceeded the statement timeout. This is a system fault, not a limit of the question — narrowing the date range will NOT help, because the cost does not come from the window. Report it; do not retry.'
+          : 'Unclassified database error. Report the message above rather than guessing at a cause.',
+      retry_with_narrower_range: timedOut ? false : undefined,
     });
   }
 
