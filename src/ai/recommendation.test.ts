@@ -578,5 +578,22 @@ test('the tool requires the chart list, so omitting it is a visible choice', () 
   const item = schema.properties.recommendations.items;
   assert.ok(item.properties.chart_indexes, 'chart_indexes is not in the schema');
   assert.ok(item.required.includes('chart_indexes'));
-  assert.match(item.properties.chart_indexes.description, /EMPTY/);
+
+  const d: string = item.properties.chart_indexes.description;
+
+  // The empty case must be spelled out, or a model with no chart that fits
+  // invents one rather than leaving the field alone.
+  assert.match(d, /empty/i);
+
+  /**
+   * AND IT MUST NOT BE THE RECOMMENDED ANSWER. The description read "Usually
+   * EMPTY, and empty is the right answer" until 24 Sep 2026, written to stop
+   * the same two charts appearing under every finding. It worked and then kept
+   * going: the briefing for Neon Pigeon on 23 Sep carried no chart anywhere,
+   * which is the failure it was guarding against wearing the other face. The
+   * test is whether the chart shows the claim, not how often the answer is
+   * none.
+   */
+  assert.doesNotMatch(d, /usually empty/i);
+  assert.match(d, /shows the claim/i);
 });

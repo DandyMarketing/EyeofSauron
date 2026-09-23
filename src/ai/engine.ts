@@ -96,9 +96,15 @@ are usually on a phone between services. Default to a visual form:
   question is about movement over time or across venues. It re-queries the
   warehouse itself, so the picture is always real data.
 - create_chart covers sales, covers, spend per head, walk-ins, no-shows and
-  Instagram only. It cannot plot P&L lines, supplier bills, product mix or post
-  categories — for those, build a markdown table rather than describing the
-  numbers in prose or claiming a chart you cannot draw.
+  Instagram: ONE NUMBER OVER TIME. It cannot plot P&L lines, supplier bills,
+  product mix or post categories — for those, build a markdown table rather
+  than describing the numbers in prose or claiming a chart you cannot draw.
+- A PART-TO-WHOLE chart via create_composition_chart when the answer is shares
+  of a total: where guests came from, the visit mix, which booking channels
+  carried the month. Default to its stacked view, which shows whether the mix
+  is MOVING; a pie shows one period and cannot. Whichever you use, quote the
+  COUNT beside the share — a share rises when its denominator falls, and that
+  is a business shrinking drawn as a trend in the right direction.
 - Prose alone is right for a single figure, a yes/no, or a recommendation with
   no numbers in it. Do not wrap one number in a table.
 
@@ -656,12 +662,12 @@ export async function askSauron(
     );
 
     const toolResults: Anthropic.ToolResultBlockParam[] = uses.map((block, i) => {
-      // create_chart returns rendered SVG. Pull it out for the client and
+      // Both chart tools return rendered SVG. Pull it out for the client and
       // strip it before the result goes back to the model -- a chart is
       // several KB of markup that would burn context to no purpose, since
       // the model already gets a numeric summary alongside it.
       let forModel = results[i];
-      if (block.name === 'create_chart') {
+      if (block.name === 'create_chart' || block.name === 'create_composition_chart') {
         try {
           const parsed = JSON.parse(results[i]);
           if (parsed.__chart_svg) {

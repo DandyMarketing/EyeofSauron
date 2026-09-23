@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
-import { buildChart, isClosedDay } from './charts.js';
+import { buildChart, buildComposition, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
 import { enforceDomainScope, mayRead, type Role } from './data-domains.js';
@@ -123,6 +123,8 @@ export async function handleToolCall(
       return queryLabour(input);
     case 'list_available_data':
       return listAvailableData(input);
+    case 'create_composition_chart':
+      return createCompositionChart(input);
     case 'create_chart':
       return createChart(input);
     // No 'web_search' case: it is Anthropic's server-side tool now and never
@@ -687,6 +689,101 @@ async function querySupplierBills(input: Record<string, any>): Promise<string> {
       ? `Showing the ${returned.length} largest of ${matched.length} lines. Totals and coverage above cover ALL of them.`
       : null,
     lines: returned,
+  });
+}
+
+/**
+ * A part-to-whole chart: what something is made of, and whether that is moving.
+ *
+ * SEPARATE FROM createChart FOR THE SAME REASON buildComposition IS SEPARATE
+ * FROM buildChart -- different row shape, different summary, different ways to
+ * mislead. The summary it returns is the point: the model gets the SHARES AND
+ * THE COUNTS for the first and last bucket rather than every cell, because the
+ * one mistake this chart type invites is reporting a rising share as good news
+ * when the total underneath it fell.
+ */
+async function createCompositionChart(input: Record<string, any>): Promise<string> {
+  const spec = await buildComposition(
+    {
+      metric: input.metric,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      venue_slug: input.venue_slug,
+      chart_type: input.chart_type,
+      title: input.title,
+    },
+    // Scope comes from the caller's own grant, never from the model's argument.
+    input.__allowed_venues,
+  );
+
+  if ('error' in spec) return JSON.stringify({ error: spec.error });
+
+  const svg = renderChartSvg(spec);
+
+  const withData = spec.buckets.filter(b => b.total > 0);
+  const describe = (b: { label: string; slices: Array<{ label: string; value: number }>; total: number }) => ({
+    period: b.label,
+    total: b.total,
+    slices: b.slices.map(sl => ({
+      category: sl.label,
+      count: sl.value,
+      pct: b.total === 0 ? null : Number(((sl.value / b.total) * 100).toFixed(1)),
+    })),
+  });
+
+  const first = withData[0];
+  const last = withData[withData.length - 1];
+
+  return JSON.stringify({
+    chart_created: true,
+    title: spec.title,
+    metric: spec.metric,
+    chart_type: spec.type,
+    unit: spec.unit_label,
+    source: spec.source,
+    categories: spec.categories,
+    buckets_plotted: spec.buckets.length,
+    // First and last rather than all of them: eighteen months of four
+    // categories is seventy-two numbers, and the model needs the ends to
+    // describe a move, not the middle to re-list it.
+    first_period: first ? describe(first) : null,
+    last_period: last && last !== first ? describe(last) : null,
+    /**
+     * The movement, computed here rather than left to be worked out from two
+     * lists. A share change in points and a count change side by side is the
+     * whole reading of this chart, and separating them is how the share trap
+     * gets reported as good news.
+     */
+    change: first && last && last !== first
+      ? spec.categories.map(cat => {
+          const f = first.slices.find(sl => sl.label === cat);
+          const l = last.slices.find(sl => sl.label === cat);
+          const fPct = first.total ? (f!.value / first.total) * 100 : 0;
+          const lPct = last.total ? (l!.value / last.total) * 100 : 0;
+          return {
+            category: cat,
+            share_points: Number((lPct - fPct).toFixed(1)),
+            count_from: f!.value,
+            count_to: l!.value,
+            count_change: l!.value - f!.value,
+          };
+        })
+      : null,
+    total_change: first && last && last !== first
+      ? { from: first.total, to: last.total, change: last.total - first.total }
+      : null,
+    low_sample_periods: spec.low_sample,
+    caveats: [
+      ...spec.caveats,
+      ...(spec.low_sample.length > 0
+        ? [`${spec.low_sample.length} period(s) carry fewer than 30 ${spec.unit_label} — their shares move several points on one large party and must not be read as a trend. They are marked in amber on the chart: ${spec.low_sample.join(', ')}.`]
+        : []),
+      'Quote share AND count together. A share is a ratio and a ratio moves when either half does — the change block gives you both for exactly this reason.',
+    ],
+    rendering: 'The chart is already shown to the user. Interpret it — what the mix is, what moved, what it means — and do not list every category back at them.',
+    // Stripped by the engine before this reaches the model. Several KB of
+    // markup in context would buy nothing: the summary above is what it reads.
+    __chart_svg: svg,
   });
 }
 

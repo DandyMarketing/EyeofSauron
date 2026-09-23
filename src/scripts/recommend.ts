@@ -428,15 +428,34 @@ for (const venue of venues as any[]) {
      * and an assignment step that quietly stops working looks exactly like a
      * week whose findings were all unchartable. Printing the split is what
      * distinguishes the two.
+     *
+     * IT PRINTS WHEN THE ANSWER IS ZERO, which it did not until 24 Sep 2026.
+     * The line was inside `if (analysis.charts.length > 0)`, so a run that drew
+     * NO charts said nothing about charts at all -- and a briefing with no
+     * visual is exactly when somebody goes looking for the reason. Two
+     * different faults produced the same silence: an analysis that never called
+     * create_chart, and a structurer that drew four and attached none. Naming
+     * which is the entire value of the line.
      */
-    if (analysis.charts.length > 0) {
+    {
       const used = new Set(parsed.value.flatMap(k => k.chart_indexes));
       const withCharts = parsed.value.filter(k => k.chart_indexes.length > 0).length;
-      console.log(
-        `  charts: ${analysis.charts.length} drawn, ${used.size} used, ` +
-        `${withCharts}/${parsed.value.length} recommendation(s) carry one` +
-        (withCharts === 0 ? ' — none matched a finding, which is a normal outcome' : ''),
-      );
+
+      if (analysis.charts.length === 0) {
+        console.log(
+          '  charts: 0 DRAWN — the analysis never called create_chart. ' +
+          'Either nothing it found is chartable, or it did not think to. ' +
+          'This briefing will have no visual at all.',
+        );
+      } else {
+        console.log(
+          `  charts: ${analysis.charts.length} drawn, ${used.size} used, ` +
+          `${withCharts}/${parsed.value.length} recommendation(s) carry one` +
+          (withCharts === 0
+            ? ' — NONE attached. Charts were drawn and the structurer matched none of them to a finding.'
+            : ''),
+        );
+      }
     }
 
     if (parsed.value.length === 0) {
