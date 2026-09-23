@@ -1912,6 +1912,21 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
     // Only meaningful when more than one venue is in view -- a "group" of one
     // is the venue again under a different heading.
     group: venues.length > 1 ? { ...total, rates: retentionRates(total) } : null,
+    /**
+     * The same measure twice: once for the model, once for the person.
+     *
+     * `definitions` below is shorthand -- "returning_here / booked_guests" --
+     * which is exact and means nothing to a restaurant manager. This is the
+     * sentence to actually say to them, and it is supplied rather than left to
+     * be composed because the model reinvents it differently every time and
+     * the two retention measures are confusable enough without that.
+     */
+    in_plain_words: {
+      what_this_is: `Of the ${total.booked_guests} guests who booked in this period, ${total.returning_here} had eaten at this venue before within the last ${lookback} days. It describes WHO WAS IN THE ROOM.`,
+      the_catch: 'It FALLS when you attract a lot of new guests, because they enlarge the bottom of the fraction. A great month for new business pushes this number down, and that is not a problem — check whether booked guests rose before treating a fall as lost regulars.',
+      the_other_one: 'query_guest_cohorts answers the different question: of the people who came here for the FIRST time in a given month, how many came back. That one does not move when you attract more new guests, so it is the one to use for "are we good at winning people back".',
+      say_it_like_this: 'Name which of the two you are quoting and give the reader one plain sentence of what it means, with the real counts in it. Never write "retention was 12%" with no explanation — the reader cannot tell the two measures apart and they move in opposite directions.',
+    },
     definitions: {
       returning_here: 'Visited THIS venue within the lookback. The venue owns this one.',
       crossed_from_sister: 'Visited a DIFFERENT group venue within the lookback, but not this one. The multi-venue premium.',
@@ -2006,6 +2021,12 @@ async function queryGuestCohorts(input: Record<string, any>): Promise<string> {
     venues: byVenue,
     group: groupCohorts,
     comparable_cohorts: mature.length,
+    in_plain_words: {
+      what_this_is: `Of the guests whose FIRST visit to this venue fell in a given ${grain}, this is the share who came back within ${windowDays} days. Every cohort gets the same ${windowDays} days, which is what makes one ${grain} comparable with another.`,
+      why_it_is_the_fairer_one: 'It follows one group of new guests from the day they met you, so it does not move when you simply attract more people. That makes it the honest answer to "are we good at winning someone back", which is a question about the room and the food rather than about marketing reach.',
+      the_other_one: 'query_guest_retention answers a different question: of everyone in the room this period, how many had been before. That one falls when new-guest numbers rise, so the two can move in opposite directions in the same month without either being wrong.',
+      say_it_like_this: 'Name which of the two you are quoting and give the reader one plain sentence of what it means, with the real counts in it. A cohort figure and a period figure quoted side by side without that will read as a contradiction.',
+    },
     caveats: [
       'A cohort is everyone whose FIRST visit fell in that period, each given the same window to return. That is what makes two cohorts comparable.',
       'is_mature false means the window has not fully elapsed. Its rate WILL rise. Never plot it as the latest point in a trend or describe it as a fall — say the cohort is still filling.',
