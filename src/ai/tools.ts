@@ -500,12 +500,35 @@ export const queryTools: Tool[] = [
       'WHY IT MATTERS FOR TRADE. A public holiday changes covers, the mix of bookings and walk-ins, and what people order, and a holiday MONDAY behaves nothing like an ordinary Monday. A week containing one is not comparable to the week before it, and saying so is usually more useful than the comparison. ' +
       'OBSERVED DAYS ARE SEPARATE ROWS AND ARE THE ONES THAT MATTER. When a holiday falls on a Sunday the following Monday is gazetted in lieu — National Day 2026 is Sunday 9 August AND Monday 10 August. For a restaurant the Monday is the day the covers move, so read both. is_observed marks the day-in-lieu. ' +
       'IT IS NOT A TRADING CALENDAR. It says nothing about whether a venue opened — Firangi Superstar closes every Sunday regardless — so never infer a closure from it, and never infer that a venue traded because a day is absent. ' +
-      'SCHOOL TERMS ARE NOT IN HERE. If a question needs them, say so rather than searching: it is a known gap, not something to fill from a blog.',
+      'SCHOOL TERMS ARE NOT IN HERE — they are in query_school_calendar, which is a separate tool with a separate source. Do not search the web for either.',
     input_schema: {
       type: 'object' as const,
       properties: {
         start_date: { type: 'string', description: 'Start of the range (inclusive), YYYY-MM-DD.' },
         end_date: { type: 'string', description: 'End of the range (inclusive), YYYY-MM-DD.' },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
+    name: 'query_school_calendar',
+    description:
+      'SINGAPORE SCHOOL TERMS AND SCHOOL HOLIDAYS for a date range, from the Ministry of Education. USE THIS INSTEAD OF SEARCHING THE WEB — never search for the MOE calendar, school terms, term breaks or school holidays, and never state these dates from memory. ' +
+      'WHY IT MOVES A RESTAURANT. The June break runs four weeks and the year-end one six, and they take the family trade out of the room and pull the rest of the evening earlier. A week containing a term break is not comparable to the week before it, and holiday_coverage tells you how much of the period was affected — check it before reading a covers movement as demand. ' +
+      'READ holiday_coverage, NOT THE ROW COUNT. MOE publishes most breaks TWICE, once for MK/Primary/Secondary and once for Post-secondary, usually on identical dates. holiday_coverage.days counts DISTINCT days and is the figure to quote; counting or summing the rows double-counts the same break. ' +
+      'IT IS SEPARATE FROM PUBLIC HOLIDAYS, deliberately. Public holidays come from query_public_holidays, sourced from the Ministry of Manpower which gazettes them. This table does not carry them, so a period can be clear here and still contain a public holiday: check both when a week looks odd. ' +
+      'IT IS NOT A TRADING CALENDAR and not a booking forecast. A school holiday says children are off school. It does not say a venue opened, and it does not say families booked — it is context for a movement you have already measured, never the measurement itself. ' +
+      'CHECK calendar_covers_to. MOE publishes the following year around end August and the warehouse only holds what has been ingested, so a query past that boundary returns an empty list that reads exactly like a period with no school holidays. The response says when you have asked beyond it.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        start_date: { type: 'string', description: 'Start of the range (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of the range (inclusive), YYYY-MM-DD.' },
+        category: {
+          type: 'string',
+          enum: ['School holidays', 'School terms'],
+          description: 'Optional filter. Omit for both — the terms give the shape of the year and the holidays are what moves trade.',
+        },
       },
       required: ['start_date', 'end_date'],
     },

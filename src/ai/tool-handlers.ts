@@ -15,6 +15,7 @@ import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableC
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
+import { holidayCoverage } from '../lib/school-calendar.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
 
@@ -110,6 +111,8 @@ export async function handleToolCall(
       return queryBookingLeadTime(input);
     case 'query_public_holidays':
       return queryPublicHolidays(input);
+    case 'query_school_calendar':
+      return querySchoolCalendar(input);
     case 'explain_revenue_change':
       return explainRevenueChange(input);
     case 'check_booking_channels':
@@ -1973,6 +1976,102 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
 }
 
 /**
+ * The MOE school calendar: which weeks the schools were out.
+ *
+ * WHY IT IS A SEPARATE TOOL FROM PUBLIC HOLIDAYS. Different authority, different
+ * table, different meaning. MOM gazettes public holidays and the whole country
+ * stops; MOE sets term dates and only families change what they do. Merging
+ * them would produce one "was anything on" flag that could not be read either
+ * way -- and the two sources overlap, which is how a warehouse ends up with two
+ * disagreeing answers to one question.
+ *
+ * THE ANSWER IS THE COVERAGE, NOT THE ROWS. MOE lists nearly every break twice,
+ * once per education level, on identical dates. A model handed six rows would
+ * report a nine-day break as eighteen days. `holidayCoverage()` counts distinct
+ * days and is returned computed, in the same spirit as `coverageByAccount()`:
+ * the figure a reader needs to interpret the answer ships with the answer.
+ */
+async function querySchoolCalendar(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  // Overlapping, not contained: a six-week break that started in November is
+  // the whole story for a week in December, and `start_date >= period start`
+  // would miss it entirely.
+  let query = supabase
+    .from('school_calendar')
+    .select('start_date, end_date, name, category, level, origin')
+    .lte('start_date', input.end_date)
+    .gte('end_date', input.start_date)
+    .order('start_date', { ascending: true });
+
+  if (input.category) query = query.eq('category', input.category);
+
+  const { data, error } = await query;
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not read the school calendar: ${error.message}. If this says the table does not exist, migration 045_school_calendar.sql has not been applied.`,
+    });
+  }
+
+  const events = (data ?? []).map(r => ({
+    start_date: r.start_date as string,
+    end_date: r.end_date as string,
+    name: r.name as string,
+    category: r.category as string,
+    // '' is how the table stores "MOE stated no level" -- see migration 045.
+    level: (r.level as string) || null,
+  }));
+
+  const coverage = holidayCoverage(events, input.start_date, input.end_date);
+
+  /**
+   * How far the calendar goes, returned with every answer.
+   *
+   * The only way this table can be wrong is the far end going stale, and the
+   * failure is silent: a query for an un-ingested year returns an empty list,
+   * which reads as a period with no school holidays. During the June break that
+   * is the most wrong thing it could say.
+   */
+  const { data: newest } = await supabase
+    .from('school_calendar')
+    .select('end_date')
+    .order('end_date', { ascending: false })
+    .limit(1);
+
+  const coveredTo = newest?.[0]?.end_date ?? null;
+  const askedBeyond = coveredTo !== null && input.end_date > coveredTo;
+  const transcribed = (data ?? []).filter(r => r.origin === 'transcribed').length;
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    events: events.map(e => ({ ...e, level: e.level ?? undefined })),
+    holiday_coverage: {
+      days: coverage.days,
+      period_days: coverage.period_days,
+      pct: coverage.pct,
+      whole_period: coverage.whole_period,
+      overlapping: coverage.overlapping,
+    },
+    source: 'Ministry of Education',
+    calendar_covers_to: coveredTo,
+    caveats: [
+      ...(askedBeyond
+        ? [`THE CALENDAR ONLY RUNS TO ${coveredTo}, and you asked past it. An empty result beyond that means nobody has ingested that year, NOT that the schools were in. Say so rather than treating the period as term time.`]
+        : []),
+      'holiday_coverage.days counts DISTINCT days. MOE publishes most breaks twice, once per education level, on the same dates — quote the coverage and never the number of events.',
+      'Public holidays are NOT in here. They come from query_public_holidays, sourced from MOM. A period clear of school holidays can still contain one.',
+      'This is context, never a cause. A school holiday means children are off school; it does not mean a venue was busy, quiet, or open. Say "the week fell in the June break" and let the measured movement speak — never "covers fell because of the school holidays".',
+      ...(transcribed > 0
+        ? [`${transcribed} of these row(s) were transcribed by hand from an MOE press release rather than read from the live calendar, because moe.gov.sg/calendar only serves the current year. They are marked origin "transcribed".`]
+        : []),
+    ],
+  });
+}
+
+/**
  * What moved when revenue moved, as arithmetic rather than analysis.
  *
  * WHY IT IS ONE CALL. The dry run on 9 Sep 2026 assembled this by hand for Fat
@@ -2201,7 +2300,7 @@ async function queryPublicHolidays(input: Record<string, any>): Promise<string> 
         : []),
       'A day-in-lieu is its own row with is_observed true. For a restaurant the Monday after a Sunday holiday is usually the day covers actually move.',
       'This is not a trading calendar. It says nothing about whether a venue opened — Firangi Superstar closes every Sunday regardless — so never read a closure from it.',
-      'School terms are not held anywhere in this system. If a question needs them, say they are missing rather than searching for them.',
+      'School terms and school holidays are NOT in here. They are a separate tool, query_school_calendar, from the Ministry of Education. Call it as well when a week looks odd — and never search the web for either.',
     ],
   });
 }
