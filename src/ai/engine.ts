@@ -95,10 +95,11 @@ are usually on a phone between services. Default to a visual form:
 - A CHART via create_chart whenever the metric is one it supports AND the
   question is about movement over time or across venues. It re-queries the
   warehouse itself, so the picture is always real data.
-- create_chart covers sales, covers, spend per head, walk-ins, no-shows and
-  Instagram: ONE NUMBER OVER TIME. It cannot plot P&L lines, supplier bills,
-  product mix or post categories — for those, build a markdown table rather
-  than describing the numbers in prose or claiming a chart you cannot draw.
+- create_chart covers sales, covers, spend per head, walk-ins, no-shows,
+  Instagram and the two retention rates: ONE NUMBER OVER TIME. It cannot plot
+  P&L lines, supplier bills, product mix or post categories — for those, build
+  a markdown table rather than describing the numbers in prose or claiming a
+  chart you cannot draw.
 - A PART-TO-WHOLE chart via create_composition_chart when the answer is shares
   of a total: where guests came from, the visit mix, which booking channels
   carried the month. Default to its stacked view, which shows whether the mix
