@@ -1507,7 +1507,62 @@ app.post('/admin/api/alerts/:id/resolve', async (c) => {
   return c.json({ resolved: data?.length ?? 0, ...target });
 });
 
+/**
+ * PUBLIC HEALTH SIGNAL. Counts and a boolean, never the figures.
+ *
+ * THE LEAK THIS CLOSES, found in the pre-alpha audit on 23 Sep 2026. This route
+ * has no authentication -- deliberately, so an external uptime monitor can read
+ * it -- and it returned the full report, including `open_alerts`, whose detail
+ * string is built as:
+ *
+ *     Monday $12,345 vs Revel $12,300 (out by $45)
+ *
+ * beside the venue NAME and the date. So anyone who knew the URL could read
+ * daily gross revenue per named venue for up to fifty unresolved alerts,
+ * without logging in. RLS was never the problem: the handler queries with the
+ * service role, which bypasses it, and the route asked for no session at all.
+ *
+ * That is BUILD_LOG 4.4 arriving through a different door. There the tables had
+ * no RLS; here the table is fine and the route in front of it is not. Both are
+ * the same lesson -- a barrier is only where you put it.
+ *
+ * A monitor needs to know WHETHER something is wrong, never what. The counts
+ * make the signal actionable ("three gaps") without naming a venue or a figure,
+ * and the full report moved to /admin/api/system, which already requires an
+ * owner and is what the admin console actually reads.
+ */
 app.get('/watchdog', async (c) => {
+  const days = Number(c.req.query('days') ?? 3);
+  const report = await checkDataGaps(days);
+  const knowledgeState = await knowledgeHealth();
+  const socialState = await socialFreshness();
+
+  const ok =
+    report.missing.length === 0 &&
+    report.recent_errors.length === 0 &&
+    report.open_alerts.length === 0 &&
+    knowledgeState.ok &&
+    socialState.ok;
+
+  return c.json({
+    healthy: ok,
+    checked_at: new Date().toISOString(),
+    // Counts only. Naming the venue would say which outlet is in trouble, and
+    // the detail strings carry revenue.
+    missing: report.missing.length,
+    recent_errors: report.recent_errors.length,
+    open_alerts: report.open_alerts.length,
+    knowledge_ok: knowledgeState.ok,
+    social_ok: socialState.ok,
+    detail: 'Counts only. The full report is at /admin/api/system and requires an owner session.',
+  });
+});
+
+/** The full report, for an owner. Unchanged in content; moved behind a session. */
+app.get('/admin/api/watchdog', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
   const days = Number(c.req.query('days') ?? 3);
   const report = await checkDataGaps(days);
   // A knowledge layer that has silently stopped being readable looks exactly
