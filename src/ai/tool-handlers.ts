@@ -14,7 +14,7 @@ import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
-import { decompose, precedingPeriod, type PeriodRow } from '../lib/revenue-decomposition.js';
+import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
 
@@ -1986,6 +1986,49 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
  * above the four-week average, so the fortnight between was the outlier. A
  * week-on-week figure alone would have reported a collapse.
  */
+/**
+ * Bills and till sales for a set of venues over one window.
+ *
+ * One query for every venue rather than one each, because the comparison needs
+ * two windows and three venues is six round trips otherwise. `daily_operations`
+ * holds one row per venue-day, so a fortnight across the group is 42 rows.
+ *
+ * A FAILURE IS RETURNED, NEVER SWALLOWED. An empty map and a failed query look
+ * identical from the caller, and the difference is "the venue was shut" against
+ * "the database refused" -- BUILD_LOG's most repeated lesson.
+ */
+async function tillTotalsFor(
+  venueIds: string[],
+  start: string,
+  end: string,
+): Promise<{ totals: Map<string, TillTotals> } | { error: string }> {
+  const totals = new Map<string, TillTotals>();
+  for (const id of venueIds) {
+    totals.set(id, { transactions: 0, net_to_account_for: 0, food_bev_sales: 0, days: 0 });
+  }
+
+  const { data, error } = await supabase
+    .from('daily_operations')
+    .select('venue_id, gross_sales, item_discounts, order_discounts, net_sales, net_to_account_for, total_transactions')
+    .in('venue_id', venueIds)
+    .gte('business_date', start)
+    .lte('business_date', end)
+    .limit(5000);
+
+  if (error) return { error: error.message };
+
+  for (const row of data ?? []) {
+    const t = totals.get(row.venue_id as string);
+    if (!t) continue;
+    t.days += 1;
+    t.transactions += Number(row.total_transactions ?? 0);
+    t.net_to_account_for += Number(row.net_to_account_for ?? 0);
+    t.food_bev_sales += foodAndBevSalesOf(row as any);
+  }
+
+  return { totals };
+}
+
 async function explainRevenueChange(input: Record<string, any>): Promise<string> {
   if (!input.start_date || !input.end_date) {
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
@@ -2025,6 +2068,24 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
 
   const rows = (data ?? []) as PeriodRow[];
 
+  /**
+   * The till figures for BOTH periods, fetched here rather than left to a
+   * second tool call.
+   *
+   * The decomposition RPC holds no bill count, so average check and
+   * transactions used to be reachable only through `query_sales`, which answers
+   * for one period at a time. A briefing that called it once ended up printing
+   * a comparison table with a column of em-dashes against data that was present
+   * all along. See `compareTill` for the full account.
+   */
+  const venueIds = venues.map(v => v.id);
+  const [currentTill, priorTill] = await Promise.all([
+    tillTotalsFor(venueIds, input.start_date, input.end_date),
+    tillTotalsFor(venueIds, prior.start, prior.end),
+  ]);
+  const tillError =
+    'error' in currentTill ? currentTill.error : 'error' in priorTill ? priorTill.error : null;
+
   const byVenue = venues.map(v => {
     const mine = rows.filter(r => r.venue_id === v.id);
     const current = mine.find(r => r.period === 'current');
@@ -2040,10 +2101,31 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
       };
     }
 
+    const decomposition = decompose(current, before, mine);
+
+    // A till read that failed degrades this ONE block and leaves the
+    // decomposition intact -- the same rule as a refused thinking parameter.
+    let till: Record<string, unknown>;
+    if (tillError) {
+      till = { error: `Could not read the till figures: ${tillError}. Average check and transactions are unavailable for both periods — say so rather than leaving a column blank.` };
+    } else {
+      // `basis` is the same four sentences for every venue, so it is lifted to
+      // the root of the response and sent once. Three venues carrying an
+      // identical paragraph each is the cost that the caching work went looking
+      // for; there is no reason to reintroduce it a tool at a time.
+      const { basis, ...rest } = compareTill(
+        (currentTill as { totals: Map<string, TillTotals> }).totals.get(v.id)!,
+        (priorTill as { totals: Map<string, TillTotals> }).totals.get(v.id)!,
+        { from: before.covers, to: current.covers },
+      );
+      till = rest;
+    }
+
     return {
       venue: v.name,
       slug: v.slug,
-      ...decompose(current, before, mine),
+      ...decomposition,
+      till,
     };
   });
 
@@ -2053,6 +2135,9 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
     venues: byVenue,
     reading_order: 'Read the baseline before the comparison. A single period against a single period is a coin toss; the trailing weeks say whether this one is unusual or the one before it was.',
     next_step: 'This says WHAT moved, never why. Follow the branch the caveats name — check_booking_channels and query_booking_lead_time when booked covers moved, holidays and footfall when walk-ins did.',
+    till_basis: tillError ? undefined : TILL_BASIS,
+    building_a_table:
+      'EVERY figure here carries both periods — net sales, covers, spend per head, average check and transactions. Build the comparison table from this response alone and do not call query_sales to fill a column: it answers for one period at a time, and a table half-filled from it prints an em-dash where the data exists. If a value is genuinely null, the caveats say why, and the reason belongs in the text rather than a dash.',
   });
 }
 

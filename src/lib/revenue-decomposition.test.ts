@@ -5,7 +5,9 @@ import {
   precedingPeriod,
   SPEND_PER_HEAD_NOISE_PCT,
   MIN_TRADING_DAYS,
+  compareTill,
   type PeriodRow,
+  type TillTotals,
 } from './revenue-decomposition.js';
 
 /**
@@ -226,4 +228,88 @@ test('weeks come back oldest first whatever order the database returned them', (
     week('2026-08-17', 4),
   ]);
   assert.deepEqual(d.baseline.weeks.map(w => w.net_sales), [1, 2, 3, 4]);
+});
+
+/**
+ * The till comparison exists because a table printed em-dashes against data
+ * that was present. So the tests are mostly about the difference between "no
+ * figure" and "a figure of zero" -- the two things an em-dash conflates.
+ */
+
+const round2Check = (n: number) => Math.round(n * 100) / 100;
+
+const till = (over: Partial<TillTotals> = {}): TillTotals => ({
+  transactions: 170,
+  net_to_account_for: 44983.7,
+  food_bev_sales: 43906.9,
+  days: 7,
+  ...over,
+});
+
+test('both periods are filled, which is the whole point', () => {
+  const t = compareTill(
+    till({ transactions: 170, net_to_account_for: 44983.7, food_bev_sales: 43906.9 }),
+    till({ transactions: 118, net_to_account_for: 26584.2, food_bev_sales: 25800.0 }),
+    { from: 285, to: 410 },
+  );
+
+  // Neon Pigeon, week of 14 Sep 2026: the figures that printed as dashes.
+  assert.equal(t.avg_check.to, 264.61);
+  assert.equal(t.avg_check.from, 225.29);
+  assert.equal(t.transactions.to, 170);
+  assert.equal(t.transactions.from, 118);
+  assert.equal(t.avg_spend_per_head.to, 107.09);
+  assert.equal(t.avg_spend_per_head.from, 90.53);
+
+  // Nothing null anywhere, because nothing was missing.
+  for (const m of [t.avg_check, t.transactions, t.avg_spend_per_head]) {
+    assert.ok(m.from !== null && m.to !== null && m.change !== null && m.change_pct !== null);
+  }
+});
+
+test('spend per head here is the food-and-beverage basis, not the driver basis', () => {
+  // The two differ by definition, and the gap is the size of a real change.
+  // 43906.9/410 = 107.09 here; net sales over covers would be lower.
+  const t = compareTill(till(), till(), { from: 410, to: 410 });
+  assert.equal(t.avg_spend_per_head.to, 107.09);
+  assert.notEqual(t.avg_spend_per_head.to, round2Check(41258 / 410));
+  assert.ok(t.basis.not_the_same_as_spend_per_head.includes('NET SALES'));
+});
+
+test('a period with no rows gives nulls and a caveat, never zeros', () => {
+  const t = compareTill(till(), till({ days: 0, transactions: 0, net_to_account_for: 0, food_bev_sales: 0 }), { from: 285, to: 410 });
+
+  assert.equal(t.avg_check.from, null);
+  assert.equal(t.transactions.from, null);
+  assert.equal(t.avg_spend_per_head.from, null);
+  // And therefore no change, rather than a rise from nothing.
+  assert.equal(t.transactions.change, null);
+  assert.equal(t.transactions.change_pct, null);
+  assert.ok(t.caveats.some(c => c.includes('COMPARISON period')));
+});
+
+test('a closed period is zero transactions, which is not the same as absent', () => {
+  // Days of data, no trade. transactions is a real 0; avg check has no
+  // denominator so it is null. Reporting the first as null would hide a
+  // closure and the second as 0 would invent a free meal.
+  const t = compareTill(
+    till({ transactions: 0, net_to_account_for: 0, food_bev_sales: 0, days: 7 }),
+    till(),
+    { from: 410, to: 0 },
+  );
+  assert.equal(t.transactions.to, 0);
+  assert.equal(t.avg_check.to, null);
+  assert.equal(t.avg_spend_per_head.to, null);
+  assert.equal(t.caveats.length, 0);
+});
+
+test('unequal days of data is flagged, because transactions is a count', () => {
+  const t = compareTill(till({ days: 7 }), till({ days: 5 }), { from: 285, to: 410 });
+  assert.ok(t.caveats.some(c => c.includes('COUNT')));
+});
+
+test('both periods absent reads as an ingest gap, not a quiet fortnight', () => {
+  const t = compareTill(till({ days: 0 }), till({ days: 0 }), { from: 0, to: 0 });
+  assert.ok(t.caveats.some(c => c.includes('ingest gap')));
+  assert.equal(t.transactions.to, null);
 });

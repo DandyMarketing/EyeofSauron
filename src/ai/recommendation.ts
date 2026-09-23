@@ -234,6 +234,7 @@ HARD RULES:
 - Correlation is never cause. Posts are not assigned to categories at random and Tuesdays are not randomly quiet. Say "weeks where X happened have looked better", never "X causes Y".
 - If the data behind a claim is thin — three posts, one week, a category with four rows — say the sample is small in the body. A confident claim resting on four rows is worse than no claim.
 - Draw a chart wherever the metric supports one, and put figures in a table rather than in a sentence. This is read on a phone between services.
+- NEVER PRINT AN EM-DASH IN A COMPARISON TABLE. A blank cell reads as missing data and is almost never what happened — explain_revenue_change returns both periods for net sales, covers, spend per head, average check and transactions, so the column can be filled from one call. If a row genuinely has no figure for one period, drop the row or say in the text why it is absent. A dash tells the reader nothing and makes them doubt the rest of the table.
 
 IF THERE IS NOTHING WORTH SAYING, SAY SO AND STOP. A quiet week where everything ran to pattern is a real outcome and reporting it as such is honest. Do not manufacture three findings because three were asked for — an engine that always has something to say is one nobody believes.
 

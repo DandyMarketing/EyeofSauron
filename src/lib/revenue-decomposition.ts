@@ -318,6 +318,132 @@ export function decompose(
 }
 
 /**
+ * The till side of the same two periods.
+ *
+ * WHY IT IS HERE AT ALL. The briefing for Neon Pigeon, week of 14 Sep 2026,
+ * printed a comparison table in which net sales and covers carried both weeks
+ * and spend per head, average check and transactions carried only one, with an
+ * em-dash where the week before should have been. Nothing was missing from the
+ * warehouse. The decomposition returns both periods and does not hold a bill
+ * count, so those three rows came from `query_sales`, which answers for ONE
+ * period per call -- and it had been called once. A table with a column of
+ * em-dashes reads as absent data, and the data was there.
+ *
+ * So the comparison carries its own till figures rather than depending on the
+ * model to make a second call it was never told to make. Same argument as
+ * `coverageByAccount()`: compute the thing the reader needs to interpret the
+ * answer and return it, rather than leaving it to be remembered.
+ *
+ * THE TWO SPEND-PER-HEAD FIGURES ARE BOTH CORRECT AND MUST NOT BE MIXED.
+ * `Decomposition.spend_per_head` is net sales over covers, because that is the
+ * identity the drivers decompose. `TillComparison.avg_spend_per_head` is food
+ * and beverage over covers, which is the basis every per-something figure in
+ * `sales.ts` uses and what `query_sales` reports. For Neon Pigeon that week
+ * they were $100.63 and $107.09 -- a 6% gap that is entirely definitional, and
+ * exactly the size of a difference somebody would report as a change. They are
+ * labelled on the way out for that reason.
+ */
+export interface TillTotals {
+  /** Bills closed in the period. */
+  transactions: number;
+  /** Revel's net-to-account-for, summed. The basis average check divides. */
+  net_to_account_for: number;
+  /** Food + beverage, before discounts and excluding service charge. */
+  food_bev_sales: number;
+  /**
+   * Days of POS data found. ZERO IS NOT THE SAME AS NO TRADE: it means the
+   * period is absent from `daily_operations`, which is an ingest question and
+   * not a quiet week, and the caveats say so.
+   */
+  days: number;
+}
+
+/** One figure across the two periods. Null throughout when it cannot be formed. */
+export interface Movement {
+  from: number | null;
+  to: number | null;
+  change: number | null;
+  change_pct: number | null;
+}
+
+export interface TillComparison {
+  transactions: Movement;
+  avg_check: Movement;
+  avg_spend_per_head: Movement;
+  /** What each figure divides, in words, so the two spend-per-heads cannot merge. */
+  basis: Record<string, string>;
+  caveats: string[];
+}
+
+/**
+ * What each till figure divides, in words.
+ *
+ * Exported so the handler can send it ONCE at the root of a response covering
+ * several venues rather than repeating it per venue. Its job is to stop the
+ * two spend-per-heads merging: they differ by about 6% for reasons that are
+ * entirely definitional, which is the size of a difference somebody acts on.
+ */
+export const TILL_BASIS: Record<string, string> = {
+  transactions: 'Bills closed. A COUNT, so it scales with trading days.',
+  avg_check: 'Net to account for ÷ bills. Revenue per BILL, so it moves with party size as much as with what people order.',
+  avg_spend_per_head: 'Food + beverage (before discounts, excluding service charge) ÷ covers. This is the basis query_sales reports and the one sales.ts uses for every per-something figure.',
+  not_the_same_as_spend_per_head:
+    'spend_per_head elsewhere in this response is NET SALES ÷ covers, because that is the identity the drivers decompose. It is a different denominator and will read a few percent lower. Use one or the other throughout a table and never put them in the same row.',
+};
+
+const movement = (from: number | null, to: number | null): Movement => ({
+  from: from === null ? null : round2(from),
+  to: to === null ? null : round2(to),
+  change: from === null || to === null ? null : round2(to - from),
+  change_pct:
+    from === null || to === null || from === 0
+      ? null
+      : Math.round(((to - from) / from) * 1000) / 10,
+});
+
+export function compareTill(
+  current: TillTotals,
+  prior: TillTotals,
+  covers: { from: number; to: number },
+): TillComparison {
+  // A period with no rows has no figures, rather than figures of zero. Zero
+  // transactions and zero sales is a statement about trade; no days of data is
+  // a statement about the ingest, and reporting the second as the first is how
+  // a gap becomes a collapse.
+  const has = (t: TillTotals) => t.days > 0;
+
+  const txFrom = has(prior) ? prior.transactions : null;
+  const txTo = has(current) ? current.transactions : null;
+
+  const checkFrom = has(prior) && prior.transactions > 0
+    ? prior.net_to_account_for / prior.transactions : null;
+  const checkTo = has(current) && current.transactions > 0
+    ? current.net_to_account_for / current.transactions : null;
+
+  const sphFrom = has(prior) && covers.from > 0 ? prior.food_bev_sales / covers.from : null;
+  const sphTo = has(current) && covers.to > 0 ? current.food_bev_sales / covers.to : null;
+
+  const caveats: string[] = [];
+  if (!has(prior) && !has(current)) {
+    caveats.push('No POS data for either period. This is an ingest gap, not a quiet fortnight — say so rather than reporting a change.');
+  } else if (!has(prior)) {
+    caveats.push('No POS data for the COMPARISON period, so average check and transactions have nothing to compare against. Report the current figure alone and say the week before is missing — do not present it as a rise.');
+  } else if (!has(current)) {
+    caveats.push('No POS data for the period under review. Check the ingest before reading this as a collapse.');
+  } else if (prior.days !== current.days) {
+    caveats.push(`The two periods carry ${current.days} and ${prior.days} days of POS data. Transactions is a COUNT and moves with the number of days; average check and spend per head are per-unit and do not. Do not report a difference in day count as a difference in trade.`);
+  }
+
+  return {
+    transactions: movement(txFrom, txTo),
+    avg_check: movement(checkFrom, checkTo),
+    avg_spend_per_head: movement(sphFrom, sphTo),
+    basis: TILL_BASIS,
+    caveats,
+  };
+}
+
+/**
  * The period immediately before the one asked about, of the same length.
  *
  * Same length rather than "last week", so a fortnight compares against the
