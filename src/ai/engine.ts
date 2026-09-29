@@ -160,6 +160,23 @@ export async function askSauron(
    * from a browser and every request against it is billed.
    */
   chosenModel?: string,
+  /**
+   * A different standing prompt, for a surface that is not Sauron.
+   *
+   * The event planner is a separate tab with a separate job -- it argues toward
+   * a document rather than answering questions -- but it needs every other
+   * thing this function does: the tool loop, the web-search handling and its
+   * three non-obvious failure modes, the rescue path, the wall-clock budget,
+   * the chart extraction, and a cached prefix. Duplicating the engine to change
+   * one string would mean two of all that, drifting.
+   *
+   * IT REPLACES ONLY THE STANDING HALF. The volatile block -- today's date, the
+   * venue scope, the team knowledge -- is assembled the same way for both,
+   * because those are facts about the caller and not about the surface. And a
+   * different stable prefix is a different cache entry, which is correct: two
+   * surfaces, two prefixes, neither poisoning the other.
+   */
+  systemOverride?: string,
 ): Promise<QueryResult> {
   /**
    * Chosen ONCE, before the first call, and used for every turn.
@@ -215,7 +232,7 @@ export async function askSauron(
   }
 
   const systemBlocks = (extra?: string): Anthropic.Messages.TextBlockParam[] => [
-    { type: 'text', text: stableSystem, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: systemOverride ?? stableSystem, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: extra ? `${volatileSystem}\n\n${extra}` : volatileSystem },
   ];
 

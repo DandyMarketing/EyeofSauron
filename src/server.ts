@@ -18,6 +18,16 @@ import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
 import { queryTools } from './ai/tools.js';
+import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
+import { modelFor } from './ai/model-policy.js';
+import Anthropic from '@anthropic-ai/sdk';
+
+/**
+ * A direct client for the ONE call that is not a conversation: the forced tool
+ * that turns a settled plan into a draft. Everything else goes through the
+ * engine, which owns the tool loop, the retries and the caching.
+ */
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
@@ -331,6 +341,230 @@ app.post('/ask', async (c) => {
     // them nothing and reads as a broken product rather than a busy minute.
     return c.json({ error: humanApiError(e) }, 500);
   }
+});
+
+// --- Event planning (its own surface, and the only one that ends in a write) ---
+
+/**
+ * A turn of the planning conversation.
+ *
+ * SEPARATE FROM /ask because it is a separate job. Sauron answers questions
+ * about what happened; this argues a concept toward a plan and refuses to
+ * finish while a blocking decision is open. Same engine, same tools, same venue
+ * and role enforcement -- a different standing prompt, and therefore a
+ * different cached prefix, which is correct rather than wasteful.
+ */
+app.post('/api/plan', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ message: string; history?: ChatMessage[] }>();
+  if (!body.message) return c.json({ error: 'Missing "message" field' }, 400);
+
+  try {
+    const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+    const result = await askSauron(
+      body.message, body.history ?? [], venueFilter, 'chat',
+      effectiveRole(user), undefined, undefined, EVENT_AGENT_PROMPT,
+    );
+    return c.json(result);
+  } catch (e: any) {
+    console.error(`[plan] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: humanApiError(e) }, 500);
+  }
+});
+
+/**
+ * Turn a settled conversation into a draft. WRITES NOTHING.
+ *
+ * A forced tool over the transcript, the same shape the recommendation engine
+ * uses: the arguing pass writes naturally and a separate call turns it into
+ * records, because asking one model to end an argument with JSON produces
+ * worse arguments and worse JSON.
+ *
+ * The draft comes back to the browser, a person reads it and clicks, and
+ * POST /api/events does the writing. That ordering is the whole design -- see
+ * the note there.
+ */
+app.post('/api/plan/draft', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ history?: ChatMessage[] }>();
+  const history = body.history ?? [];
+  if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
+
+  const transcript = history
+    .map(m => `${m.role === 'user' ? 'PLANNER' : 'YOU'}: ${m.content}`)
+    .join('\n\n');
+
+  try {
+    const structured = await anthropic.messages.create({
+      model: modelFor('lookup', process.env).model,
+      max_tokens: 16384,
+      system: [{
+        type: 'text',
+        text: 'You are turning a finished planning conversation into a structured brief. Everything must already be in the transcript: do not add a decision, do not invent a figure, and do not fill a field that was never settled — leave it out. Numbers appear only where the conversation quoted them from a query tool.',
+        cache_control: { type: 'ephemeral' },
+      }],
+      tools: [eventDraftTool() as any],
+      tool_choice: { type: 'tool', name: 'record_event_draft' },
+      messages: [{ role: 'user', content: `The planning conversation:\n\n${transcript}` }],
+    });
+
+    const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
+    if (!call?.input) return c.json({ error: 'Could not build a draft from this conversation.' }, 422);
+
+    return c.json({ draft: call.input });
+  } catch (e: any) {
+    console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: humanApiError(e) }, 500);
+  }
+});
+
+/**
+ * Create the event. THE ONLY WRITE PATH, and a person is on the end of it.
+ *
+ * WHY THE MODEL CANNOT REACH THIS. If a write were a tool, the model could call
+ * it having merely believed the person agreed -- and "the user confirmed" is
+ * precisely the claim a language model is worst at, and the kind of mistake
+ * nobody notices until a row is wrong. So the confirmation is a click that
+ * happened rather than a sentence that was generated.
+ *
+ * Everything below is re-checked here rather than trusted from the draft: the
+ * venues against what this user may see, the dates, the shape. The draft
+ * arrived through a browser and a browser can send anything.
+ */
+app.post('/api/events', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const d = await c.req.json<any>().catch(() => null);
+  if (!d?.name || !d?.start_date || !d?.end_date) {
+    return c.json({ error: 'An event needs a name and both dates.' }, 400);
+  }
+  if (d.end_date < d.start_date) {
+    return c.json({ error: 'The end date is before the start date.' }, 400);
+  }
+
+  const { data: allVenues } = await supabaseAdmin.from('venues').select('id, slug, name');
+  const mayUse = user.isOwner
+    ? (allVenues ?? [])
+    : (allVenues ?? []).filter(v => user.venues.some(uv => uv.venue_id === v.id));
+
+  const slugs: string[] = Array.isArray(d.venue_slugs) ? d.venue_slugs : [];
+  const chosen = mayUse.filter(v => slugs.includes(v.slug));
+
+  // An empty list is NOT "all venues" — it is a half-written event, and the
+  // migration makes those owner-only by construction. Refuse it here so
+  // nobody creates one by accident.
+  if (chosen.length === 0) {
+    return c.json({ error: 'Name at least one venue you have access to.' }, 400);
+  }
+  if (chosen.length !== slugs.length) {
+    const refused = slugs.filter(sl => !chosen.some(v => v.slug === sl));
+    return c.json({ error: `You do not have access to: ${refused.join(', ')}` }, 403);
+  }
+
+  const { data: created, error } = await supabaseAdmin
+    .from('events')
+    .insert({
+      name: d.name,
+      start_date: d.start_date,
+      end_date: d.end_date,
+      occasion: d.occasion ?? null,
+      concept_type: d.concept_type ?? null,
+      partner: d.partner ?? null,
+      format: d.format ?? null,
+      demographic: d.demographic ?? null,
+      concept: d.concept ?? null,
+      usp: d.usp ?? null,
+      venue_fit: d.venue_fit ?? null,
+      target_net_sales: d.target_net_sales ?? null,
+      target_covers: d.target_covers ?? null,
+      target_spend_per_head: d.target_spend_per_head ?? null,
+      baseline_net_sales: d.baseline_net_sales ?? null,
+      baseline_covers: d.baseline_covers ?? null,
+      baseline_spend_per_head: d.baseline_spend_per_head ?? null,
+      baseline_basis: d.baseline_basis ?? null,
+      price: d.price ?? null,
+      price_basis_food_avg: d.price_basis_food_avg ?? null,
+      price_basis_bev_avg: d.price_basis_bev_avg ?? null,
+      cost_lines: Array.isArray(d.cost_lines) ? d.cost_lines : [],
+      cost_total: d.cost_total ?? null,
+      break_even_covers: d.break_even_covers ?? null,
+      ad_budget: d.ad_budget ?? null,
+      ad_plan: d.ad_plan ?? null,
+      status: 'brief_issued',
+      created_by: user.id,
+    })
+    .select('id')
+    .single();
+
+  if (error || !created) {
+    console.error(`[events] insert failed for ${user.email ?? user.id}: ${error?.message}`);
+    return c.json({ error: `Could not create the event: ${error?.message ?? 'unknown'}` }, 400);
+  }
+
+  const { error: venueError } = await supabaseAdmin
+    .from('event_venues')
+    .insert(chosen.map(v => ({ event_id: created.id, venue_id: v.id })));
+
+  if (venueError) {
+    /**
+     * An event with no venues is owner-only and invisible to the person who
+     * just made it, so a half-succeeded write is worse than none. Undo it and
+     * say so rather than leaving a row nobody can see.
+     */
+    await supabaseAdmin.from('events').delete().eq('id', created.id);
+    console.error(`[events] venue link failed, event rolled back: ${venueError.message}`);
+    return c.json({ error: `Could not attach the venues: ${venueError.message}` }, 400);
+  }
+
+  const tasks = Array.isArray(d.tasks) ? d.tasks : [];
+  if (tasks.length > 0) {
+    const start = Date.parse(`${d.start_date}T00:00:00Z`);
+    const { error: taskError } = await supabaseAdmin.from('event_tasks').insert(
+      tasks.map((t: any) => {
+        const tMinus = Number(t.t_minus_days);
+        return {
+          event_id: created.id,
+          kind: ['content', 'outreach', 'ops', 'other'].includes(t.kind) ? t.kind : 'other',
+          description: String(t.description ?? '').slice(0, 2000),
+          channel: t.channel ?? null,
+          // Stored as a NEGATIVE offset, matching the column's own definition,
+          // while the draft speaks in "14 days before" like a person does.
+          t_minus_days: Number.isFinite(tMinus) ? -Math.abs(tMinus) : null,
+          due_date: Number.isFinite(tMinus)
+            ? new Date(start - Math.abs(tMinus) * 86_400_000).toISOString().slice(0, 10)
+            : null,
+          owner_name: t.owner_name ?? null,
+        };
+      }),
+    );
+    // Not fatal: the event and its venues are real, and losing the schedule is
+    // recoverable by hand where losing the event is not. Reported so nobody
+    // discovers an empty task list a week later.
+    if (taskError) {
+      console.error(`[events] tasks failed for ${created.id}: ${taskError.message}`);
+      return c.json({
+        id: created.id,
+        warning: `The event was created but its schedule was not: ${taskError.message}`,
+      });
+    }
+  }
+
+  console.log(`[events] ${user.email ?? user.id} created "${d.name}" (${created.id}) at ${chosen.map(v => v.slug).join(', ')} with ${tasks.length} task(s)`);
+  return c.json({ id: created.id, venues: chosen.map(v => v.name), tasks: tasks.length });
 });
 
 // --- Admin API (owner only) ---

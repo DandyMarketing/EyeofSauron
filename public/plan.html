@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan an event - Sauron</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #14141f;
+    --surface-hover: #1a1a2a;
+    --border: #2a2a3a;
+    --text: #e4e4ef;
+    --text-muted: #8888a0;
+    --accent: #e8933a;
+    --accent-dim: #c47520;
+    --error: #e84040;
+    --success: #40c060;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 10;
+  }
+  .logo {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim));
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .subtitle { font-size: 11px; color: var(--text-muted); }
+  header nav { margin-left: auto; display: flex; gap: 16px; font-size: 14px; }
+  header nav a { color: var(--text-muted); text-decoration: none; }
+  header nav a.active { color: var(--accent); }
+  header nav a:hover { color: var(--text); }
+
+  #thread { flex: 1; max-width: 860px; width: 100%; margin: 0 auto; padding: 24px 20px 20px; }
+
+  .msg { margin-bottom: 20px; }
+  .msg .who { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .msg.planner .bubble {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; font-size: 15px;
+  }
+  .msg.agent .bubble { font-size: 15px; }
+  .msg.agent .bubble h2 { font-size: 16px; margin: 16px 0 8px; }
+  .msg.agent .bubble h3 { font-size: 15px; margin: 14px 0 6px; color: var(--accent); }
+  .msg.agent .bubble p { margin: 8px 0; }
+  .msg.agent .bubble ul, .msg.agent .bubble ol { margin: 8px 0 8px 22px; }
+  .msg.agent .bubble li { margin: 4px 0; }
+  .msg.agent .bubble code { background: var(--surface); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .msg.agent .bubble table { border-collapse: collapse; margin: 12px 0; width: 100%; font-size: 14px; }
+  .msg.agent .bubble th, .msg.agent .bubble td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .msg.agent .bubble th { background: var(--surface); font-weight: 600; }
+  .msg .queries { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+
+  .intro {
+    border: 1px dashed var(--border); border-radius: 10px;
+    padding: 24px; color: var(--text-muted); font-size: 14px; margin-bottom: 24px;
+  }
+  .intro strong { color: var(--text); display: block; margin-bottom: 8px; font-size: 15px; }
+  .intro ul { margin: 10px 0 0 20px; }
+  .intro li { margin: 4px 0; }
+
+  .thinking { color: var(--text-muted); font-size: 14px; padding: 8px 0; }
+  .err { color: var(--error); font-size: 14px; padding: 10px 0; }
+
+  footer {
+    position: sticky; bottom: 0; background: var(--bg);
+    border-top: 1px solid var(--border); padding: 12px 20px;
+  }
+  .composer { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 11px 13px; font: inherit; font-size: 15px;
+    resize: none; min-height: 46px; max-height: 200px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent-dim); }
+  button {
+    background: var(--accent); color: #17110a; border: none; border-radius: 10px;
+    padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  button.secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+  button.secondary:hover:not(:disabled) { color: var(--text); border-color: var(--accent-dim); }
+
+  .actions { max-width: 860px; margin: 10px auto 0; display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* --- the draft, and the one click that writes --- */
+  .draft {
+    border: 1px solid var(--accent-dim); border-radius: 10px;
+    background: var(--surface); padding: 18px; margin: 20px 0;
+  }
+  .draft h2 { font-size: 15px; color: var(--accent); margin-bottom: 4px; }
+  .draft .note { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+  .draft dl { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 16px; font-size: 14px; margin-bottom: 14px; }
+  .draft dt { color: var(--text-muted); }
+  .draft table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0 14px; }
+  .draft th, .draft td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  .draft th { background: var(--bg); }
+  .draft .missing { color: var(--error); font-size: 13px; margin-bottom: 12px; }
+  .draft .confirm-row { display: flex; gap: 10px; justify-content: flex-end; }
+  .saved { color: var(--success); font-size: 14px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"></div>
+    <div>
+      <h1>Plan an event</h1>
+      <div class="subtitle">Argue it out, then issue the brief</div>
+    </div>
+    <nav id="nav">
+      <a href="/">Chat</a>
+      <a href="/briefing.html">Briefing</a>
+      <a href="/plan.html" class="active">Plan</a>
+      <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
+      <a href="#" id="logout-link" style="display:none">Logout</a>
+    </nav>
+  </header>
+
+  <div id="thread">
+    <div class="intro" id="intro">
+      <strong>Bring me a concept and I will argue with it.</strong>
+      Tell me what you are thinking of — the venue, roughly when, and what it is.
+      I will push back where the plan is thin, pull your actual figures rather than
+      guessing at them, and say so plainly if it is not ready.
+      <ul>
+        <li>One question at a time, not a form.</li>
+        <li>Every number comes from the warehouse. I will not estimate one.</li>
+        <li>Targets have to be checkable. The creative does not.</li>
+        <li>When it is settled, I prepare a brief — <em>you</em> confirm it before anything is saved.</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="A two-night guest chef collab at Firangi in November…"></textarea>
+      <button id="send">Send</button>
+    </div>
+    <div class="actions">
+      <button id="draft-btn" class="secondary" disabled>Prepare the brief</button>
+    </div>
+  </footer>
+
+<script type="module">
+let token = null;
+let history = [];
+let busy = false;
+
+const thread = document.getElementById('thread');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const draftBtn = document.getElementById('draft-btn');
+
+(async () => {
+  const cfg = await (await fetch('/api/config')).json();
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  token = session.access_token;
+
+  const { enforceTerms } = await import('/terms-gate.js');
+  await enforceTerms(token);
+
+  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+  if (!meRes.ok) { window.location.href = '/login.html'; return; }
+  const me = await meRes.json();
+  if (me.isOwner) document.getElementById('admin-link').style.display = '';
+
+  document.getElementById('logout-link').style.display = '';
+  document.getElementById('logout-link').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await supabase.auth.signOut();
+    window.location.href = '/login.html';
+  });
+})();
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** The same subset briefing.html renders. Tables matter most here. */
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  function splitRow(row) {
+    const parts = row.split('|');
+    if (parts.length && parts[0].trim() === '') parts.shift();
+    if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
+    return parts.map(c => c.trim());
+  }
+
+  html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (m, head, sep, body) => {
+    const headers = splitRow(head);
+    let t = '<table><thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
+    body.trim().split('\n').forEach(r => {
+      if (!r.trim()) return;
+      const cells = splitRow(r);
+      while (cells.length < headers.length) cells.push('');
+      t += '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+    });
+    return t + '</tbody></table>';
+  });
+
+  return html.split(/\n{2,}/).map(block => {
+    if (/^\s*<(h2|h3|table)/.test(block)) return block;
+    const lines = block.split('\n');
+    if (lines.every(l => /^\s*[-*]\s+/.test(l))) {
+      return '<ul>' + lines.map(l => '<li>' + l.replace(/^\s*[-*]\s+/, '') + '</li>').join('') + '</ul>';
+    }
+    return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function addMessage(who, cls, bodyHtml, queries) {
+  document.getElementById('intro')?.remove();
+  const el = document.createElement('div');
+  el.className = 'msg ' + cls;
+  el.innerHTML =
+    '<div class="who">' + escapeHtml(who) + '</div>' +
+    '<div class="bubble">' + bodyHtml + '</div>' +
+    (queries ? '<div class="queries">' + escapeHtml(queries) + '</div>' : '');
+  thread.appendChild(el);
+  window.scrollTo(0, document.body.scrollHeight);
+  return el;
+}
+
+function setBusy(on) {
+  busy = on;
+  sendBtn.disabled = on;
+  draftBtn.disabled = on || history.length === 0;
+  sendBtn.textContent = on ? '…' : 'Send';
+}
+
+async function send() {
+  const message = input.value.trim();
+  if (!message || busy) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  addMessage('You', 'planner', '<p>' + escapeHtml(message).replace(/\n/g, '<br>') + '</p>');
+  setBusy(true);
+
+  const pending = addMessage('Planner', 'agent', '<div class="thinking">Thinking, and checking the figures…</div>');
+
+  try {
+    const res = await fetch('/api/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ message, history }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(data.error || 'Request failed') + '</div>';
+      setBusy(false);
+      return;
+    }
+
+    pending.querySelector('.bubble').innerHTML = renderMarkdown(data.answer || '');
+    // What it actually looked at. On this surface the model's judgement is the
+    // product, which is exactly where an invented figure would hide — so the
+    // queries behind an answer are shown rather than trusted.
+    if (data.toolCalls?.length) {
+      const names = [...new Set(data.toolCalls.map(t => t.name))].join(', ');
+      pending.insertAdjacentHTML('beforeend',
+        '<div class="queries">Checked: ' + escapeHtml(names) + '</div>');
+    }
+
+    history.push({ role: 'user', content: message });
+    history.push({ role: 'assistant', content: data.answer || '' });
+  } catch (e) {
+    pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
+  }
+
+  setBusy(false);
+}
+
+const money = v => (v === null || v === undefined || v === '') ? null : '$' + Number(v).toLocaleString('en-SG');
+
+function renderDraft(d) {
+  const rows = [];
+  const add = (k, v) => { if (v !== null && v !== undefined && v !== '') rows.push([k, v]); };
+
+  add('Venues', (d.venue_slugs || []).join(', '));
+  add('Dates', d.start_date === d.end_date ? d.start_date : d.start_date + ' → ' + d.end_date);
+  add('Occasion', d.occasion);
+  add('Concept', d.concept_type);
+  add('Partner', d.partner);
+  add('Format', d.format);
+  add('Audience', d.demographic);
+  add('Price', money(d.price));
+  // Both bases, never blended — that is the whole point of storing two.
+  if (d.price_basis_food_avg || d.price_basis_bev_avg) {
+    add('Venue averages', 'food ' + (money(d.price_basis_food_avg) ?? '—') + ' · drink ' + (money(d.price_basis_bev_avg) ?? '—'));
+  }
+  // A target is shown WITH its baseline or not at all.
+  if (d.target_net_sales) {
+    add('Target', money(d.target_net_sales) +
+      (d.baseline_net_sales ? ' against ' + money(d.baseline_net_sales) : '') +
+      (d.baseline_basis ? ' (' + d.baseline_basis + ')' : ''));
+  }
+  add('Target covers', d.target_covers);
+  add('Cost', money(d.cost_total));
+  add('Break-even', d.break_even_covers ? d.break_even_covers + ' covers' : null);
+  add('Ad budget', money(d.ad_budget));
+
+  const dl = rows.map(([k, v]) => '<dt>' + escapeHtml(k) + '</dt><dd>' + escapeHtml(String(v)) + '</dd>').join('');
+
+  const tasks = (d.tasks || []).slice().sort((a, b) => (b.t_minus_days ?? 0) - (a.t_minus_days ?? 0));
+  const taskTable = tasks.length
+    ? '<table><thead><tr><th>When</th><th>What</th><th>Channel</th><th>Owner</th></tr></thead><tbody>' +
+      tasks.map(t =>
+        '<tr><td>' + (t.t_minus_days === 0 ? 'On the day' : 'T−' + t.t_minus_days) + '</td>' +
+        '<td>' + escapeHtml(t.description || '') + '</td>' +
+        '<td>' + escapeHtml(t.channel || '') + '</td>' +
+        '<td>' + escapeHtml(t.owner_name || '') + '</td></tr>').join('') +
+      '</tbody></table>'
+    : '<div class="missing">No schedule in this draft. A post without a date is an intention, not a plan — go back and settle the content and outreach dates.</div>';
+
+  const el = document.createElement('div');
+  el.className = 'draft';
+  el.innerHTML =
+    '<h2>' + escapeHtml(d.name || 'Untitled event') + '</h2>' +
+    '<div class="note">Nothing has been saved yet. Read it, then confirm.</div>' +
+    '<dl>' + dl + '</dl>' +
+    (d.concept ? '<p>' + escapeHtml(d.concept) + '</p>' : '') +
+    taskTable +
+    '<div class="confirm-row">' +
+      '<button class="secondary" data-act="discard">Not yet</button>' +
+      '<button data-act="confirm">Create this event</button>' +
+    '</div>';
+
+  thread.appendChild(el);
+  window.scrollTo(0, document.body.scrollHeight);
+
+  el.querySelector('[data-act="discard"]').addEventListener('click', () => el.remove());
+  el.querySelector('[data-act="confirm"]').addEventListener('click', async () => {
+    const btn = el.querySelector('[data-act="confirm"]');
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+    try {
+      const res = await fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(d),
+      });
+      const out = await res.json();
+      if (!res.ok || out.error) {
+        el.querySelector('.confirm-row').innerHTML = '<div class="err">' + escapeHtml(out.error || 'Could not create it.') + '</div>';
+        return;
+      }
+      el.querySelector('.confirm-row').innerHTML =
+        '<div class="saved">Created at ' + escapeHtml((out.venues || []).join(', ')) +
+        (out.tasks ? ' with ' + out.tasks + ' task' + (out.tasks === 1 ? '' : 's') : '') + '.' +
+        (out.warning ? ' ' + escapeHtml(out.warning) : '') + '</div>';
+    } catch (e) {
+      el.querySelector('.confirm-row').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
+    }
+  });
+}
+
+async function prepareDraft() {
+  if (busy || history.length === 0) return;
+  setBusy(true);
+  const pending = addMessage('Planner', 'agent', '<div class="thinking">Putting the brief together…</div>');
+
+  try {
+    const res = await fetch('/api/plan/draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ history }),
+    });
+    const data = await res.json();
+    pending.remove();
+
+    if (!res.ok || data.error) {
+      addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(data.error || 'Could not build a draft.') + '</div>');
+      setBusy(false);
+      return;
+    }
+
+    if (data.draft?.brief) {
+      addMessage('The brief', 'agent', renderMarkdown(data.draft.brief));
+    }
+    renderDraft(data.draft || {});
+  } catch (e) {
+    pending.remove();
+    addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>');
+  }
+
+  setBusy(false);
+}
+
+sendBtn.addEventListener('click', send);
+draftBtn.addEventListener('click', prepareDraft);
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+});
+</script>
+</body>
+</html>
