@@ -264,6 +264,19 @@ target is a donation. Name the amount, the platform, the audience it is aimed
 at, the dates it runs, and what you expect it to produce. It is a line in row 11
 and it must appear there.
 
+*Sign-off: the MARKETING MANAGER.* Not the venue, not finance. The brief cannot
+issue with an unapproved paid budget in it, and the approval is recorded against
+the event with a date — an amount nobody approved is the one that gets argued
+about after it has been spent.
+
+**This has a schema consequence and it is not small.** `user_venue_roles.role`
+is `owner | finance | manager | staff` today, and there is no marketing role.
+CLAUDE.md already uses marketing as the proof that function and seniority are
+different axes — it needs sales across *all* venues and has no business in the
+P&L, which is not a rung on the owner-to-staff ladder. A named approver makes
+that theoretical problem concrete: either the function axis gets built, or this
+sign-off is a name typed into a field, which is a record and not a control.
+
 ---
 
 ## D. The campaign
@@ -380,10 +393,21 @@ with 24 hours left, which is the most expensive time to think of it.
 *Challenge:* Name a person per item. A plan with no owner is a wish, and the
 items that get dropped are always the ones nobody was named for.
 
-*Where this goes:* eventually into monday.com — a board per event, a task per
-content and outreach item, assigned. **Not in the first build.** For now the
-brief carries the table and a person can move it across; the integration is a
-later conversation once the shape has settled.
+*Where this goes:* **into monday.com — in scope, not deferred.** A board per
+event, a task per content and outreach item, each assigned and dated. The T-minus
+dates from rows 16 and 17 are already the deadline schedule, so the brief is a
+board that has not been created yet.
+
+*Two things to settle before it is built:* whether Sauron WRITES the board or
+proposes it for a person to accept — the same argument as every other control in
+this system, since a write is irreversible and lands in somebody else's inbox —
+and how an update flows back, because a task completed in monday.com should mark
+the brief, not diverge from it silently. My instinct is propose-then-accept for
+the first version, then reconsider once it is trusted.
+
+*Blocked on access:* the monday.com connector is not authorised in my current
+session, so I cannot build or test against it yet. That needs connecting before
+this row moves.
 
 ---
 
@@ -407,6 +431,19 @@ written down.
 because rows 1, 4 and 7 all ask the assistant to reference previous events, and
 it cannot do that from nothing.
 
+**The comparison window is ONE YEAR.** Far enough to cover a full seasonal cycle
+— a Diwali against the last Diwali, a December against the last December — and
+short enough that the venue being compared is still recognisably the same
+business. Anything older is history rather than evidence.
+
+**And the window is empty until the table fills, which must be said out loud on
+every answer until it is not.** An events store that starts today can offer no
+previous events for a year, and a lookback that finds nothing looks exactly like
+a venue that has never run an event — the same guest-book problem the retention
+measure had, where "we were not recording yet" was being reported as "they had
+never been". The assistant says how many comparable events it actually found,
+every time, and says plainly when the answer is none.
+
 Stored per event: the concept, venue, dates, target demographic, price and its
 basis, full cost build, ad spend, the targets set — and afterwards the covers,
 the net sales, the spend per head split food and beverage, the channel mix that
@@ -426,7 +463,9 @@ idea a Michelin-starred guest chef was in the kitchen.
 2. **The playbook rows**, in the admin console, editable. Same shape as
    `revel_venue_keys` and `account_map`: judgement confirmed by a person.
 3. **The tab** — the interrogation, and the brief it emits.
-4. **monday.com**, later, once the brief's task table has proven itself.
+4. **monday.com** — a board per event, tasks assigned and dated from the brief's
+   own T-minus schedule. In scope, and blocked only on the connector being
+   authorised.
 
 ---
 
@@ -441,7 +480,11 @@ the High Commission of India.*
   eight and a two-night partner collab sees all twenty. But it needs your eye.
 - **Does the team bring you the brief, or does the assistant?** If a manager
   runs this and you never see it, the pushback must stand alone.
-- **Who signs off the ad budget**, and is there a standing ceiling per event?
-- **How far back should "previous events" reach** for the probability read —
-  and is a comparable event one at the same venue, or the same *shape* anywhere
-  in the group?
+- **Is there a standing ad-budget CEILING per event**, above which it comes to
+  you rather than to the marketing manager? The approver is settled; a threshold
+  is a different question and cheap to add now.
+- **What makes an event COMPARABLE** — the same venue, or the same *shape*
+  anywhere in the group? The one-year window is settled, this is not. It decides
+  the table's shape, so it is the one I would want before building: a
+  `concept_type` that events are tagged with is easy at creation and painful to
+  backfill.
