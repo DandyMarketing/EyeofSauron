@@ -154,6 +154,38 @@ has not been designed for any of them, and it will read that way to the guest.
 
 ---
 
+**5b. `scope` — is this one event or several?** · blocking when more than one venue is named · dandy_specific
+
+> *Ask:* If one venue pulled out tomorrow, would the others still work?
+
+*The schema allows one event across many venues. The playbook should make you
+earn it,* because the three venues are three different concepts and a concept
+that fits all of them was probably designed for none — which is row 5's whole
+argument, applied one level up.
+
+**The test is whether the mechanic breaks.** A passport or crawl where guests
+visit all three, a shared voucher, a group membership launch: pull one venue and
+the thing stops working. That is ONE event across many venues, and it is rare.
+
+**A shared occasion is not a shared event.** Valentine's at all three is three
+events — Neon Pigeon does a Japanese one, Fat Prince a Middle Eastern one,
+Firangi an Indian one — and forcing them into one row buries three different
+concepts, three prices, three audiences and three results under a single
+heading, then makes it impossible to say which of them worked.
+
+*Weak:* "It's Valentine's, so it's a group event."
+*Challenge:* Is it one concept running in three rooms, or three concepts sharing
+a date? If any venue could change its menu without asking the others, it is
+three.
+
+**Nothing is lost by splitting them.** They share the `occasion` attribute, so
+the comparison rows already treat them as related, and each still gets its own
+price basis, its own target and its own read afterwards. The only reason to
+force them into one row would be to compare them together, and the attribute
+model does that without the cost.
+
+---
+
 **6. `date_and_why_that_date`** · blocking · universal
 
 > *Ask:* Why that night? Are you filling a weak one or spending a strong one?
