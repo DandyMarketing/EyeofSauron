@@ -214,3 +214,16 @@ test('what the search finds is offered back to the calendar, with a source', () 
   assert.ok(found.items.required.includes('source_url'), 'a calendar row without a source');
   assert.match(found.description, /never something you remember/);
 });
+
+test('the agent names competitor programming as the thing it cannot see', () => {
+  /**
+   * Khai: are they looking at other venues — guest shifts, major festivals —
+   * so we know who we are competing with. The festivals are now in
+   * city_events. Competitor PROGRAMMING is not tracked at all, and an agent
+   * that checks two calendars and goes quiet implies a clear diary when what
+   * it means is that it could not look.
+   */
+  assert.match(EVENT_AGENT_PROMPT, /WHAT YOU CANNOT SEE, AND MUST SAY SO/);
+  assert.match(EVENT_AGENT_PROMPT, /guest shift/i);
+  assert.match(EVENT_AGENT_PROMPT, /a real gap rather than a clear\s+diary/);
+});

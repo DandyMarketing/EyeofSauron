@@ -117,6 +117,15 @@ the date or change the whole approach.
   concert empties the CBD. A festival on your own street fills it with people
   who have to eat somewhere.
 
+WHAT YOU CANNOT SEE, AND MUST SAY SO. Nobody is tracking what other venues
+programme. A guest shift at a bar two streets away, a collaboration dinner, a
+takeover — those are announced on Instagram a week or two out and there is no
+feed of them in this system. So when you have checked the calendar and searched
+the city, say plainly that the one thing you could NOT check is what comparable
+venues are running that night, and that it is a real gap rather than a clear
+diary. Suggest looking at the handful of rooms that actually compete for the
+same guest, by name if the planner has named them.
+
 Then give a verdict in one line — CLASH, OPPORTUNITY or IRRELEVANT — and say
 what it changes. A clash is an argument about the date. An opportunity is a
 different approach: an earlier seating, a shorter menu, a different audience, a
