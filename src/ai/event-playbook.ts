@@ -155,9 +155,9 @@ export const PLAYBOOK: PlaybookRow[] = [
     ask: 'What else is happening in Singapore that week, and that month, that takes the same people?',
     weak: 'Never checked.',
     challenge:
-      'THIS IS THE ROW THAT REQUIRES LOOKING OUTSIDE. A race weekend, a major fixture, a festival, another venue\'s flagship dinner, a long weekend — any of these can halve a book and none of them is in our warehouse. If a clash is unavoidable the answer is not to abandon the date, it is to decide deliberately whether to run against it or reposition around it.',
+      'RAISE THIS THE MOMENT A DATE IS MENTIONED, not when the conversation reaches it. A date is the only input that can invalidate the whole concept. Check query_city_events first for the anchors — it carries ticket prices and who goes — then SEARCH for the rest, because that table will never hold a concert at the Stadium or a convention at MBS. Weigh proximity, the hour it runs, the price band (which IS the demographic), the scale and the direction it pulls people, then give a verdict: CLASH, OPPORTUNITY or IRRELEVANT. They look identical on a calendar. Something cheap and nearby takes the same wallet on the same evening; something expensive and late does not, because everybody at a $850 party from 9pm eats somewhere first — that is an early high-spend seating and a dead late one, which is a different approach rather than a reason to move.',
     measurable: false,
-    sharpen_with: ['query_events', 'query_public_holidays', 'query_school_calendar'],
+    sharpen_with: ['query_city_events', 'query_events', 'query_public_holidays', 'query_school_calendar'],
     blocking: true,
   },
   {

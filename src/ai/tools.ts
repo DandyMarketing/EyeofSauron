@@ -524,6 +524,23 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_city_events',
+    description:
+      'WHAT ELSE IS ON IN SINGAPORE on a given date or range — race weekends, festivals, concerts, the big nightlife nights. CHECK THIS THE MOMENT A DATE IS NAMED, before anything else about an event is discussed. A date is the one input that can invalidate an entire concept, and none of this is anywhere else in the warehouse: the Grand Prix is not a public holiday, not a school term, and not one of our events. ' +
+      'THE FAILURE THIS EXISTS FOR: on 30 September 2026 the planner was asked to plan an event for 10 October and said nothing. The 10th is race Saturday, and Amber Lounge runs that night from $850 a head. It began planning a dinner into one of the most distorted nights of the Singapore year. ' +
+      'THE TICKET PRICE SEPARATES A CLASH FROM AN OPPORTUNITY, and the two look identical on a calendar. Something cheap and nearby takes the same wallet on the same evening — that is a clash and the date should be argued about. Something expensive and late does not: everybody paying $850 for a party at 9pm eats somewhere first, which makes it an early high-spend seating and a dead late service. That is a different approach and a different target market, not a reason to move. Reason it out from the price band and the hour, say plainly that the demographic read is YOUR inference, and never state a ticket price that is not in this response. ' +
+      'IT IS FILLED BY HAND AND IT IS THIN. An empty answer means nobody has entered anything for that period — NOT that the city is quiet. Say you checked and found nothing recorded. Rows marked confirmed_by_a_person false came from a search: quote them with the source and treat the figures as indicative. ' +
+      'Do not web-search for a race weekend or a public festival before checking here. The weekly run on 29 September read fourteen pages about the Grand Prix and quoted none of them.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        start_date: { type: 'string', description: 'Start of the range (inclusive), YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'End of the range (inclusive), YYYY-MM-DD. Use a window around the date, not just the day — a race weekend distorts the whole week.' },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_public_holidays',
     description:
       'SINGAPORE PUBLIC HOLIDAYS for a date range, from the Ministry of Manpower via data.gov.sg. USE THIS INSTEAD OF SEARCHING THE WEB. Never run a web search for Singapore public holidays, school holidays or the MOE calendar — the holidays are here, and searching for them costs a dozen page fetches that then sit in context for the rest of the conversation. ' +

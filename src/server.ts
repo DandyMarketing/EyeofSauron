@@ -563,8 +563,62 @@ app.post('/api/events', async (c) => {
     }
   }
 
-  console.log(`[events] ${user.email ?? user.id} created "${d.name}" (${created.id}) at ${chosen.map(v => v.slug).join(', ')} with ${tasks.length} task(s)`);
-  return c.json({ id: created.id, venues: chosen.map(v => v.name), tasks: tasks.length });
+  /**
+   * What the planner found in the city while working, written back.
+   *
+   * THIS IS HOW city_events FILLS. Nobody can maintain a calendar of everything
+   * happening in Singapore by hand -- Khai's objection, and it is correct. The
+   * table holds the anchors; the long tail arrives as a byproduct of somebody
+   * planning around it, and the next planner finds it already there instead of
+   * searching again.
+   *
+   * WRITTEN UNCONFIRMED, ALWAYS. These came from a search during a chat, which
+   * is the weakest evidence in the system, and the query tool reports the
+   * confirmed flag with every row so a reader knows which they are looking at.
+   * A person promotes one by checking it.
+   *
+   * NEVER FATAL. The event is the thing that was asked for; a calendar row is a
+   * bonus, and losing it must not take the event with it.
+   */
+  const found = Array.isArray(d.city_events_found) ? d.city_events_found : [];
+  let calendarAdded = 0;
+
+  if (found.length > 0) {
+    const rows = found
+      // A row with no source is worse than no row: it is an assertion nobody
+      // can check, sitting in the table that everything else trusts.
+      .filter((e: any) => e?.name && e?.start_date && e?.end_date && e?.source_url)
+      .slice(0, 20)
+      .map((e: any) => ({
+        name: String(e.name).slice(0, 300),
+        start_date: e.start_date,
+        end_date: e.end_date,
+        category: ['sport', 'festival', 'concert', 'nightlife', 'conference'].includes(e.category) ? e.category : 'other',
+        location: e.location ?? null,
+        ticket_price_low: Number.isFinite(Number(e.ticket_price_low)) ? Number(e.ticket_price_low) : null,
+        ticket_price_high: Number.isFinite(Number(e.ticket_price_high)) ? Number(e.ticket_price_high) : null,
+        audience: e.audience ?? null,
+        source: 'Found while planning an event',
+        source_url: String(e.source_url).slice(0, 1000),
+        confirmed: false,
+      }));
+
+    if (rows.length > 0) {
+      const { error: cityError } = await supabaseAdmin
+        .from('city_events')
+        .upsert(rows, { onConflict: 'name,start_date', ignoreDuplicates: true });
+      if (cityError) console.error(`[events] city calendar additions failed: ${cityError.message}`);
+      else calendarAdded = rows.length;
+    }
+  }
+
+  console.log(`[events] ${user.email ?? user.id} created "${d.name}" (${created.id}) at ${chosen.map(v => v.slug).join(', ')} with ${tasks.length} task(s)${calendarAdded ? `, ${calendarAdded} city calendar row(s) added unconfirmed` : ''}`);
+  return c.json({
+    id: created.id,
+    venues: chosen.map(v => v.name),
+    tasks: tasks.length,
+    city_events_added: calendarAdded || undefined,
+  });
 });
 
 // --- Admin API (owner only) ---

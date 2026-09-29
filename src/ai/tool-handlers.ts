@@ -116,6 +116,8 @@ export async function handleToolCall(
       return querySchoolCalendar(input);
     case 'query_events':
       return queryEvents(input);
+    case 'query_city_events':
+      return queryCityEvents(input);
     case 'explain_revenue_change':
       return explainRevenueChange(input);
     case 'check_booking_channels':
@@ -2130,6 +2132,94 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * What else is on in Singapore, and who it takes.
+ *
+ * THE CASE THIS EXISTS FOR. Asked to plan an event on 10 October 2026, the
+ * planner said nothing -- and the 10th is race Saturday, with Amber Lounge
+ * running that night from $850 a head. Nothing in the warehouse knew: F1 is not
+ * a public holiday, not a term break, and not ours.
+ *
+ * THE PRICE BAND IS RETURNED BECAUSE IT SEPARATES A CLASH FROM AN OPPORTUNITY,
+ * and those look identical on a calendar. A $60 street festival two streets
+ * away competes for the same wallet on the same evening. An $850 party at 9pm
+ * does not -- everybody at it eats first, which makes it an early high-spend
+ * seating and a dead late one. The reasoning is the reader's; the figures it
+ * reasons from are here.
+ */
+async function queryCityEvents(input: Record<string, any>): Promise<string> {
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  // Overlapping, not contained: a three-day weekend that began yesterday is the
+  // whole story for today, and `start_date >= period start` would miss it.
+  const { data, error } = await supabase
+    .from('city_events')
+    .select('name, start_date, end_date, category, location, part_of, ticket_price_low, ticket_price_high, currency, audience, effect_notes, source_url, confirmed')
+    .lte('start_date', input.end_date)
+    .gte('end_date', input.start_date)
+    .order('start_date', { ascending: true });
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not read the city calendar: ${error.message}. If this says the table does not exist, migration 047_city_events.sql has not been applied.`,
+    });
+  }
+
+  const rows = (data ?? []) as any[];
+
+  /**
+   * How far the calendar reaches, returned every time.
+   *
+   * The only way this table can mislead is by being thin, and the failure is
+   * silent in exactly the way migration 040's was: an empty answer reads as
+   * "nothing on that week" when it means "nobody has entered anything". For a
+   * calendar whose entire job is warning about clashes, that is the worst
+   * possible way to be wrong.
+   */
+  const { data: newest } = await supabase
+    .from('city_events')
+    .select('end_date')
+    .order('end_date', { ascending: false })
+    .limit(1);
+
+  const coveredTo = newest?.[0]?.end_date ?? null;
+  const unconfirmed = rows.filter(r => !r.confirmed).length;
+
+  return JSON.stringify({
+    period: { start: input.start_date, end: input.end_date },
+    events: rows.map(r => ({
+      name: r.name,
+      dates: { start: r.start_date, end: r.end_date },
+      category: r.category,
+      location: r.location ?? undefined,
+      part_of: r.part_of ?? undefined,
+      ticket_price: r.ticket_price_low === null && r.ticket_price_high === null
+        ? null
+        : { low: r.ticket_price_low, high: r.ticket_price_high, currency: r.currency },
+      audience: r.audience ?? undefined,
+      effect_notes: r.effect_notes ?? undefined,
+      source_url: r.source_url ?? undefined,
+      confirmed_by_a_person: r.confirmed,
+    })),
+    found: rows.length,
+    calendar_covers_to: coveredTo,
+    caveats: [
+      ...(rows.length === 0
+        ? ['NOTHING IS LISTED FOR THIS PERIOD, which means nobody has entered anything — not that the city is quiet. This calendar is filled by hand and is thin. Say that you checked and found nothing recorded, and if the date matters, look it up and say where you looked.']
+        : []),
+      ...(coveredTo !== null && input.end_date > coveredTo
+        ? [`THE CALENDAR ONLY REACHES ${coveredTo} and you asked past it. Beyond that an empty answer means nothing has been entered.`]
+        : []),
+      ...(unconfirmed > 0
+        ? [`${unconfirmed} of these have not been checked by a person — they came from a search. Quote them with the source and treat the figures as indicative.`]
+        : []),
+      'THE PRICE BAND TELLS YOU WHETHER THIS IS A CLASH OR AN OPPORTUNITY, and they look the same on a calendar. Something cheap and nearby competes for the same evening and the same wallet. Something expensive and late does not: everybody at a $850 party from 9pm eats somewhere first, which is an early high-spend seating and a dead late one. Reason it out from the price and the hour, say it is your reading, and never state a price that is not in this response.',
+    ],
   });
 }
 

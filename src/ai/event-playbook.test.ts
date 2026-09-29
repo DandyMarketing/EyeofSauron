@@ -149,3 +149,68 @@ test('multi-venue is discouraged in the tool, not only in the conversation', () 
   const props: any = eventDraftTool().input_schema.properties;
   assert.match(props.venue_slugs.description, /MORE THAN ONE ONLY IF THE MECHANIC BREAKS/);
 });
+
+/**
+ * The 10 October failure. Asked to plan an event on race Saturday, the agent
+ * said nothing about the Grand Prix or about Amber Lounge running that night
+ * from $850 a head. These assert the three things that were wrong.
+ */
+
+test('the date check interrupts the agenda rather than waiting for its turn', () => {
+  // It was in the `shape` stage, which comes after `point`, so a conversation
+  // that opened with a date reached the clash check several turns later — if
+  // it got there at all. A date is the only input that can invalidate the
+  // whole concept.
+  assert.match(EVENT_AGENT_PROMPT, /THE MOMENT A DATE IS NAMED/);
+  assert.match(EVENT_AGENT_PROMPT, /interrupts the agenda/);
+});
+
+test('the table is checked before the search, and the search is bounded', () => {
+  // Searching first is what produced fourteen pages and zero citations on the
+  // 29 Sep run. The anchors are a query; the long tail is a narrow search.
+  assert.match(EVENT_AGENT_PROMPT, /query_city_events/);
+  assert.match(EVENT_AGENT_PROMPT, /CHECK IT FIRST, ALWAYS/);
+  assert.match(EVENT_AGENT_PROMPT, /NARROW question about a\s+SPECIFIC window/);
+  assert.match(EVENT_AGENT_PROMPT, /fourteen pages/);
+});
+
+test('a clash and an opportunity are told apart on five stated factors', () => {
+  /**
+   * Khai's point: a competing event "gives a different approach and target
+   * market". Amber Lounge at $850 from 9pm is not competing for a $180 dinner
+   * wallet — it is a pre-party seating. Without a framework the agent either
+   * ignores the clash or panics about it, and both are wrong.
+   */
+  for (const factor of ['PROXIMITY', 'HOUR', 'PRICE, WHICH IS THE DEMOGRAPHIC', 'SCALE', 'DIRECTION']) {
+    assert.ok(EVENT_AGENT_PROMPT.includes(factor), `the ${factor} factor is missing`);
+  }
+  assert.match(EVENT_AGENT_PROMPT, /CLASH, OPPORTUNITY or IRRELEVANT/);
+  // Irrelevant said out loud, because silence reads as "nothing is on".
+  assert.match(EVENT_AGENT_PROMPT, /Irrelevant is a real answer/);
+});
+
+test('the demographic read is marked as an inference, and its inputs are not', () => {
+  // The reasoning is the product here. The numbers under it are the one thing
+  // that must not be invented, and a confident invented audience sounds exactly
+  // like the useful version.
+  assert.match(EVENT_AGENT_PROMPT, /NEVER state a ticket price, a date or an attendance figure/);
+  assert.match(EVENT_AGENT_PROMPT, /SAY WHEN YOU ARE INFERRING/);
+});
+
+test('a search that found nothing has to say so', () => {
+  assert.match(EVENT_AGENT_PROMPT, /silence reads as "nothing is on"/);
+});
+
+test('what the search finds is offered back to the calendar, with a source', () => {
+  /**
+   * The answer to "we cannot possibly maintain that by hand": the table holds
+   * the anchors and fills its long tail as a byproduct of somebody planning
+   * around it. An unsourced row would be an assertion nobody can check sitting
+   * in the table everything else trusts, so source_url is required.
+   */
+  const props: any = eventDraftTool().input_schema.properties;
+  const found = props.city_events_found;
+  assert.ok(found, 'the draft cannot carry what it discovered');
+  assert.ok(found.items.required.includes('source_url'), 'a calendar row without a source');
+  assert.match(found.description, /never something you remember/);
+});

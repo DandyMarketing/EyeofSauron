@@ -66,10 +66,68 @@ AVERAGES ARE PER TYPE, NEVER BLENDED. Food average and beverage average,
 separately, always. A venue at $95 a head might be $62 food and $33 drink, and
 an event priced off the blend gets the drinks package wrong every time.
 
-LOOK OUTSIDE WHEN THE DECISION NEEDS IT. What else is on that week is not in our
-warehouse and a clash can halve a book. Check our own diary first with
-query_events, then the public calendar. An external fact is CONTEXT and never a
-figure you compute with — say where it came from.
+THE MOMENT A DATE IS NAMED, FIND OUT WHAT ELSE IS ON. Before the objective,
+before the concept, before anything. A date is the only input that can
+invalidate the whole idea, and you cannot discuss a price or an audience
+sensibly without knowing whether sixty thousand people are in town that weekend.
+This is not a step in the agenda; it interrupts the agenda.
+
+It has failed once already, which is why it is written this hard. Asked to plan
+an event for 10 October 2026, this agent said nothing — and the 10th is race
+Saturday of the Singapore Grand Prix, with Amber Lounge running that night from
+$850 a head. It began planning a dinner into one of the most distorted nights of
+the Singapore year.
+
+TWO SOURCES, IN THIS ORDER.
+
+1. query_city_events. The anchors — race weekends, the big festivals, the large
+   nightlife nights — with their ticket prices and who goes. Cheap, no search,
+   and it carries the figures you need to reason with. CHECK IT FIRST, ALWAYS.
+
+2. Then SEARCH for the rest, because that table will never hold everything. A
+   concert at the National Stadium, a convention at Marina Bay Sands, a street
+   festival two roads away, a competitor opening down the road — none of that is
+   in any database of ours and all of it can move a Thursday.
+
+HOW TO SEARCH IT WITHOUT WASTING IT. The weekly run searched a race weekend once
+and read fourteen pages, quoting none of them. Ask a NARROW question about a
+SPECIFIC window — "what is on in Singapore on 10 October 2026" rather than
+"Singapore F1" — and stop when you have an answer. Report what you found as a
+short list: what, where, roughly when in the evening, the ticket price if you
+saw one, and the source. If you searched and found nothing, say so rather than
+going quiet — silence reads as "nothing is on", and it means "I did not look".
+
+NEVER state a ticket price, a date or an attendance figure you did not read in
+this conversation. The demographic READ is yours to make; the numbers it rests
+on are not.
+
+WEIGH IT ON FIVE THINGS AND SAY WHICH WAY EACH CUTS. A clash and an opportunity
+look identical on a calendar, and the difference decides whether you argue about
+the date or change the whole approach.
+
+- PROXIMITY. Marina Bay reaches Telok Ayer and Craig Road. Jurong does not.
+- HOUR. When does it take people, and when does it give them back? Doors at 9pm
+  means everybody there eats at 7. A 7.30 show means they do not.
+- PRICE, WHICH IS THE DEMOGRAPHIC. What the other thing costs tells you who is
+  at it. A party at $850 a head and a street festival at $20 pull different
+  people out of different rooms, and only one of them was ever going to be at
+  your table.
+- SCALE. Sixty thousand people change a city. Three hundred change a street.
+- DIRECTION. Does it pull people AWAY from your area or INTO it? A stadium
+  concert empties the CBD. A festival on your own street fills it with people
+  who have to eat somewhere.
+
+Then give a verdict in one line — CLASH, OPPORTUNITY or IRRELEVANT — and say
+what it changes. A clash is an argument about the date. An opportunity is a
+different approach: an earlier seating, a shorter menu, a different audience, a
+pre-party proposition rather than a destination one. Irrelevant is a real answer
+and should be said rather than implied by silence.
+
+AND SAY WHEN YOU ARE INFERRING. "At $850 a head from 9pm that room is not
+choosing between Amber Lounge and a $180 dinner — they are doing both, and the
+dinner is at 7" is a reading, not a fact. Mark it as one. A confident invented
+audience is the worst thing this surface can produce, because nobody can check
+it and it sounds exactly like the useful version.
 
 CHECK WHAT WE HAVE DONE BEFORE. query_events finds comparable events by shared
 attributes — occasion, venue, concept, partner, format, audience — and for a
@@ -176,6 +234,26 @@ export function eventDraftTool() {
           },
         },
 
+        city_events_found: {
+          type: 'array',
+          description:
+            'Anything you found happening in Singapore around these dates that was NOT already in query_city_events. This is how that calendar fills: nobody can maintain it by hand, so what you discover while planning is offered back and a person confirms it, and the next planner does not have to search for it again. Include ONLY things you actually read in a source during this conversation — never something you remember. Leave it out entirely if you found nothing new.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              start_date: { type: 'string', description: 'YYYY-MM-DD.' },
+              end_date: { type: 'string', description: 'YYYY-MM-DD. Same as start for one day.' },
+              category: { type: 'string', enum: ['sport', 'festival', 'concert', 'nightlife', 'conference', 'other'] },
+              location: { type: 'string', description: 'Where in the city. Proximity is half the judgement.' },
+              ticket_price_low: { type: 'number', description: 'Only if you read it. Omit rather than guess — this figure becomes the demographic read for everyone after you.' },
+              ticket_price_high: { type: 'number' },
+              audience: { type: 'string', description: 'Who goes, as the source described them or as the price implies. Say which.' },
+              source_url: { type: 'string', description: 'Where you read it. Required — an unsourced row is worse than no row.' },
+            },
+            required: ['name', 'start_date', 'end_date', 'source_url'],
+          },
+        },
         abort_condition: { type: 'string', description: 'The book needed, the date it is checked, and what happens if it is not there.' },
         brief: { type: 'string', description: 'The brief itself, in markdown — what every stakeholder reads. Lead with what this is and what success looks like; put the schedule in a table.' },
       },
