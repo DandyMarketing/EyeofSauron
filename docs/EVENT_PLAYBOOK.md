@@ -395,21 +395,30 @@ with 24 hours left, which is the most expensive time to think of it.
 *Challenge:* Name a person per item. A plan with no owner is a wish, and the
 items that get dropped are always the ones nobody was named for.
 
-*Where this goes:* **into monday.com — in scope, not deferred.** A board per
-event, a task per content and outreach item, each assigned and dated. The T-minus
-dates from rows 16 and 17 are already the deadline schedule, so the brief is a
-board that has not been created yet.
+**The brief carries the table, and that is the whole requirement for now.** One
+row per content and outreach item: what, when (as a T-minus date), who owns it.
+A person can work from that directly, and it is what makes the brief a document
+with commitments in it rather than a description.
 
-*Two things to settle before it is built:* whether Sauron WRITES the board or
-proposes it for a person to accept — the same argument as every other control in
-this system, since a write is irreversible and lands in somebody else's inbox —
-and how an update flows back, because a task completed in monday.com should mark
-the brief, not diverge from it silently. My instinct is propose-then-accept for
-the first version, then reconsider once it is trusted.
+*monday.com is a LATER STAGE — deliberately, and the shape is already decided so
+it does not get re-argued.* Not a board per event: **a new GROUP of items per
+event**, inside a standing board, one item per task, assigned and dated from the
+same T-minus schedule. A board per event would scatter the diary across dozens
+of boards nobody can see at once; groups in one board put every live event and
+its tasks on a single screen, which is what row 7's overlapping-events question
+actually needs.
 
-*Blocked on access:* the monday.com connector is not authorised in my current
-session, so I cannot build or test against it yet. That needs connecting before
-this row moves.
+*Two things still to settle when it is picked up:* whether Sauron writes the
+group or proposes it for a person to accept — a write is irreversible and lands
+in somebody else's inbox — and how a completed task flows back so the brief
+marks rather than diverging silently. Propose-then-accept for the first version.
+The connector also needs authorising before anything can be built against it.
+
+**Issuing the brief is the moment of record, with or without monday.com.** One
+action creates the event row with its attributes and the brief itself. That
+answers who tags an event and when: nobody does it as a separate chore, because
+rows 1 to 6 have already asked for occasion, venue, concept, partner and
+demographic by the time a brief exists. The outcome is filled in at close-out.
 
 ---
 
@@ -480,8 +489,12 @@ So: where a shared `occasion` exists, find the PREVIOUS OCCURRENCE of it
 whatever the gap. One year is the default reach for the generic case — no
 shared occasion, just a similar concept — and never a hard cutoff.
 
-**And the window is empty until the table fills, which must be said out loud on
-every answer until it is not.** An events store that starts today can offer no
+**NO BACKFILL. The store starts empty and fills forward**, which is decided
+rather than a limitation to work around — but it makes one rule load-bearing
+rather than defensive. For roughly the first year, "no comparable event on
+record" is the most common thing this row will say, and it must never be
+allowed to read as "this has never been done here". It means the store was not
+running yet. The same distinction the retention measure had to learn: An events store that starts today can offer no
 previous events for a year, and a lookback that finds nothing looks exactly like
 a venue that has never run an event — the same guest-book problem the retention
 measure had, where "we were not recording yet" was being reported as "they had
@@ -501,15 +514,16 @@ idea a Michelin-starred guest chef was in the kitchen.
 
 ## What gets built, in what order
 
-1. **The events table.** Everything above leans on it, and it is useful on its
-   own the moment it has rows — the weekly briefing stops mistaking an event for
-   a mystery.
+1. **The events table.** Everything above leans on it, and it earns its place
+   the moment it has rows — the weekly briefing stops mistaking an event for a
+   mystery, and rows 1, 4 and 7 get something to reference. Attributes as
+   listed, outcome filled at close-out, posts linked.
 2. **The playbook rows**, in the admin console, editable. Same shape as
-   `revel_venue_keys` and `account_map`: judgement confirmed by a person.
-3. **The tab** — the interrogation, and the brief it emits.
-4. **monday.com** — a board per event, tasks assigned and dated from the brief's
-   own T-minus schedule. In scope, and blocked only on the connector being
-   authorised.
+   `revel_venue_keys` and `account_map`: judgement confirmed by a person, never
+   inferred.
+3. **The tab** — the interrogation, and the brief it emits, task table included.
+4. **monday.com** — later stage. Shape decided (a group per event), nothing
+   blocked by leaving it.
 
 ---
 
@@ -524,12 +538,5 @@ the High Commission of India.*
   eight and a two-night partner collab sees all twenty. But it needs your eye.
 - **Does the team bring you the brief, or does the assistant?** If a manager
   runs this and you never see it, the pushback must stand alone.
-- **Who tags an event, and when?** The attributes are cheap at creation and
-  painful to backfill. My proposal: the playbook does it, since rows 1 to 6
-  already ask for occasion, venue, concept, partner and demographic — so an
-  event becomes a row the moment its brief issues, and the outcome is filled in
-  at close-out. Proposal, not a decision.
-- **Do we backfill the events we already know about?** A year of them exists in
-  people's heads and in Monday boards. Without a backfill the store is empty
-  until late 2027 and every comparison row has nothing to say for a year —
-  which is exactly the state the rows were written to end.
+- **Which monday.com board** the event groups live in, when that stage arrives.
+  Not needed to start.
