@@ -313,10 +313,14 @@ partners, a hotel concierge desk, a specialist retailer's mailing list, KOLs
 with genuine standing in that community rather than general food influencers.
 
 *Khai's example, and the standard to aim at:* for the Firangi Superstar
-**[VIKIBANI?]** event, the target was the **[SINDHI?]** community in Singapore —
-so the approach was to go to the **[Sindhi Society?]** to help carry the
-marketing, and to the **[High Commission of India?]** for support. That is not a
-channel anybody arrives at from "which platform should we post on".
+**Vicky Ratnani** event, the target was the **Sindhi** community in Singapore —
+so the approach was to go to the **Sindhi Society** to help carry the marketing,
+and to the **High Commission of India** for support. That is not a channel
+anybody arrives at from "which platform should we post on", and it is not
+reachable at all until row 2 has named the audience that precisely. A guest
+chef with standing in a specific diaspora is a different marketing problem from
+a guest chef with a Michelin star, and the same content calendar serves neither
+of them well.
 
 *KOLs are named explicitly*, and the test for one is standing with the target
 demographic, not follower count.
@@ -426,18 +430,10 @@ idea a Michelin-starred guest chef was in the kitchen.
 
 ---
 
-## Things I need you to confirm
+## Open decisions
 
-**Three proper nouns I could not make out**, and I would rather ask than put a
-community's name in a document wrongly:
-
-- The Firangi Superstar event name — I heard **"Vikibani"**. What is it?
-- The target community — I heard **"Cindy"**. Did you mean the **Sindhi**
-  community?
-- **"High Council of India"** — did you mean the **High Commission of India**,
-  the diplomatic mission?
-
-**And four open decisions:**
+*The three proper nouns are confirmed: Vicky Ratnani, the Sindhi community, and
+the High Commission of India.*
 
 - **Twenty rows is a lot**, and last time you asked whether twelve was too many.
   My answer is that it is only a problem if they are all asked every time —
