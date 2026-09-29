@@ -5,6 +5,13 @@ import { parseMoeCalendar, INGESTED_CATEGORIES } from '../lib/school-calendar.js
 /**
  * The MOE school calendar, from the ministry rather than from a blog.
  *
+ * RUN IT BY HAND, ONCE A YEAR. It is a one-off that exits when it is done, so
+ * it must never be a service's start command: Railway treats an exited process
+ * as a crash and restarts it, which turns a yearly job into an endless one. On
+ * 24 Sep 2026 this ran successfully as the Recommend service's command, was
+ * left there, and re-fetched moe.gov.sg on every restart for five days -- while
+ * the service it had replaced, the weekly briefing, did not run at all.
+ *
  * WHY IT IS A JOB AND NOT A SEED, for everything from the current year on.
  * moe.gov.sg/calendar server-renders ONE year -- whichever one it is now, plus
  * next year behind a client-side tab this cannot reach. So the far end of this
@@ -35,7 +42,8 @@ if (!res.ok) {
   process.exit(1);
 }
 
-const { events, categories } = parseMoeCalendar(await res.text());
+const html = await res.text();
+const { events, categories } = parseMoeCalendar(html);
 
 console.log(`MOE academic calendar — ${events.length} event(s) parsed from ${SOURCE_URL}`);
 for (const [cat, n] of Object.entries(categories).sort()) {
@@ -54,8 +62,44 @@ for (const [cat, n] of Object.entries(categories).sort()) {
  * calendar that is published every year without fail.
  */
 if (events.length === 0) {
-  console.error('\nParsed ZERO events. The page structure has changed — fix the parser.');
-  console.error('Expected rows of the form: <tr class="fc-list-item" data-start="YYYY-MM-DD" ...>');
+  /**
+   * SAY WHAT WE GOT, DO NOT DIAGNOSE IT.
+   *
+   * This block used to assert "the page structure has changed — fix the
+   * parser". On 29 Sep 2026 it fired, and the page had not changed at all:
+   * fetched by hand the same hour it parsed 74 events exactly as before. The
+   * run had been looping for five days -- a one-off script left as a service's
+   * start command, restarted by Railway every time it exited -- and whatever
+   * moe.gov.sg served that request was not the calendar.
+   *
+   * A failed fetch of that kind still returns HTTP 200, so `res.ok` is no help.
+   * The difference between "they changed the page", "we were served a block
+   * page" and "the proxy returned something else" is visible in the RESPONSE,
+   * and nothing was printing it. An error message that names a cause it cannot
+   * support sends somebody to fix the wrong thing -- which is what it did.
+   */
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim().slice(0, 120);
+  const text = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+                   .replace(/<[^>]+>/g, ' ')
+                   .replace(/\s+/g, ' ')
+                   .trim()
+                   .slice(0, 300);
+
+  console.error('\nParsed ZERO events. Here is what we actually received:');
+  console.error(`  final url    ${res.url}`);
+  console.error(`  status       ${res.status} ${res.statusText}`);
+  console.error(`  content-type ${res.headers.get('content-type') ?? 'none'}`);
+  console.error(`  bytes        ${html.length}`);
+  console.error(`  <title>      ${title ?? 'none'}`);
+  console.error(`  begins       ${text || '(no text)'}`);
+  console.error('\nThe parser expects rows of the form:');
+  console.error('  <tr class="fc-list-item" data-start="YYYY-MM-DD" ...><h2 class="event-l-title">');
+  console.error(`  fc-list-item in this response: ${(html.match(/fc-list-item/g) ?? []).length}`);
+  console.error(`  data-start   in this response: ${(html.match(/data-start="\d{4}-\d{2}-\d{2}"/g) ?? []).length}`);
+  console.error('\nIf those two counts are ZERO and the title is not "Academic calendar | MOE",');
+  console.error('we were served something other than the calendar — check whether this script is');
+  console.error('being re-run in a loop. It is a ONE-OFF: run it once a year, never as a service');
+  console.error('start command, because a script that exits is a service Railway keeps restarting.');
   process.exit(1);
 }
 
