@@ -1,41 +1,61 @@
-# The Event Playbook — draft for Khai to argue with
+# The Event Playbook — v2, from Khai's brief of 29 Sep 2026
 
-**Status: a straw man.** None of this is agreed. It exists so there is something
-to disagree with rather than a blank page. Every question below is my guess at
-what you would ask; the ones that are wrong are the useful part.
+**Status: restructured, not agreed.** v1 was twelve questions for a planner to
+answer. This is a different thing: a surface that interrogates a concept and
+then **produces an internal brief every stakeholder works from**. The questions
+are now the means, not the product.
 
-**What this becomes.** Not a document the team reads — a table the planning
-assistant reads, one row per decision, editable in the admin console. Same shape
-as `revel_venue_keys`, `account_map` and the BOH/FOH mapping: judgement
-confirmed by a person, never inferred. It is drafted as markdown because you
-need to edit the *content*, and nobody edits content comfortably in TypeScript.
+Two marked queries are in here where I could not make out a proper noun. They
+are flagged inline rather than guessed at — see **Things I need you to confirm**.
 
 ---
 
-## The rule that makes this not a template
+## Where it lives and what it emits
 
-A fixed list of twelve questions asked in a fixed order is a form with a chat
-interface, and it will be abandoned in a month.
+**Its own tab, not the Sauron chat.** Sauron answers questions about what
+happened. This drives a process toward a document with owners and dates in it,
+and the two do not share a shape. It reads the same warehouse and obeys the same
+anti-hallucination rule; it is not the same conversation.
 
-So the playbook is **not a script**. It is a set of decisions that must be
-settled, each carrying what a weak answer sounds like and what to say to it. The
-assistant chooses what to ask next from what is still unsettled and what the
-last answer revealed. A Tuesday wine tasting and a two-night Michelin collab do
-not get the same interrogation.
+**The output is a concept-mechanics brief.** One document, circulated, that the
+kitchen, floor, marketing and finance all work from. Not notes, not a chat
+transcript — a brief with a target, a budget, a content calendar and a name
+against every task.
 
-Four behaviours, which matter more than the question list:
+**And the event is stored.** Dates, concept, spend, targets, and the actual
+commercial outcome, mapped to the posts that promoted it. That is what makes the
+*next* concept answerable: what did the last three of these do, and what is the
+realistic probability this one works. Without the store, every event is planned
+from memory — which is the current state.
 
-1. **One question at a time.** A director does not hand you a form. Firing six
-   questions at once turns this straight back into the thing it replaces.
-2. **Push back on weak answers.** This is the whole product. An assistant that
-   accepts "we'll post about it" has added nothing.
-3. **Permission to say the plan is not ready.** Same rule as the recommendation
-   engine's permission to say nothing. One that approves every plan is wallpaper.
-4. **Questions and challenges come from here; every FIGURE comes from a tool.**
-   This is the first surface where the model's judgement is the product rather
-   than the warehouse's data, and that is exactly where an invented lead time
-   would slip in. The playbook says *check the lead time*; the number comes from
-   `query_booking_lead_time` or it is not said.
+---
+
+## The three rules that run through every row
+
+**1. A target must be measurable, or it is not a target.**
+
+This is the spine. "Revenue" is not an objective — it is a word. "Revenue"
+becomes an objective at *"$28,000 net across two nights, against a median
+Thursday-Friday pair of $19,400"*. If an answer cannot be checked afterwards by
+somebody who was not in the room, the assistant does not accept it as a target.
+
+**Creative is explicitly exempt.** Mood, look, the story, what the room should
+feel like — these must NOT be forced into numbers, and an assistant that demands
+a KPI for a creative direction is worse than useless. The rule applies to
+targets and commitments. It does not apply to the idea.
+
+**2. Every financial figure is checked against the POS, never against feel.**
+
+A price, a spend-per-head target, a break-even — each is quoted next to what this
+venue actually does, pulled live from the warehouse. A number that was never
+compared to the venue's own history is a wish with a dollar sign in front of it.
+
+**3. Averages are per type, never blended.**
+
+Food average and beverage average, separately. A blended spend per head hides
+the thing that decides whether a set menu prices correctly: a venue at $95 all-in
+might be $62 food and $33 drink, and an event priced off the $95 without knowing
+the split will get the drinks package wrong every time.
 
 ---
 
@@ -45,178 +65,301 @@ Four behaviours, which matter more than the question list:
 |---|---|
 | `key` | Machine name — `campaign_length` |
 | `decision` | What must be settled, in one line |
-| `exists_because` | The failure it prevents. Written from a real one where possible |
+| `exists_because` | The failure it prevents |
 | `ask` | The question, in your voice |
 | `weak_answers` | What a bad answer sounds like, and the challenge to it |
+| `must_be_measurable` | Whether the answer has to carry a checkable number |
 | `sharpen_with` | Which tool makes it concrete, and what to look for |
-| `blocking` | Does "unsettled" mean the plan is not ready, or is this a prompt |
-| `applies_when` | Scale or type this is relevant to — so a wine tasting skips it |
-| `portability` | `universal` or `dandy_specific`, tagged from row one |
+| `feeds_brief` | Which section of the output document this becomes |
+| `blocking` | Does "unsettled" mean the brief cannot be issued |
+| `applies_when` | Scale or type — so a Tuesday tasting skips partner terms |
+| `portability` | `universal` or `dandy_specific` |
 
 ---
 
-## The decisions
+## A. The point
 
-Grouped into four. Roughly the order a plan firms up, though the assistant
-chooses at runtime.
+**1. `objective` — what is this event for, in a number?** · blocking · measurable · universal
 
-### A. The point
+> *Ask:* If this goes perfectly, what is different the next morning — and what is
+> the number that proves it?
 
-**1. `objective` — what is this event actually for?** · blocking · universal
+*Weak:* "Awareness." "Revenue." "It'll be good for the brand."
+*Challenge:* **Revenue is not an answer, it is a category.** Revenue of what,
+over what period, against what this venue already does on that night? One word
+cannot be checked afterwards, so it cannot be a target. Name the figure and the
+baseline in the same breath, or this is a party and should be costed as one.
 
-> *Ask:* If this goes perfectly, what is different the next morning? Pick one:
-> covers on a dead night, spend per head, new guests through the door, press and
-> positioning, the partner relationship, or clearing something.
-
-*Weak:* "Awareness." "It'll be good for the brand."
-*Challenge:* Awareness of what, measured how? If you cannot name the thing that
-moves, this is a party and should be costed as one. Pick the one that matters
-most — an event optimised for press and an event optimised for covers are
-planned differently and priced differently.
-
-*Why it is first:* Every later question is unanswerable without it. A campaign
-length, a channel and a price are all downstream of what you are buying.
+*Sharpen with:* the venue's own median for that weekday — `query_sales`,
+`explain_revenue_change`.
 
 ---
 
-**2. `success_measure` — what number, by when, against what?** · blocking · universal
+**2. `target_demographic` — who exactly is this for?** · blocking · universal
 
-> *Ask:* What number tells you this worked, and what is the ordinary version of
-> that number here?
+> *Ask:* Who is the person you are selling this to? Not "foodies" — who?
 
-*Weak:* "A full room." "Good engagement."
-*Challenge:* Full compared to what? An ordinary Wednesday at this venue is a
-known figure — name the one you are trying to beat, or you will call any outcome
-a success afterwards.
+*Weak:* "Everyone." "Our regulars." "People who like Indian food."
+*Challenge:* Without a target market there is no way to choose a channel, a
+price, a time or a message, and every later question becomes a guess. The more
+specific the answer, the more channels become available — and some of them are
+not channels you would have thought of. This question is what makes row 12
+possible.
 
-*Sharpen with:* `query_daily_operations` / `query_reservations` for the venue's
-own median for that weekday. The comparison is always against the venue's own
-history, never another venue's.
-
-*Measured, as an example of what this prevents:* the 16–17 September collab was
-92 covers across two nights against a recent median midweek pair of around 166.
-Nobody had written down what 166 was, so "92 booked" did not read as a problem
-until somebody went looking 24 hours out.
+*Why it is here and not in the campaign section:* it is not a marketing
+decision. It is the decision the concept is built on.
 
 ---
 
-### B. The shape
+**3. `audience_motivation` — why would they actually come?** · blocking · universal
 
-**3. `date_and_why_that_date`** · blocking · universal
+> *Ask:* Put yourself in that person's week. Why do they give up a Thursday for
+> this? What do they want that they are not currently getting?
+
+*Weak:* "Because it's a great chef." "Because the food is amazing."
+*Challenge:* That is why *you* would come. The guest is choosing between this
+and everything else on that night, most of it cheaper and closer to home. Name
+what they get here that they cannot get elsewhere that week.
+
+---
+
+**4. `usp_and_differentiation` — what makes this one different?** · blocking · universal
+
+> *Ask:* What is the single thing about this event that is not true of the last
+> one we did, or of the one happening down the road the same week?
+
+*Weak:* "It's a collab." "It's a five-course menu."
+*Challenge:* We have done collabs and five-course menus. If the honest answer is
+that it is the same shape with a different guest, say so — that is a legitimate
+event, but it should be marketed and priced as a repeat rather than as news, and
+the content plan changes accordingly.
+
+*Sharpen with:* the events store — what were the last three, and what did each
+claim as its hook.
+
+---
+
+## B. The shape
+
+**5. `venue_fit` — why THIS venue?** · blocking · dandy_specific
+
+> *Ask:* Why does this concept belong at this venue rather than one of the
+> others? What is it about the room, the kitchen or the guest base that makes it
+> land here?
+
+*Weak:* "The date was free." "The chef knows the GM."
+*Challenge:* Three venues with genuinely different rooms, price points and guest
+bases. A concept that would work equally well at any of them is a concept that
+has not been designed for any of them, and it will read that way to the guest.
+
+---
+
+**6. `date_and_why_that_date`** · blocking · universal
 
 > *Ask:* Why that night? Are you filling a weak one or spending a strong one?
 
 *Weak:* "It's when the chef was free."
 *Challenge:* Understandable, and it changes the plan rather than ending it. On a
 strong night you are displacing covers you would have had anyway, so the event
-has to beat a normal night, not fill an empty room. On a weak night a smaller
-result is still a win. Which is it?
+has to beat a normal night. On a weak night a smaller result is still a win.
 
-*Sharpen with:* `query_daily_operations` grouped by weekday. Also
-`query_public_holidays` — a long weekend moves everything.
+*Sharpen with:* `query_sales` by weekday, `query_public_holidays`,
+`query_school_calendar` — a term break empties the family trade and a long
+weekend moves everything.
 
 ---
 
-**4. `product_shape` — what is being sold, and is it a walk-in product?** · blocking · universal
+**7. `competing_events` — what else is on?** · blocking · universal
+
+> *Ask:* What else is happening in Singapore that week, and in that month, that
+> takes the same people?
+
+*Weak:* Never checked.
+*Challenge:* This is the row that requires the assistant to look **outside**.
+F1 weekend, a major fixture, another venue's flagship dinner, a festival, a
+long weekend — any of these can halve a book and none of them is in our
+warehouse. If a clash is unavoidable, the answer is not to abandon the date; it
+is to decide deliberately whether to run against it or to reposition around it.
+
+*Sharpen with:* the events store for our own diary, `query_public_holidays`,
+`query_school_calendar`, and a web search for the public calendar in that
+window. **A searched fact is context, never a figure** — the same rule as
+everywhere else, and the search must name what it found and where.
+
+---
+
+**8. `product_shape` — is it a walk-in product?** · blocking · universal
 
 > *Ask:* Set menu or à la carte? Can somebody who wanders in at 8pm have it?
 
-*Weak:* Treating a set collaboration menu as though walk-ins will fill the gap.
-*Challenge:* A two-night collaboration menu is not a walk-in product. If it
-cannot be sold to somebody at the door, every cover has to be booked in advance,
-and that decides the campaign length, the channel and the outreach — not the
-other way round.
+*Challenge:* A set collaboration menu is not a walk-in product. If it cannot be
+sold at the door, every cover has to be booked in advance, and that decides the
+campaign length, the channel and the outreach — not the other way round.
 
-*This is the 16–17 September lesson in one line,* and the reason it sits above
-the campaign questions rather than below them.
+*This is the 16–17 September lesson in one line.*
 
 ---
 
-**5. `price_and_who_pays_for_it`** · blocking · dandy_specific
+**9. `partner_terms` — what does each side owe?** · blocking when there is a partner · dandy_specific
 
-> *Ask:* What is spend per head meant to be, against this venue's normal? And
-> where does the partner's cost sit — in the price, in marketing, or absorbed?
+> *Ask:* What does the partner give, what do they get, and whose audience is
+> doing the work?
 
-*Weak:* Setting the price on what feels right for the guest chef's reputation.
-*Challenge:* Your three venues sit at genuinely different spend per head. An
-event priced above the venue's normal has to justify it to a guest who has been
-before. An event priced at cost with a partner fee on top is a marketing spend,
-so say so and judge it as one.
+*Weak:* Never written down. Assumed to be mutual.
+*Challenge:* A guest chef, a brand, a DJ, a distillery — each arrives with an
+audience, a cost and an expectation, and the three are rarely stated together.
+If they are bringing the room, the terms should reflect it; if we are, the same.
+Fee, covered costs, who posts what and when, and what happens if it
+underperforms.
 
-*Sharpen with:* `query_daily_operations` for the venue's own spend per head over
-the last eight weeks. Note the basis — food and beverage sales, not net sales.
-
----
-
-### C. The campaign
-
-**6. `campaign_length` — how many weeks, starting when?** · blocking · universal
-
-> *Ask:* How long is the campaign, and what is each week doing?
-
-*Weak:* "Three weeks." Any number given without reference to how far ahead
-people actually book here.
-*Challenge:* This is the question people answer with a round number and never
-check. If most of your bookings arrive inside 72 hours, then the last week is
-the one that books the room and the earlier weeks are building recognition — so
-be honest about which weeks are doing which job, and do not judge week one by
-bookings. If a run is long, it needs something new to say in each week, or it is
-one message repeated until people stop seeing it.
-
-*Sharpen with:* `query_booking_lead_time` for this venue. *Measured in August:*
-23.5% of bookings were made same-day and a further 32.3% within one to three
-days — so roughly half a typical midweek lands in the final 72 hours. A campaign
-built as though people book three weeks out is planning for a customer this
-business does not have.
+*This is the row you flagged as possibly the most important, and I had not
+drafted it because I did not know how you think about it. Here is a first
+attempt to argue with.*
 
 ---
 
-**7. `channels_and_which_one_books`** · blocking · universal
+## C. The money
 
-> *Ask:* Which channels, in what order, and which one do you expect to actually
-> produce a booking rather than a view?
+**10. `price_and_basis` — priced against what?** · blocking · measurable · dandy_specific
+
+> *Ask:* What is the ticket or set price, and how does it sit against this
+> venue's food average and its beverage average — separately?
+
+*Weak:* Pricing on what feels right for the guest chef's reputation. Comparing
+to a single blended spend per head.
+*Challenge:* **Never price off a blended average.** Food and beverage move
+differently and a set menu with a pairing is two decisions, not one. A venue at
+$95 a head might be $62 food and $33 drink; an event priced off the $95 gets the
+drinks package wrong every time. Quote both, from the POS, for the last eight
+weeks.
+
+*Sharpen with:* `query_sales` — `food_sales`, `beverage_sales` and `food_pct`
+are returned separately, on the food-and-beverage basis, never net sales.
+
+---
+
+**11. `cost_build_and_breakeven` — what does it cost, and at how many covers?** · blocking · measurable · universal
+
+> *Ask:* List every cost, then tell me the cover count where this washes its
+> face.
+
+*Weak:* Food cost only. "We'll absorb the rest."
+*Challenge:* **All costs go into the price**, or the event is a marketing spend
+wearing a P&L's clothes. Ingredients, the partner's fee and travel, extra
+labour, printing, décor, any comped covers, and the ad budget from row 12. Then
+the break-even cover count, and how it compares to what the room actually seats.
+An event that breaks even at 90% occupancy is a decision, not a plan.
+
+---
+
+**12. `ad_spend` — what is the paid budget?** · blocking · measurable · universal
+
+> *Ask:* What are we spending on paid promotion, on what, and what do we expect
+> back from it?
+
+*Weak:* Nothing, which is the current state — paid promotion is not being
+planned or costed at all.
+*Challenge:* A budget with no number is not a budget, and paid reach with no
+target is a donation. Name the amount, the platform, the audience it is aimed
+at, the dates it runs, and what you expect it to produce. It is a line in row 11
+and it must appear there.
+
+---
+
+## D. The campaign
+
+**13. `campaign_length` — how many weeks, and what is each one doing?** · blocking · measurable · universal
+
+> *Ask:* How long is the campaign, and what job does each week do?
+
+*Weak:* "Three weeks", given without reference to how far ahead people book here.
+*Challenge:* *Measured in August:* 23.5% of bookings were made same-day and a
+further 32.3% within one to three days — so roughly half a typical midweek lands
+in the final 72 hours. A campaign built as though people book three weeks out is
+planning for a customer this business does not have. Be honest about which weeks
+build recognition and which week books the room, and do not judge week one by
+bookings.
+
+*Sharpen with:* `query_booking_lead_time`.
+
+---
+
+**14. `channels_and_which_one_books`** · blocking · universal
+
+> *Ask:* Which channels, in what order, and which one do you expect to produce a
+> booking rather than a view?
 
 *Weak:* "Instagram."
-*Challenge:* Reach and bookings are different things and one does not imply the
-other. Name the channel you expect to convert — the widget, a direct message, a
-phone call, the partner's own audience — and say what you expect from each.
+*Challenge:* Reach and bookings are different things. *Measured on the collab
+week:* reach spiked to 11,301 from 1,905 and website clicks totalled 78 for the
+week. Reach moved; intent did not follow.
 
-*Sharpen with:* `check_booking_channels` for where this venue's bookings
-actually come from. *Measured on the collab week:* account reach spiked to
-11,301 from 1,905 the week before and website clicks totalled 78 for the week.
-Reach moved; intent did not follow. That is correlation, not proof — but it is
-the shape to look for.
+*Sharpen with:* `check_booking_channels`, and the new booking-channel
+composition chart for where this venue's bookings actually come from.
 
 ---
 
-**8. `content_plan` — how many posts, of what?** · prompting · universal
+**15. `alternative_channels` — propose the impossible** · blocking · universal
 
-> *Ask:* How many posts, in what format, showing what — and who is in them?
+> *Ask:* Forget Instagram, email and the phone. Who else can reach these people,
+> and who already has their trust?
 
-*Weak:* One reminder image a few days out.
-*Challenge:* Format and subject both move reach here, and a promotional graphic
-is the weakest combination of both. *Measured:* the collab reminder image
-reached 481 people with 14 interactions — the weakest of nine recent posts —
-while dish reels in the same period reached 3,654–3,666. If the food is the
-draw, show the food, moving, being made. A poster announcing a dinner is not a
-picture of the dinner.
+*Weak:* The same four channels every time.
+*Challenge:* **This is the row where the assistant is supposed to be
+uncomfortable.** Once row 2 has named a specific audience, channels open up that
+nobody lists by default: community associations, cultural societies, diplomatic
+missions, chambers of commerce, alumni networks, member clubs, corporate
+partners, a hotel concierge desk, a specialist retailer's mailing list, KOLs
+with genuine standing in that community rather than general food influencers.
 
-*Sharpen with:* `query_post_patterns` grouped by `media_product_type` and by
-category for this venue. Reels against images, dish against promotion.
+*Khai's example, and the standard to aim at:* for the Firangi Superstar
+**[VIKIBANI?]** event, the target was the **[SINDHI?]** community in Singapore —
+so the approach was to go to the **[Sindhi Society?]** to help carry the
+marketing, and to the **[High Commission of India?]** for support. That is not a
+channel anybody arrives at from "which platform should we post on".
+
+*KOLs are named explicitly*, and the test for one is standing with the target
+demographic, not follower count.
 
 ---
 
-**9. `direct_outreach` — who gets a message rather than a post?** · blocking when the product is not walk-in · universal
+**16. `content_plan` — how many posts, of what, on which dates?** · blocking · measurable · universal
 
-> *Ask:* Who are you calling? Not posting to — calling, or messaging by name.
+> *Ask:* How many posts, in what format, showing what — and give me a date for
+> each one, as T-minus days from the event.
 
-*Weak:* Nobody. Relying entirely on broadcast.
+*Weak:* One reminder image a few days out. A number of posts with no schedule.
+*Challenge:* **A post without a date is not a plan, it is an intention.** Every
+post gets a target date before anything else moves, because those dates are what
+become deadlines for the people who have to make the assets. Justify the count
+too: three posts and twelve posts are different campaigns and the difference
+should be reasoned, not inherited.
+
+*And format matters as much as count. Measured:* the collab reminder image
+reached 481 with 14 interactions — weakest of nine recent posts — while dish
+reels in the same period reached 3,654–3,666. If the food is the draw, show the
+food being made. A poster announcing a dinner is not a picture of the dinner.
+
+*Sharpen with:* `query_post_patterns` by `media_product_type` and by category.
+
+*Feeds:* the content calendar in the brief — one row per post, with T-minus
+date, format, subject, owner.
+
+---
+
+**17. `direct_outreach` — who gets a message, and when?** · blocking when the product is not walk-in · universal
+
+> *Ask:* Who are you calling? And on which days — an early awareness pass, the
+> final 72 hours, or both? What is the follow-up?
+
+*Weak:* Nobody. Or a single undated "we'll reach out to VIPs".
 *Challenge:* For a set-menu event the people most likely to come are the ones
-who have already come: VIPs in the same week's window, guests who booked the
-equivalent event last time, people who booked the peak weeks. That is a list of
-names, not an audience, and somebody has to work it.
+who have already come. That is a list of names, not an audience, and somebody
+has to work it. **Outreach gets the same scheduling discipline as content** —
+first contact, the push inside the booking window, and the follow-up on
+non-responders, each with a date and an owner.
 
-*Sharpen with:* `query_reservations` for VIP counts in the window;
+*Sharpen with:* `query_reservations` for VIPs in the window,
 `query_guest_retention` / `query_guest_cohorts` for returning guests.
 
 *Why blocking:* on 16 September this is what the briefing ended up recommending
@@ -224,59 +367,85 @@ with 24 hours left, which is the most expensive time to think of it.
 
 ---
 
-### D. The follow-through
+## E. The follow-through
 
-**10. `owner_and_dates`** · blocking · universal
+**18. `owners_and_deadlines`** · blocking · universal
 
-> *Ask:* Who does each of these, and by when?
+> *Ask:* Who does each item, and by when?
 
-*Weak:* "The team will handle it."
 *Challenge:* Name a person per item. A plan with no owner is a wish, and the
 items that get dropped are always the ones nobody was named for.
 
+*Where this goes:* eventually into monday.com — a board per event, a task per
+content and outreach item, assigned. **Not in the first build.** For now the
+brief carries the table and a person can move it across; the integration is a
+later conversation once the shape has settled.
+
 ---
 
-**11. `abort_condition` — what would make you pull it, and when do you look?** · prompting · universal
+**19. `abort_condition`** · prompting · measurable · universal
 
 > *Ask:* What does the book have to look like, on what date, for you to still be
-> happy? And what would you do if it isn't there?
+> happy — and what do you do if it isn't there?
 
-*Weak:* Never considered.
-*Challenge:* Deciding this in advance is what turns a bad week into a decision
-instead of a panic. Set the date you check and the number you need by then. The
-answer is rarely to cancel — it is usually to switch from broadcast to phoning
-people — but that switch happens days earlier if it was written down.
-
----
-
-**12. `what_gets_recorded`** · prompting · universal
-
-> *Ask:* What do we write down afterwards so the next one is better?
-
-*Weak:* Nothing, which is the current state.
-*Challenge:* Right now an event is invisible to this system — there is no events
-table, so Sauron sees an unusual Wednesday and no idea a Michelin-starred guest
-chef was in the kitchen. Until that exists, every event is planned from memory.
-
-*This is the hook for phase two:* the plan becomes the row, and the next
-planning session opens with what the last three actually did.
+*Challenge:* Deciding this in advance turns a bad week into a decision instead
+of a panic. The answer is rarely to cancel; it is usually to switch from
+broadcast to phoning people, and that switch happens days earlier if it was
+written down.
 
 ---
 
-## What I think is missing, and want your view on
+**20. `record_the_outcome`** · blocking at close-out · measurable · universal
 
-- **Does the team bring you the plan, or does the assistant?** If a manager
-  plans through this and you never see it, the pushback has to be good enough to
-  stand alone. If it produces something you review, it can be lighter and the
-  last question becomes "what will Khai ask about this?"
-- **Is there a decision about the PARTNER?** Guest chefs, brands, DJs — what
-  they owe you, what you owe them, whose audience does the work. I have not
-  drafted it because I do not know how you think about it, and it may be the
-  most important row here.
-- **Is twelve too many?** I would rather cut three than have it feel like a
-  form. My candidates for cutting are 11 and 12 — both are real, neither is
-  planning.
-- **Which of these are actually `dandy_specific`?** I tagged one. My instinct is
-  that nearly all of the *questions* are universal and nearly all of the
-  *challenges* are yours, which would be a good thing for the sell phase — but
-  that is a guess.
+> *Ask:* Once it has run — what did it actually do?
+
+*This is no longer a nice-to-have. It is the row everything else depends on,*
+because rows 1, 4 and 7 all ask the assistant to reference previous events, and
+it cannot do that from nothing.
+
+Stored per event: the concept, venue, dates, target demographic, price and its
+basis, full cost build, ad spend, the targets set — and afterwards the covers,
+the net sales, the spend per head split food and beverage, the channel mix that
+produced the bookings, and **the posts associated with it**, so the socials can
+be read against the commercial outcome rather than beside it.
+
+That store is also what lets Sauron stop seeing an unusual Wednesday with no
+idea a Michelin-starred guest chef was in the kitchen.
+
+---
+
+## What gets built, in what order
+
+1. **The events table.** Everything above leans on it, and it is useful on its
+   own the moment it has rows — the weekly briefing stops mistaking an event for
+   a mystery.
+2. **The playbook rows**, in the admin console, editable. Same shape as
+   `revel_venue_keys` and `account_map`: judgement confirmed by a person.
+3. **The tab** — the interrogation, and the brief it emits.
+4. **monday.com**, later, once the brief's task table has proven itself.
+
+---
+
+## Things I need you to confirm
+
+**Three proper nouns I could not make out**, and I would rather ask than put a
+community's name in a document wrongly:
+
+- The Firangi Superstar event name — I heard **"Vikibani"**. What is it?
+- The target community — I heard **"Cindy"**. Did you mean the **Sindhi**
+  community?
+- **"High Council of India"** — did you mean the **High Commission of India**,
+  the diplomatic mission?
+
+**And four open decisions:**
+
+- **Twenty rows is a lot**, and last time you asked whether twelve was too many.
+  My answer is that it is only a problem if they are all asked every time —
+  `applies_when` should gate them hard, so a Tuesday wine tasting sees maybe
+  eight and a two-night partner collab sees all twenty. But it needs your eye.
+- **Does the team bring you the brief, or does the assistant?** If a manager
+  runs this and you never see it, the pushback must stand alone.
+- **Who signs off the ad budget**, and is there a standing ceiling per event?
+- **How far back should "previous events" reach** for the probability read —
+  and is a comparable event one at the same venue, or the same *shape* anywhere
+  in the group?
