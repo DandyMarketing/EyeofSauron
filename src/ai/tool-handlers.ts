@@ -779,6 +779,9 @@ async function createCompositionChart(input: Record<string, any>): Promise<strin
         ? [`${spec.low_sample.length} period(s) carry fewer than 30 ${spec.unit_label} — their shares move several points on one large party and must not be read as a trend. They are marked in amber on the chart: ${spec.low_sample.join(', ')}.`]
         : []),
       'Quote share AND count together. A share is a ratio and a ratio moves when either half does — the change block gives you both for exactly this reason.',
+      ...(spec.buckets.some(b => b.total > 0 && b.slices.some(sl => sl.value > 0 && (sl.value / b.total) * 100 < 8))
+        ? ['A BAND UNDER 8% CANNOT BE READ OFF THE PICTURE. The chart shows the shape and the legend carries each band first-to-last, but the month-by-month figures for the small ones are only in this response. Put them in a markdown table under the chart — one row per period, one column per category — or the reader is being asked to judge a few pixels by eye.']
+        : []),
     ],
     rendering: 'The chart is already shown to the user. Interpret it — what the mix is, what moved, what it means — and do not list every category back at them.',
     // Stripped by the engine before this reaches the model. Several KB of

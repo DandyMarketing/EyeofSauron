@@ -82,6 +82,7 @@ export const bucketTotal = (b: Bucket): number =>
 export function alignBuckets(
   buckets: Bucket[],
   max: number = MAX_SLICES,
+  preferred?: string[],
 ): { categories: string[]; buckets: Bucket[] } {
   const totals = new Map<string, number>();
   for (const b of buckets) {
@@ -90,11 +91,29 @@ export function alignBuckets(
     }
   }
 
-  const ranked = [...totals.entries()]
+  const bySize = [...totals.entries()]
     // Value first, then name, so a tie does not reorder between two runs of the
     // same query -- a chart that reshuffles on refresh reads as a data change.
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([label]) => label);
+
+  /**
+   * SOME CATEGORIES HAVE A NATURAL ORDER AND MUST NOT BE SORTED BY SIZE.
+   *
+   * Visit mix is a funnel -- first, second, third, fourth-or-more -- and at Fat
+   * Prince "fourth or more" outnumbers "third", so ranking by volume printed
+   * the legend as First, Second, Fourth or more, Third. The stack was ordered
+   * the same way. A funnel drawn out of sequence is not a funnel, and a reader
+   * checking whether the second-visit band is thinning has to decode the key
+   * first.
+   *
+   * Where no natural order exists -- booking channels -- biggest first is still
+   * right, because the eye should meet the dominant slice at the start of the
+   * stack.
+   */
+  const ranked = preferred
+    ? [...preferred.filter(p => totals.has(p)), ...bySize.filter(l => !preferred.includes(l))]
+    : bySize;
 
   const keep = ranked.length > max ? ranked.slice(0, max - 1) : ranked;
   const folded = ranked.length > max;

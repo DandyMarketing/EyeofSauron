@@ -122,3 +122,43 @@ test('a chart stored before composition existed still renders as a series', () =
   assert.match(svg, /Net sales/);
   assert.doesNotMatch(svg, /no data/i);
 });
+
+test('the legend carries each band first-to-last, including ones too thin to label', () => {
+  /**
+   * The reason this exists. At Fat Prince the third and fourth visit bands run
+   * about 4% each, which is eight pixels of an eight-hundred-pixel column — a
+   * 10px digit does not fit, so those bands carried no number at all and the
+   * reader was asked to judge them by eye. They are also the bands whose
+   * movement matters: the second-visit share is where the population is.
+   */
+  const svg = renderChartSvg(comp({
+    type: 'stacked_pct',
+    categories: ['First visit', 'Third visit'],
+    buckets: [
+      { label: '2026-03', slices: [{ label: 'First visit', value: 96 }, { label: 'Third visit', value: 4 }], total: 100 },
+      { label: '2026-09', slices: [{ label: 'First visit', value: 93 }, { label: 'Third visit', value: 7 }], total: 100 },
+    ],
+  }));
+
+  // The thin band's figures are present even though its segment cannot hold them.
+  assert.match(svg, /4\.0% → 7\.0%/);
+  assert.match(svg, /96% → 93%/);
+});
+
+test('a thin band is not drawn as a floating pill', () => {
+  // A flat 2px gap off an 8px segment is a quarter of it, and a 2px corner
+  // radius turns what is left into a lozenge — the separator defeating the
+  // thing it separates.
+  const svg = renderChartSvg(comp({
+    type: 'stacked_pct',
+    categories: ['Big', 'Sliver'],
+    buckets: [{ label: '2026-09', slices: [{ label: 'Big', value: 97 }, { label: 'Sliver', value: 3 }], total: 100 }],
+  }));
+
+  const radii = [...svg.matchAll(/<rect [^>]*height="([\d.]+)"[^>]*rx="([\d.]+)"/g)]
+    .map(m => ({ h: Number(m[1]), rx: Number(m[2]) }));
+  const thin = radii.find(r => r.h < 10);
+
+  assert.ok(thin, 'expected a thin segment');
+  assert.ok(thin!.rx <= thin!.h / 4 + 0.05, `rx ${thin!.rx} is too round for a ${thin!.h}px band`);
+});

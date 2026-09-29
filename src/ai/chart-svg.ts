@@ -245,18 +245,48 @@ const SEG_GAP = 2;
 
 const pct = (v: number) => `${v.toFixed(v >= 10 ? 0 : 1)}%`;
 
-/** Legend across the bottom, wrapping when the names are long. */
-function legend(categories: string[], yStart: number, xStart: number, maxX: number): string {
+/**
+ * Legend across the bottom, carrying each band's VALUE and its movement.
+ *
+ * WHY IT IS NOT JUST A KEY. On a hundred-percent stack the small bands cannot
+ * be labelled in place -- a 4% segment is eight pixels tall and a 10px digit
+ * does not fit, so the third and fourth visit bands at Fat Prince had no
+ * numbers at all and the reader was asked to judge them by eye. They are also
+ * the bands whose movement matters most: the second-visit share is where the
+ * population is.
+ *
+ * Putting first -> last beside the name solves it without a leader line or a
+ * second chart. It answers the question a stacked chart is drawn for -- is this
+ * moving -- for every band including the ones too thin to write on.
+ */
+function legend(
+  categories: string[],
+  yStart: number,
+  xStart: number,
+  maxX: number,
+  movement?: Map<string, { from: number; to: number }>,
+): string {
   const parts: string[] = [];
   let lx = xStart;
   let ly = yStart;
+
   categories.forEach((name, i) => {
-    const w = 20 + name.length * 6.2;
-    if (lx + w > maxX) { lx = xStart; ly += 14; }
+    const m = movement?.get(name);
+    const suffix = m ? `  ${pct(m.from)} → ${pct(m.to)}` : '';
+    const label = `${name}${suffix}`;
+    const w = 22 + label.length * 6.0;
+    if (lx + w > maxX) { lx = xStart; ly += 15; }
+
     parts.push(`<rect x="${lx}" y="${ly - 9}" width="9" height="9" fill="${SERIES_COLOURS[i % SERIES_COLOURS.length]}" rx="2"/>`);
     parts.push(`<text x="${lx + 14}" y="${ly}" fill="${MUTED}" font-size="10">${esc(name)}</text>`);
+    if (m) {
+      // The figures in reading ink rather than muted: they are the content
+      // here, and the name beside a coloured chip is the key.
+      parts.push(`<text x="${lx + 16 + name.length * 6.0}" y="${ly}" fill="${TEXT}" font-size="10" font-weight="600">${esc(suffix.trim())}</text>`);
+    }
     lx += w;
   });
+
   return parts.join('');
 }
 
@@ -347,7 +377,27 @@ function renderStackedSvg(spec: CompositionSpec): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="60"><text x="12" y="34" fill="${MUTED}" font-family="sans-serif" font-size="13">No data to chart.</text></svg>`;
   }
 
-  const legendRows = Math.ceil((spec.categories.length * 110) / (W - 40)) || 1;
+  /**
+   * First and last bucket that actually held anything, per category, so the
+   * legend can carry the movement. Empty buckets are skipped for the same
+   * reason shareTrap() skips them: a month with no trade at the front would
+   * make every band read as having risen from nothing.
+   */
+  const withData = spec.buckets.filter(b => b.total > 0);
+  const movement = new Map<string, { from: number; to: number }>();
+  if (withData.length >= 2) {
+    const first = toPercent(withData[0].slices);
+    const last = toPercent(withData[withData.length - 1].slices);
+    spec.categories.forEach(cat => {
+      const f = first.find(sl => sl.label === cat);
+      const l = last.find(sl => sl.label === cat);
+      if (f && l) movement.set(cat, { from: f.value, to: l.value });
+    });
+  }
+
+  // Wider entries now that each carries two figures, so the row estimate grows
+  // with them rather than clipping the last one off the edge.
+  const legendRows = Math.ceil((spec.categories.length * 170) / (W - 40)) || 1;
   const H2 = 300 + legendRows * 14;
   const pad = { top: 56 + TOTAL_ROW, right: 20, bottom: 40 + legendRows * 14, left: 44 };
   const plotW = W - pad.left - pad.right;
@@ -385,17 +435,30 @@ function renderStackedSvg(spec: CompositionSpec): string {
         if (share <= 0) return;
         const hFull = (share / 100) * plotH;
         const yTop = pad.top + plotH - ((acc + share) / 100) * plotH;
-        // The gap is taken off the segment, never added between, so the column
-        // still ends exactly on the axis and the stack still reads as 100%.
-        const h = Math.max(1, hFull - SEG_GAP);
+        /**
+         * The gap is taken off the segment, never added between, so the column
+         * still ends exactly on the axis and the stack still reads as 100%.
+         *
+         * AND IT SCALES DOWN ON A THIN BAND. A flat 2px off an 8px segment is a
+         * quarter of it, which made the third and fourth visit bands read as
+         * bars floating above the stack rather than part of it — the separator
+         * defeating the thing it was separating.
+         */
+        const gap = Math.min(SEG_GAP, hFull * 0.2);
+        const h = Math.max(1, hFull - gap);
+        // A 2px corner on an 8px band turns it into a pill, so the rounding
+        // follows the height too.
+        const r = Math.min(2, h / 4).toFixed(1);
         parts.push(
           `<rect x="${bx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" ` +
-          `fill="${SERIES_COLOURS[si % SERIES_COLOURS.length]}" rx="2">` +
+          `fill="${SERIES_COLOURS[si % SERIES_COLOURS.length]}" rx="${r}">` +
           `<title>${esc(`${bucket.label} — ${slice.label}: ${pct(share)} (${Math.round(slice.value)} ${spec.unit_label} of ${Math.round(bucket.total)})`)}</title></rect>`,
         );
         // Direct-label a segment only when it is tall enough to hold the text.
         // A label clipped by its own segment is worse than no label.
-        if (hFull >= 22 && barW >= 34) {
+        // 16px, not 22: a 10px glyph fits, and lowering it brings the 8-12%
+        // bands into the picture. Below that the legend carries the figure.
+        if (hFull >= 16 && barW >= 30) {
           parts.push(`<text x="${cx.toFixed(1)}" y="${(yTop + hFull / 2 + 4).toFixed(1)}" fill="#12121a" font-size="10" font-weight="600" text-anchor="middle">${pct(share)}</text>`);
         }
         acc += share;
@@ -410,7 +473,7 @@ function renderStackedSvg(spec: CompositionSpec): string {
     }
   });
 
-  parts.push(legend(spec.categories, H2 - 14 - (legendRows - 1) * 14, pad.left, W - 20));
+  parts.push(legend(spec.categories, H2 - 16 - (legendRows - 1) * 15, pad.left, W - 20, movement));
   parts.push(`<line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" stroke="${AXIS}" stroke-width="1"/>`);
   parts.push(`<line x1="${pad.left}" y1="${pad.top + plotH}" x2="${W - pad.right}" y2="${pad.top + plotH}" stroke="${AXIS}" stroke-width="1"/>`);
   parts.push('</svg>');

@@ -160,3 +160,43 @@ test('several slivers are flagged even when no slice dominates', () => {
   assert.ok(note);
   assert.match(note!, /under 5%/);
 });
+
+test('an ordinal category set keeps its own order, not the volume order', () => {
+  /**
+   * Fat Prince, Sep 2026: "Fourth or more" outnumbers "Third visit", so ranking
+   * by volume printed the legend as First, Second, Fourth or more, Third — and
+   * stacked it that way too. A funnel drawn out of sequence is not a funnel.
+   */
+  const order = ['First visit', 'Second visit', 'Third visit', 'Fourth or more'];
+  const { categories } = alignBuckets(
+    [b('2026-09', { 'First visit': 470, 'Second visit': 58, 'Third visit': 23, 'Fourth or more': 30 })],
+    MAX_SLICES,
+    order,
+  );
+  assert.deepEqual(categories, order);
+});
+
+test('without a preferred order the biggest still leads', () => {
+  // Booking channels have no sequence, so the eye should meet the dominant
+  // slice at the start of the stack.
+  const { categories } = alignBuckets([b('2026-09', { Small: 5, Huge: 500, Mid: 50 })]);
+  assert.deepEqual(categories, ['Huge', 'Mid', 'Small']);
+});
+
+test('a preferred category absent from the data is not invented', () => {
+  const { categories } = alignBuckets(
+    [b('2026-09', { 'First visit': 10, 'Second visit': 2 })],
+    MAX_SLICES,
+    ['First visit', 'Second visit', 'Third visit', 'Fourth or more'],
+  );
+  assert.deepEqual(categories, ['First visit', 'Second visit']);
+});
+
+test('anything outside the preferred list follows it, by size', () => {
+  const { categories } = alignBuckets(
+    [b('2026-09', { 'First visit': 10, Unexpected: 40, Rare: 1 })],
+    MAX_SLICES,
+    ['First visit', 'Second visit'],
+  );
+  assert.deepEqual(categories, ['First visit', 'Unexpected', 'Rare']);
+});

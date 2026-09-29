@@ -4,7 +4,7 @@ import { netSalesOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
 import { normaliseChannel } from '../lib/channel-health.js';
 import { lookbackCoverage, truncationCaveat } from '../lib/retention.js';
 import {
-  alignBuckets, bucketTotal, shareTrap, lowSampleBuckets, pieFitNote,
+  alignBuckets, bucketTotal, shareTrap, lowSampleBuckets, pieFitNote, MAX_SLICES,
   type Slice, type Bucket,
 } from '../lib/composition.js';
 
@@ -671,7 +671,18 @@ export async function buildComposition(
     });
   }
 
-  const { categories, buckets } = alignBuckets(raw);
+  /**
+   * Two of the three are ordered, one is not. Visit mix is a funnel and guest
+   * source runs outward from the venue -- new, then returning here, then
+   * crossed from a sister. Booking channels have no sequence, so biggest first
+   * is right for them and the eye meets the dominant slice at the start.
+   */
+  const ORDERED: Partial<Record<CompositionMetric, string[]>> = {
+    visit_mix: ['First visit', 'Second visit', 'Third visit', 'Fourth or more'],
+    guest_source: ['New to group', 'Returning here', 'Crossed from sister'],
+  };
+
+  const { categories, buckets } = alignBuckets(raw, MAX_SLICES, ORDERED[input.metric]);
   const withTotals: CompositionBucket[] = buckets.map(b => ({ ...b, total: bucketTotal(b) }));
 
   if (withTotals.every(b => b.total === 0)) {
