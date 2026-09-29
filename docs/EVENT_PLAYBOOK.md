@@ -267,7 +267,9 @@ and it must appear there.
 *Sign-off: the MARKETING MANAGER.* Not the venue, not finance. The brief cannot
 issue with an unapproved paid budget in it, and the approval is recorded against
 the event with a date — an amount nobody approved is the one that gets argued
-about after it has been spent.
+about after it has been spent. **There is no ceiling**: every amount goes to the
+same approver, so the control is that somebody owns the number, not that large
+numbers escalate.
 
 **This has a schema consequence and it is not small.** `user_venue_roles.role`
 is `owner | finance | manager | staff` today, and there is no marketing role.
@@ -431,10 +433,52 @@ written down.
 because rows 1, 4 and 7 all ask the assistant to reference previous events, and
 it cannot do that from nothing.
 
-**The comparison window is ONE YEAR.** Far enough to cover a full seasonal cycle
-— a Diwali against the last Diwali, a December against the last December — and
-short enough that the venue being compared is still recognisably the same
-business. Anything older is history rather than evidence.
+**COMPARABLE MEANS ONE SHARED POINT, NOT ONE MATCHING TYPE.** Khai's rule:
+events repeat, the big days above all, and any single point in common is enough
+to be worth comparing — this Valentine's against last Valentine's. So an event
+is not tagged with *a* type. It carries several attributes, and two events are
+comparable if they share ANY of them:
+
+| Attribute | Example |
+|---|---|
+| `occasion` | Valentine's Day, Deepavali, CNY, NYE, National Day |
+| `venue` | Firangi Superstar |
+| `concept_type` | guest-chef collab, tasting, brunch, party, launch |
+| `partner` | Vicky Ratnani |
+| `format` | set menu, à la carte, ticketed |
+| `demographic` | the Sindhi community |
+
+Matches are RANKED by how many attributes overlap, and the brief names which
+ones — "three comparable events: two share the occasion, one shares the
+partner". A single shared attribute is a weak comparison and must be presented
+as one, never laundered into a forecast.
+
+**THE REACH IS THE PREVIOUS OCCURRENCE, NOT 365 DAYS, and this is not a
+quibble.** Valentine's is the easy case: it is 14 February every year, so a
+year back finds it exactly. Measured against MOM's own calendar, the days that
+move do not:
+
+| | gap to the year before |
+|---|---|
+| Valentine's Day, Christmas, National Day | 365 days |
+| Deepavali 2025 → 2026 | **384 days** |
+| Chinese New Year 2025 → 2026 | **383 days** |
+| Good Friday 2024 → 2025 | **385 days** |
+
+Deepavali 2026 falls on 8 November; Deepavali 2025 was 20 October. A strict
+365-day lookback reaches back to 8 November 2025 and **misses last Deepavali by
+nineteen days** — excluding the most valuable comparison the store could offer,
+on the kind of day most likely to be repeated.
+
+And it fails SELECTIVELY, which is the dangerous part. Every example anybody
+reaches for first — Valentine's, Christmas, New Year's Eve, National Day — is
+fixed and would compare perfectly, so the window would look sound to whoever
+checked it. Only the lunar and lunisolar days break, and they move by up to
+three weeks a year in either direction.
+
+So: where a shared `occasion` exists, find the PREVIOUS OCCURRENCE of it
+whatever the gap. One year is the default reach for the generic case — no
+shared occasion, just a similar concept — and never a hard cutoff.
 
 **And the window is empty until the table fills, which must be said out loud on
 every answer until it is not.** An events store that starts today can offer no
@@ -480,11 +524,12 @@ the High Commission of India.*
   eight and a two-night partner collab sees all twenty. But it needs your eye.
 - **Does the team bring you the brief, or does the assistant?** If a manager
   runs this and you never see it, the pushback must stand alone.
-- **Is there a standing ad-budget CEILING per event**, above which it comes to
-  you rather than to the marketing manager? The approver is settled; a threshold
-  is a different question and cheap to add now.
-- **What makes an event COMPARABLE** — the same venue, or the same *shape*
-  anywhere in the group? The one-year window is settled, this is not. It decides
-  the table's shape, so it is the one I would want before building: a
-  `concept_type` that events are tagged with is easy at creation and painful to
-  backfill.
+- **Who tags an event, and when?** The attributes are cheap at creation and
+  painful to backfill. My proposal: the playbook does it, since rows 1 to 6
+  already ask for occasion, venue, concept, partner and demographic — so an
+  event becomes a row the moment its brief issues, and the outcome is filled in
+  at close-out. Proposal, not a decision.
+- **Do we backfill the events we already know about?** A year of them exists in
+  people's heads and in Monday boards. Without a backfill the store is empty
+  until late 2027 and every comparison row has nothing to say for a year —
+  which is exactly the state the rows were written to end.
