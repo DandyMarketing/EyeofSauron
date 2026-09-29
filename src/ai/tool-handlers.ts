@@ -17,6 +17,7 @@ import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
 import { holidayCoverage } from '../lib/school-calendar.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
+import { rankComparable, previousOccurrence, comparabilityCaveats, type EventLike, type Criteria } from '../lib/events.js';
 import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
 
 async function getVenueId(slug: string): Promise<string> {
@@ -113,6 +114,8 @@ export async function handleToolCall(
       return queryPublicHolidays(input);
     case 'query_school_calendar':
       return querySchoolCalendar(input);
+    case 'query_events':
+      return queryEvents(input);
     case 'explain_revenue_change':
       return explainRevenueChange(input);
     case 'check_booking_channels':
@@ -2127,6 +2130,210 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
     summary: total === 0
       ? 'No booking channel has fallen materially below its normal level. This is the expected result — report it as nothing wrong, not as missing data.'
       : `${total} channel(s) are materially below normal. A channel at or near zero is usually broken rather than unpopular: check the integration still works, and check it has not simply been renamed.`,
+  });
+}
+
+/**
+ * Events the group has run or plans to run.
+ *
+ * TWO QUESTIONS, ONE TOOL, because they share every row. "What was on that
+ * week" is the briefing's question -- it explains an unusual Wednesday that
+ * currently arrives as a mystery. "What comparable events have we run" is the
+ * planner's, and it is the whole reason the store exists.
+ *
+ * COMPARISON IS AN OVERLAP, NOT A LOOKUP. Any shared attribute counts, ranked
+ * by how many, and which ones matched travel with every result -- a match on
+ * format alone and a match on occasion, venue and partner are different claims
+ * and must not read alike.
+ *
+ * THE OUTCOME IS JOINED, NEVER COPIED. Whole-day sales and covers live in
+ * daily_operations and reservations; migration 046 deliberately does not
+ * duplicate them. This reads them back through the venue and the dates, so
+ * there is one figure for one night rather than two that drift.
+ */
+async function queryEvents(input: Record<string, any>): Promise<string> {
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  if (!allVenues) return JSON.stringify({ error: 'No venues found' });
+
+  const visible = scopeVenues(allVenues, input);
+  const visibleIds = new Set(visible.map(v => v.id));
+  const slugOf = new Map(allVenues.map(v => [v.id, v.slug as string]));
+  const nameOf = new Map(allVenues.map(v => [v.id, v.name as string]));
+
+  const { data: rows, error } = await supabase
+    .from('events')
+    .select('id, name, start_date, end_date, occasion, concept_type, partner, format, demographic, status, price, target_net_sales, target_covers, baseline_net_sales, baseline_covers, baseline_basis, cost_total, break_even_covers, ad_budget, outcome_basis, covers_actual, net_sales_actual, outcome_notes, concept, usp, event_venues(venue_id)')
+    .order('start_date', { ascending: false })
+    .limit(500);
+
+  if (error) {
+    return JSON.stringify({
+      error: `Could not read events: ${error.message}. If this says the table does not exist, migration 046_events.sql has not been applied.`,
+    });
+  }
+
+  /**
+   * Venue scope, applied here rather than in the query.
+   *
+   * An event has no venue_id of its own -- it is reachable only through
+   * event_venues -- so PostgREST cannot filter it in one pass. An event with NO
+   * venues attached is withheld from everyone but an owner, matching
+   * may_read_event() in the migration: a half-written row defaulting to visible
+   * is how a restricted account reads something nobody meant it to.
+   */
+  const isOwner = !input.__allowed_venues || input.__allowed_venues.length === allVenues.length;
+
+  const all: Array<EventLike & { raw: any }> = [];
+  for (const r of (rows ?? []) as any[]) {
+    const ids: string[] = ((r.event_venues ?? []) as any[]).map(x => x.venue_id);
+    if (ids.length === 0) { if (!isOwner) continue; }
+    else if (!ids.some(id => visibleIds.has(id))) continue;
+
+    all.push({
+      id: r.id, name: r.name, start_date: r.start_date, end_date: r.end_date,
+      occasion: r.occasion, concept_type: r.concept_type, partner: r.partner,
+      format: r.format, demographic: r.demographic,
+      venue_slugs: ids.map(id => slugOf.get(id)!).filter(Boolean),
+      raw: { ...r, venue_names: ids.map(id => nameOf.get(id)!).filter(Boolean) },
+    });
+  }
+
+  /**
+   * The night's trade, read back rather than stored.
+   *
+   * One query across every venue-day any returned event touches, then
+   * attributed. `outcome_basis` decides whether it applies: 'venue_day' means
+   * the event WAS the night and the day's figures are its figures; 'measured'
+   * means somebody counted a subset, and the day would overstate it.
+   */
+  const dayKey = (venueId: string, date: string) => `${venueId}|${date}`;
+  const sales = new Map<string, { net_sales: number; covers: number }>();
+
+  if (all.length > 0) {
+    const dates = all.flatMap(e => [e.start_date, e.end_date]).sort();
+    const { data: ops } = await supabase
+      .from('daily_operations')
+      .select('venue_id, business_date, net_sales, total_guests')
+      .in('venue_id', [...visibleIds])
+      .gte('business_date', dates[0])
+      .lte('business_date', dates[dates.length - 1])
+      .limit(5000);
+
+    for (const o of (ops ?? []) as any[]) {
+      sales.set(dayKey(o.venue_id, o.business_date), {
+        net_sales: Number(o.net_sales ?? 0),
+        covers: Number(o.total_guests ?? 0),
+      });
+    }
+  }
+
+  const describe = (e: EventLike & { raw: any }) => {
+    const r = e.raw;
+    const venueIds = ((r.event_venues ?? []) as any[]).map(x => x.venue_id);
+
+    let derived: { net_sales: number; covers: number; days: number } | null = null;
+    if (r.outcome_basis === 'venue_day') {
+      let net = 0, cov = 0, days = 0;
+      for (const vid of venueIds) {
+        for (let d = Date.parse(`${e.start_date}T00:00:00Z`); d <= Date.parse(`${e.end_date}T00:00:00Z`); d += 86_400_000) {
+          const hit = sales.get(dayKey(vid, new Date(d).toISOString().slice(0, 10)));
+          if (hit) { net += hit.net_sales; cov += hit.covers; days += 1; }
+        }
+      }
+      derived = { net_sales: Number(net.toFixed(2)), covers: cov, days };
+    }
+
+    return {
+      id: e.id, name: e.name, venues: r.venue_names,
+      dates: { start: e.start_date, end: e.end_date },
+      status: r.status,
+      attributes: {
+        occasion: e.occasion, concept_type: e.concept_type, partner: e.partner,
+        format: e.format, demographic: e.demographic,
+      },
+      concept: r.concept ?? undefined,
+      usp: r.usp ?? undefined,
+      plan: {
+        price: r.price, target_net_sales: r.target_net_sales, target_covers: r.target_covers,
+        baseline_net_sales: r.baseline_net_sales, baseline_covers: r.baseline_covers,
+        baseline_basis: r.baseline_basis,
+        cost_total: r.cost_total, break_even_covers: r.break_even_covers, ad_budget: r.ad_budget,
+      },
+      outcome: {
+        basis: r.outcome_basis,
+        // Derived from the night, for an event that WAS the night.
+        venue_day: derived,
+        // Counted, for an event that was part of one.
+        measured: r.outcome_basis === 'measured'
+          ? { covers: r.covers_actual, net_sales: r.net_sales_actual }
+          : null,
+        notes: r.outcome_notes ?? undefined,
+        vs_target: r.target_net_sales && (derived?.net_sales ?? r.net_sales_actual)
+          ? Number((((derived?.net_sales ?? Number(r.net_sales_actual)) - Number(r.target_net_sales)) / Number(r.target_net_sales) * 100).toFixed(1))
+          : null,
+      },
+    };
+  };
+
+  // --- what was on in a window -------------------------------------------
+  const inWindow = (input.start_date && input.end_date)
+    ? all.filter(e => e.start_date <= input.end_date && e.end_date >= input.start_date)
+    : [];
+
+  // --- what is comparable -------------------------------------------------
+  const criteria: Criteria = {
+    occasion: input.occasion, concept_type: input.concept_type, partner: input.partner,
+    format: input.format, demographic: input.demographic,
+    venue_slugs: input.venue_slug ? [input.venue_slug] : undefined,
+    exclude_id: input.exclude_event_id,
+    before: input.before,
+  };
+
+  const askedForComparison = Boolean(
+    input.occasion || input.concept_type || input.partner || input.format ||
+    input.demographic || input.exclude_event_id,
+  );
+
+  const matches = askedForComparison
+    ? rankComparable(criteria, all, input.before ?? input.start_date).slice(0, Number(input.limit) || 10)
+    : [];
+
+  const prior = askedForComparison && input.occasion
+    ? previousOccurrence(input.occasion, all, input.before ?? input.start_date ?? '9999-12-31', input.exclude_event_id)
+    : null;
+
+  return JSON.stringify({
+    events_held_in_total: all.length,
+    ...(input.start_date && input.end_date
+      ? {
+          window: { start: input.start_date, end: input.end_date },
+          events_in_window: inWindow.map(describe),
+          window_note: inWindow.length === 0
+            ? 'No event on record overlaps this period. The store began in September 2026 and was not backfilled, so an earlier period is empty by construction rather than quiet.'
+            : undefined,
+        }
+      : {}),
+    ...(askedForComparison
+      ? {
+          comparable: matches.map(m => ({
+            shared_attributes: m.shared,
+            shared_count: m.shared.length,
+            days_before: m.days_before,
+            ...describe(m.event as EventLike & { raw: any }),
+          })),
+          comparable_found: matches.length,
+          previous_same_occasion: prior
+            ? describe(prior as EventLike & { raw: any })
+            : null,
+          previous_same_occasion_note:
+            'The previous occurrence of the SAME OCCASION, at any distance. Deepavali 2025 to 2026 is 384 days and Chinese New Year 383, so a one-year window would miss them — this does not use one.',
+        }
+      : {}),
+    caveats: [
+      ...(askedForComparison ? comparabilityCaveats(matches, criteria) : []),
+      'Whole-day sales and covers are JOINED from daily_operations, not stored on the event — there is one figure for a night, not two. outcome.basis says which reading applies: venue_day means the event was the night; measured means somebody counted a subset and the day would overstate it.',
+      'No event was backfilled. Absence is absence of a RECORD, never evidence the group has not done something.',
+    ],
   });
 }
 

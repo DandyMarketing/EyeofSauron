@@ -497,6 +497,33 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_events',
+    description:
+      'EVENTS THE GROUP HAS RUN OR PLANS TO RUN — collabs, guest chefs, tastings, parties, the big calendar days. Two uses. First: "was anything on that week", which explains a night that otherwise arrives as an anomaly — an unusual Wednesday with a guest chef in the kitchen is not a mystery, it is an event, and until this table existed nothing in the warehouse could say so. Second: "what comparable events have we run", which is the planning question. ' +
+      'COMPARISON IS AN OVERLAP, NOT A MATCH ON ONE FIELD. Pass any of occasion, concept_type, partner, format, demographic or venue_slug and it returns events sharing ANY of them, ranked by how many. Every result carries shared_attributes, and you must read it: a match on occasion, venue and partner is a real precedent, a match on format alone is barely a relation. Say which attributes matched when you cite one. ' +
+      'FOR A SHARED OCCASION IT FINDS THE PREVIOUS OCCURRENCE AT ANY DISTANCE, returned separately as previous_same_occasion. This matters more than it sounds: Deepavali 2025 to 2026 is 384 days apart and Chinese New Year 383, so a one-year lookback would miss last year\'s entirely. Valentine\'s, Christmas and National Day are fixed at 365 and would have worked — which is exactly why a day-window would have survived unnoticed. ' +
+      'AN EMPTY RESULT MEANS NO RECORD, NEVER "NEVER DONE". The store began in September 2026 and was deliberately not backfilled, so for about a year the honest answer to "what did the last one do" is that nothing matching is on file. Say "we have no record of a comparable event" — never "this has not been tried here", which is a claim about the business rather than about the data. ' +
+      'OUTCOMES ARE JOINED FROM THE POS, NOT STORED ON THE EVENT, so there is one figure for a night rather than two that drift. Read outcome.basis before quoting anything: "venue_day" means the event was the whole night and the day\'s trade is its trade; "measured" means somebody counted a subset — a private room, one seating — and the day would overstate it; "unknown" means nobody recorded which. ' +
+      'Targets carry the BASELINE they were set against, because a target without one cannot be judged afterwards. Quote both or neither.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        start_date: { type: 'string', description: 'Start of a window to list events in, YYYY-MM-DD. Use with end_date for "what was on".' },
+        end_date: { type: 'string', description: 'End of that window, YYYY-MM-DD.' },
+        venue_slug: { type: 'string', description: 'Restrict to, or compare against, one venue: "neon-pigeon", "fat-prince", "super-firangi".' },
+        occasion: { type: 'string', description: 'Find events sharing an occasion: "Valentine\'s Day", "Deepavali", "CNY". The strongest comparison axis, and the one that triggers previous_same_occasion.' },
+        concept_type: { type: 'string', description: 'Find events sharing a concept: "guest-chef collab", "tasting", "brunch", "party", "launch".' },
+        partner: { type: 'string', description: 'Find events sharing a partner: "Vicky Ratnani". A returning partner is a comparison on its own.' },
+        format: { type: 'string', description: 'Find events sharing a format: "set menu", "a la carte", "ticketed". The weakest axis on its own.' },
+        demographic: { type: 'string', description: 'Find events aimed at the same audience, in the planner\'s own words.' },
+        exclude_event_id: { type: 'string', description: 'Exclude one event from its own comparison set.' },
+        before: { type: 'string', description: 'Only consider events that started before this date, YYYY-MM-DD. Defaults to start_date when given.' },
+        limit: { type: 'number', description: 'How many comparable events to return. Default 10.' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'query_public_holidays',
     description:
       'SINGAPORE PUBLIC HOLIDAYS for a date range, from the Ministry of Manpower via data.gov.sg. USE THIS INSTEAD OF SEARCHING THE WEB. Never run a web search for Singapore public holidays, school holidays or the MOE calendar — the holidays are here, and searching for them costs a dozen page fetches that then sit in context for the rest of the conversation. ' +
