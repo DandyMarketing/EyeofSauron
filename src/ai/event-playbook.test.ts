@@ -156,13 +156,22 @@ test('multi-venue is discouraged in the tool, not only in the conversation', () 
  * from $850 a head. These assert the three things that were wrong.
  */
 
-test('the date check interrupts the agenda rather than waiting for its turn', () => {
-  // It was in the `shape` stage, which comes after `point`, so a conversation
-  // that opened with a date reached the clash check several turns later — if
-  // it got there at all. A date is the only input that can invalidate the
-  // whole concept.
+test('the date is checked on first mention, not when the agenda reaches it', () => {
+  /**
+   * The original fault: competing_events sat in the `shape` stage, after
+   * `point`, so a conversation opening with a date reached the clash check
+   * several turns later if at all.
+   *
+   * THE FIRST FIX OVERSHOT and this test went with it. It asserted the prompt
+   * said the check "interrupts the agenda", and it did — so the agent led with
+   * the Grand Prix before knowing whether the event was a dinner or a late
+   * party, which is the only thing that decides what the clash means. The
+   * property worth guarding is that the CHECK is early, not that the
+   * CONVERSATION is hijacked; the assertion that the old wording is gone lives
+   * in the test above.
+   */
   assert.match(EVENT_AGENT_PROMPT, /THE MOMENT A DATE IS NAMED/);
-  assert.match(EVENT_AGENT_PROMPT, /interrupts the agenda/);
+  assert.match(EVENT_AGENT_PROMPT, /on the first mention of a date/);
 });
 
 test('the table is checked before the search, and the search is bounded', () => {
@@ -226,4 +235,45 @@ test('the agent names competitor programming as the thing it cannot see', () => 
   assert.match(EVENT_AGENT_PROMPT, /WHAT YOU CANNOT SEE, AND MUST SAY SO/);
   assert.match(EVENT_AGENT_PROMPT, /guest shift/i);
   assert.match(EVENT_AGENT_PROMPT, /a real gap rather than a clear\s+diary/);
+});
+
+/**
+ * The opposite failure to the 10 October one, caused by fixing it. Told "I want
+ * to do an event on 10 October 2026 at Neon Pigeon", the agent opened with the
+ * Grand Prix and a demand for a measurable objective — before it knew whether
+ * the event was a dinner or a late party, which is the only thing that decides
+ * what the clash means.
+ */
+
+test('it hears the idea out before challenging any of it', () => {
+  assert.match(EVENT_AGENT_PROMPT, /HEAR THE WHOLE IDEA BEFORE YOU ARGUE/);
+  assert.match(EVENT_AGENT_PROMPT, /genuine\s+curiosity before a single challenge/);
+});
+
+test('THIN and WEAK are distinguished, because only one earns a challenge', () => {
+  /**
+   * "Mainly awareness" is weak: thought about, and badly. "An event on the 10th
+   * at Neon Pigeon" is thin: not finished. Treating the second like the first
+   * is badgering somebody for not yet having said what they were about to say.
+   */
+  assert.match(EVENT_AGENT_PROMPT, /THIN IS NOT WEAK/);
+  assert.match(EVENT_AGENT_PROMPT, /earns a follow-up\s+question instead/);
+  assert.match(EVENT_AGENT_PROMPT, /it is badgering/);
+});
+
+test('the date is CHECKED immediately but RAISED when the advice can be specific', () => {
+  // Checking and raising are different acts. Running them together is what
+  // made the fix for the 10 October miss into an interruption.
+  assert.match(EVENT_AGENT_PROMPT, /CHECK IMMEDIATELY AND SILENTLY/);
+  assert.match(EVENT_AGENT_PROMPT, /RAISE IT ONCE YOU KNOW ENOUGH/);
+  assert.match(EVENT_AGENT_PROMPT, /ONE CLAUSE/);
+
+  // And the old wording must not creep back.
+  assert.doesNotMatch(EVENT_AGENT_PROMPT, /it interrupts the agenda/);
+});
+
+test('the clash still gets raised — holding it is not dropping it', () => {
+  // The 10 October failure must not come back as the cure for this one.
+  assert.match(EVENT_AGENT_PROMPT, /THEN RAISE IT PROPERLY/);
+  assert.match(EVENT_AGENT_PROMPT, /stops you forgetting it/);
 });
