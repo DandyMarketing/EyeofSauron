@@ -277,3 +277,42 @@ test('the clash still gets raised — holding it is not dropping it', () => {
   assert.match(EVENT_AGENT_PROMPT, /THEN RAISE IT PROPERLY/);
   assert.match(EVENT_AGENT_PROMPT, /stops you forgetting it/);
 });
+
+/**
+ * The planner replaces the whole standing prompt, so it never inherited
+ * Sauron's presentation rules — it was built with none at all. The 10 October
+ * answer was correct, insightful and a wall of prose, which for somebody on a
+ * phone between services is most of the way to useless.
+ */
+
+test('the planner has presentation rules, which it did not inherit', () => {
+  // system-prompt.ts has these; EVENT_AGENT_PROMPT replaces it wholesale, so
+  // they have to be stated again rather than assumed.
+  assert.match(EVENT_AGENT_PROMPT, /SHOW IT, DO NOT NARRATE IT/);
+  assert.match(EVENT_AGENT_PROMPT, /run restaurants/);
+});
+
+test('the verdict leads, the facts are a table, the prose is capped', () => {
+  assert.match(EVENT_AGENT_PROMPT, /THE VERDICT GOES FIRST/);
+  assert.match(EVENT_AGENT_PROMPT, /MORE THAN TWO FACTS PER ROW IS A TABLE/);
+  assert.match(EVENT_AGENT_PROMPT, /THREE SENTENCES OF PROSE, AT MOST/);
+  assert.match(EVENT_AGENT_PROMPT, /ONE QUESTION, at the end/);
+});
+
+test('the prompt SHOWS the shape rather than describing it', () => {
+  /**
+   * A worked example beats a rule here. The example is the real 10 October
+   * answer rewritten: same facts, same judgement, a third of the reading — so
+   * the model can see the target instead of inferring it from adjectives.
+   */
+  assert.match(EVENT_AGENT_PROMPT, /\| On, Sat 10 Oct \| Where \| When \| Price \|/);
+  assert.match(EVENT_AGENT_PROMPT, /THAT IS THE SHAPE/);
+});
+
+test('brevity is not allowed to cost the insight', () => {
+  // The Padang emptying at 11.45 is the product. The rule is "say it in one
+  // sentence", never "leave it out" — a short answer with nothing in it is a
+  // worse failure than a long one.
+  assert.match(EVENT_AGENT_PROMPT, /Your REASONING is the product/);
+  assert.match(EVENT_AGENT_PROMPT, /an insight is one\s+sentence, not five/);
+});
