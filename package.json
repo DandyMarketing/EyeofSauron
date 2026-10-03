@@ -27,7 +27,8 @@
     "plan:dry": "NODE_USE_ENV_PROXY=1 tsx src/scripts/plan-dry-run.ts",
     "probe:xero-pl": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-pl-layout.ts",
     "probe:staffany": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-staffany.ts",
-    "audit:rls": "NODE_USE_ENV_PROXY=1 tsx src/scripts/audit-rls.ts"
+    "audit:rls": "NODE_USE_ENV_PROXY=1 tsx src/scripts/audit-rls.ts",
+    "vendor": "tsx src/scripts/vendor-supabase.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.118.0",

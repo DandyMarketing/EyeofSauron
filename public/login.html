@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Login - Sauron</title>
+<!--
+  Start the auth client downloading while the HTML is still being parsed.
+
+  Without this the browser cannot know it needs the file until the script at the
+  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
+  download that could have been in flight from the first byte waits for the
+  whole document to parse first. A modulepreload is the only way to tell it
+  earlier, because a dynamic import is invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -166,7 +176,7 @@
     return;
   }
 
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  const { createClient } = await import('/vendor/supabase.js');
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   // Check existing session

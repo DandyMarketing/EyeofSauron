@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin - Sauron</title>
+<!--
+  Start the auth client downloading while the HTML is still being parsed.
+
+  Without this the browser cannot know it needs the file until the script at the
+  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
+  download that could have been in flight from the first byte waits for the
+  whole document to parse first. A modulepreload is the only way to tell it
+  earlier, because a dynamic import is invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -443,13 +453,16 @@ let venues = [];
 let currentUserId = null;
 
 (async function init() {
-  const cfg = await fetch('/api/config').then(r => r.json());
+  // Both at once — see index.html for why these were never dependent.
+  const [cfg, { createClient }] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
     document.getElementById('app').innerHTML = '<div class="loading">Auth not configured.</div>';
     return;
   }
 
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   const { data: { session } } = await supabase.auth.getSession();
@@ -459,6 +472,21 @@ let currentUserId = null;
   }
 
   token = session.access_token;
+
+  /**
+   * The seven admin queries start NOW, alongside /api/me.
+   *
+   * They are the slow half of this page and they were waiting on a request that
+   * tells us nothing they need. This is not a loosening: every /admin/api route
+   * checks the owner role server-side, so a non-owner's seven requests are seven
+   * refusals rather than seven answers, and the isOwner check below still
+   * decides what this page draws. The only cost is seven wasted refusals for
+   * somebody who should not be on this page at all.
+   */
+  const dataPromise = fetchAll().then(
+    (d) => ({ d }),
+    (err) => ({ err }),
+  );
 
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
   if (!meRes.ok) {
@@ -479,7 +507,13 @@ let currentUserId = null;
     window.location.href = '/login.html';
   });
 
-  await loadAll();
+  const result = await dataPromise;
+  if (result.err) {
+    document.getElementById('app').innerHTML =
+      '<div class="loading">Could not load the admin data: ' + escapeHtml(String(result.err.message || result.err)) + '</div>';
+    return;
+  }
+  applyAll(result.d);
 })();
 
 async function api(method, path, body) {
@@ -631,7 +665,15 @@ async function loadFeeAcks() {
   });
 }
 
-async function loadAll() {
+/**
+ * Fetch only, and DELIBERATELY TOUCHES NOTHING.
+ *
+ * Split out from loadAll because init() starts it before it knows whether the
+ * reader is an owner. If it drew anything, a non-owner would see "Admin access
+ * required" and then have seven refusals painted over the top of it a moment
+ * later. Fetching is safe to do early; rendering is not.
+ */
+async function fetchAll() {
   const [usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData] = await Promise.all([
     api('GET', '/admin/api/users'),
     api('GET', '/admin/api/venues'),
@@ -641,9 +683,17 @@ async function loadAll() {
     api('GET', '/admin/api/notes?status=pending'),
     api('GET', '/admin/api/alerts'),
   ]);
+  return { usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData };
+}
 
-  venues = venuesData.venues || [];
-  render(usersData.users || [], systemData, notesData.notes || [], xeroData.connections || [], pendingData.notes || [], alertsData.alerts || []);
+function applyAll(d) {
+  venues = d.venuesData.venues || [];
+  render(d.usersData.users || [], d.systemData, d.notesData.notes || [], d.xeroData.connections || [], d.pendingData.notes || [], d.alertsData.alerts || []);
+}
+
+/** What every action on this page calls to refresh itself. Unchanged for them. */
+async function loadAll() {
+  applyAll(await fetchAll());
 }
 
 function render(users, system, notes, xeroConnections, pendingNotes, alerts) {

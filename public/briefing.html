@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Briefing - Sauron</title>
+<!--
+  Start the auth client downloading while the HTML is still being parsed.
+
+  Without this the browser cannot know it needs the file until the script at the
+  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
+  download that could have been in flight from the first byte waits for the
+  whole document to parse first. A modulepreload is the only way to tell it
+  earlier, because a dynamic import is invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
+<link rel="modulepreload" href="/terms-gate.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -248,28 +259,48 @@ let token = null;
 let myVenues = [];
 
 (async function init() {
-  const cfg = await fetch('/api/config').then(r => r.json());
+  // Both at once — see index.html. The config is two public strings and the
+  // module is 60 KB; serialising them paid for the round trip twice.
+  const [cfg, { createClient }] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
     document.getElementById('app').innerHTML = '<div class="loading">Auth not configured.</div>';
     return;
   }
 
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
 
+  /**
+   * THE BRIEFING ITSELF STARTS NOW, not after the terms check and /api/me.
+   *
+   * This is the change worth having on this page. The briefing is the slowest
+   * request here by far -- it is a database read, not two strings -- and it was
+   * SIXTH in a chain of six, so a reader stared at "Loading..." through four
+   * round trips that had nothing to do with it. All three of these need only
+   * the token.
+   *
+   * The one case that is not safe is handled below rather than by going back to
+   * serial: if the terms gate has to appear, this request was issued before the
+   * acceptance was recorded and the server correctly refused it.
+   */
+  const briefing = fetchBriefing();
+  const gate = import('/terms-gate.js');
+  const mePromise = fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
 
   /**
    * The terms, before the briefing renders. Blocking, and the API refuses
    * /api/recommendations regardless of what happens here.
    */
-  const { enforceTerms } = await import('/terms-gate.js');
-  await enforceTerms(token);
+  const { enforceTerms } = await gate;
+  const terms = await enforceTerms(token);
 
-  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+  const meRes = await mePromise;
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();
   myVenues = me.venues || [];
@@ -281,24 +312,36 @@ let myVenues = [];
     window.location.href = '/login.html';
   });
 
-  await load();
+  // 'already' is the only answer that means the parallel request above was
+  // made by somebody the server would answer. Anything else and it is asked
+  // again -- once, now that the acceptance exists.
+  await render(terms === 'already' ? await briefing : await fetchBriefing());
 })();
 
-async function load() {
-  const app = document.getElementById('app');
-
-  let payload;
+/**
+ * Fetch and nothing else. Split out from render() so it can be started before
+ * the things it does not depend on, and so a failure is a VALUE rather than a
+ * half-drawn page: it returns { error } and render() decides what the reader
+ * sees. Never throws.
+ */
+async function fetchBriefing() {
   try {
     const res = await fetch('/api/recommendations', { headers: { Authorization: 'Bearer ' + token } });
-    if (!res.ok) {
-      app.innerHTML = '<div class="empty"><strong>Could not load the briefing.</strong>The chat still works — this page is an addition, not a gate on it.</div>';
-      return;
-    }
-    payload = await res.json();
+    if (!res.ok) return { error: 'The chat still works — this page is an addition, not a gate on it.' };
+    return { payload: await res.json() };
   } catch (e) {
-    app.innerHTML = '<div class="empty"><strong>Could not load the briefing.</strong>' + escapeHtml(String(e.message || e)) + '</div>';
+    return { error: escapeHtml(String(e.message || e)) };
+  }
+}
+
+async function render(result) {
+  const app = document.getElementById('app');
+
+  if (result.error) {
+    app.innerHTML = '<div class="empty"><strong>Could not load the briefing.</strong>' + result.error + '</div>';
     return;
   }
+  const payload = result.payload;
 
   const recs = payload.recommendations || [];
 

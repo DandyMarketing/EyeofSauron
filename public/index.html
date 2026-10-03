@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sauron - The Dandy Collection</title>
+<!--
+  Start the auth client downloading while the HTML is still being parsed.
+
+  Without this the browser cannot know it needs the file until the script at the
+  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
+  download that could have been in flight from the first byte waits for the
+  whole document to parse first. A modulepreload is the only way to tell it
+  earlier, because a dynamic import is invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
+<link rel="modulepreload" href="/terms-gate.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -690,10 +701,20 @@ let supabaseClient = null;
 let myVenues = [];
 
 (async function initAuth() {
-  const cfg = await fetch('/api/config').then(r => r.json());
+  /**
+   * Both at once, because neither needs the other.
+   *
+   * These two were serial for no reason: a round trip for two public strings,
+   * and only then the client download that is the expensive half. Issued
+   * together, the config lands inside the time the bundle is already spending
+   * on the wire and costs nothing measurable.
+   */
+  const [cfg, { createClient }] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
 
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   supabaseClient = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -704,25 +725,37 @@ let myVenues = [];
 
   authToken = session.access_token;
 
+  /**
+   * Who I am, and the terms module, fired together the moment there is a token.
+   *
+   * Both only need the token, and /api/me was queued behind nothing but the
+   * order it happened to be written in. It also APPLIES ITSELF in a .then
+   * rather than being awaited here: the terms gate below can sit waiting for a
+   * human for minutes, and the header should not be missing its admin link for
+   * all of that.
+   */
+  const gate = import('/terms-gate.js');
+  const me = fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } })
+    .then(async (res) => {
+      if (!res.ok) return;
+      const body = await res.json();
+      myVenues = body.venues || [];
+      if (body.isOwner) document.getElementById('admin-link').style.display = '';
+    })
+    .catch(() => { /* the header degrades; the chat does not depend on it */ });
+
   supabaseClient.auth.onAuthStateChange((_event, session) => {
     authToken = session?.access_token || null;
     if (!authToken) window.location.href = '/login.html';
   });
 
-  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } });
-  if (meRes.ok) {
-    const me = await meRes.json();
-    myVenues = me.venues || [];
-    if (me.isOwner) document.getElementById('admin-link').style.display = '';
-  }
-
-
   /**
    * The terms, before anything else loads. Blocking: the app is not usable
    * until they are accepted, and /ask refuses regardless of what this does.
    */
-  const { enforceTerms } = await import('/terms-gate.js');
+  const { enforceTerms } = await gate;
   await enforceTerms(authToken);
+  await me;
 
   document.getElementById('logout-link').style.display = '';
   document.getElementById('logout-link').addEventListener('click', async (e) => {

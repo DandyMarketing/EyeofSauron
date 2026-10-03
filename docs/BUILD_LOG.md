@@ -557,6 +557,49 @@ Lower stakes, but each one made real data unusable or invisible.
 recovery path re-asks with tools withheld, and a plain-language fallback runs if
 that also fails.
 
+### 5.6 Every page was slow, and nothing in the code looked wrong
+
+Reported as "a UI that is more responsive and loads faster" elsewhere. Nothing
+was broken, no test failed, and no line of the front end was obviously at
+fault — which is why it had survived since the first page was written. Three
+separate causes, found by measuring rather than reading:
+
+| Cause | Measured | Fix |
+|---|---|---|
+| **No compression anywhere.** No `Content-Encoding`, no middleware, never configured | admin.html went down the wire at 87,178 bytes against 23,731 gzipped; index.html 40,801 against 12,874 | `hono/compress` registered FIRST, so it wraps the static handler. 65–73% off every page |
+| **The auth client came from esm.sh**, a third party, on the critical path of every page | 349 ms for a **531-byte** re-export shim — 302 ms of it TLS to a host we had never spoken to — which then pulled six more modules, ~181 KB across 7+ further requests, each discoverable only after the one before it arrived | Bundled into `public/vendor/supabase.js` and committed. One same-origin request, 60 KB gzipped, on the connection the HTML already opened |
+| **The boot sequence was six serial round trips** on every page: `/api/config` → the client import → `getSession()` → `/terms-gate.js` → `/api/me` → the data | On briefing.html the briefing itself — the only slow request, a database read — was **sixth of six** | `Promise.all` where there was never a dependency, `<link rel="modulepreload">` so the client downloads during parse, and the page's own data fetch started as soon as there is a token |
+
+**Recurs? Every customer, and worse at every one of them.** All three were
+invisible from Singapore on an office connection and are not invisible on a
+phone: TLS to a third party costs a round trip that scales with distance, and
+an uncompressed 87 KB page is 87 KB of someone's data allowance. The product is
+for operators between services, on a phone, which is the exact case none of
+this was measured in.
+
+**Two things worth carrying forward beyond the fix itself.**
+
+*The modulepreload is doing the work, and it was verified rather than assumed.*
+Measured from the browser's own Resource Timing: `/vendor/supabase.js` starts at
+**23 ms**, initiated by the link element, while the script that asks for it does
+not run until 26 ms. A dynamic `import()` is invisible to the preload scanner,
+so without the link the download cannot begin until the whole document has
+parsed.
+
+*Parallelising a request can change its ANSWER, not just its timing.* The
+briefing's data fetch now runs alongside the terms gate. If the gate has to
+appear, that request was issued before the acceptance existed and the server
+correctly refused it — so `enforceTerms()` was changed to report WHICH case it
+was (`already` / `accepted` / `skipped`) and the page re-fetches when the answer
+is not `already`. A parallelisation that silently serves a 403 page to
+first-time users would have been a worse bug than the slowness.
+
+And the usual one: `tsc` never looks inside an HTML file, so a brace dropped
+while editing four boot sequences by hand would have produced a **blank page**
+with the whole suite green. `src/frontend/pages.test.ts` now compiles every
+page's inline script without running it, and carries a test proving it still
+rejects broken code.
+
 ---
 
 ## 6. Process failures

@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plan an event - Sauron</title>
+<!--
+  Start the auth client downloading while the HTML is still being parsed.
+
+  Without this the browser cannot know it needs the file until the script at the
+  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
+  download that could have been in flight from the first byte waits for the
+  whole document to parse first. A modulepreload is the only way to tell it
+  earlier, because a dynamic import is invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
+<link rel="modulepreload" href="/terms-gate.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -165,18 +176,26 @@ const sendBtn = document.getElementById('send');
 const draftBtn = document.getElementById('draft-btn');
 
 (async () => {
-  const cfg = await (await fetch('/api/config')).json();
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  // Both at once — see index.html for why these were never dependent.
+  const [cfg, { createClient }] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
 
-  const { enforceTerms } = await import('/terms-gate.js');
+  // Both only need the token. There is no data fetch to start here: the planner
+  // has nothing to show until somebody types.
+  const gate = import('/terms-gate.js');
+  const mePromise = fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+
+  const { enforceTerms } = await gate;
   await enforceTerms(token);
 
-  const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+  const meRes = await mePromise;
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();
   if (me.isOwner) document.getElementById('admin-link').style.display = '';

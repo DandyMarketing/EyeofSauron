@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
+import { compress } from 'hono/compress';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
@@ -39,6 +40,24 @@ import type { SessionUser } from './auth/session.js';
 import type { ProductMixRow, OperationsData, HourlySalesData } from './parsers/revel/types.js';
 
 const app = new Hono();
+
+/**
+ * Compress every response, and register it FIRST so it wraps everything
+ * including the static files.
+ *
+ * WHY. Nothing here was compressed at all -- admin.html went down the wire at
+ * 87,178 bytes where gzip makes it 23,731, and index.html at 40,801 against
+ * 12,874. That is 73% and 69% of the two pages people actually wait for,
+ * given away for one line, and on a phone on mobile data it is the single
+ * largest win available.
+ *
+ * MIDDLEWARE ORDER IS THE WHOLE POINT. Compression has to see the body on the
+ * way back out, so it must be the OUTERMOST layer -- registered before the
+ * handler that produces the body, so its `await next()` returns with the
+ * finished response. Put it after serveStatic and it compresses nothing,
+ * silently, while looking exactly as installed as it does here.
+ */
+app.use('*', compress());
 
 app.use('/ask', cors());
 app.use('/api/*', cors());
@@ -1899,6 +1918,32 @@ app.use('/*', async (c, next) => {
   await next();
   const last = c.req.path.split('/').pop() ?? '';
   const isShell = last === '' || last.endsWith('.html') || !last.includes('.');
+
+  /**
+   * The vendored auth client is the one asset worth caching hard.
+   *
+   * It is 222 KB (60 KB compressed) and it changes only when supabase-js is
+   * upgraded, which has happened less than once a quarter.
+   *
+   * A DAY rather than a year, because the filename carries no content hash: a
+   * year would mean a returning user running an auth client we replaced months
+   * ago, including if we replaced it for a security fix. A day bounds that, and
+   * within the day every repeat visit costs nothing.
+   *
+   * MEASURED, because the obvious assumption is wrong: @hono/node-server's
+   * serveStatic sends Last-Modified but does NOT answer a conditional request
+   * with a 304 -- an If-Modified-Since request for this file comes back 200 with
+   * all 227 KB of it. So after the day expires the browser re-downloads rather
+   * than revalidating cheaply. That is a bounded cost on one request a day and
+   * is not worth either a hashed filename or hand-rolled 304 handling here; it
+   * is written down so nobody reasons from the 304 that does not arrive.
+   */
+  if (c.req.path.startsWith('/vendor/')) {
+    c.res = new Response(c.res.body, c.res);
+    c.res.headers.set('Cache-Control', 'public, max-age=86400');
+    return;
+  }
+
   if (!isShell) return;
 
   // Rebuilt rather than mutated: a Response's headers are immutable once it

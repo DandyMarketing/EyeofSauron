@@ -11,12 +11,21 @@
  * free one. The split is deliberate and is the same one the AI tool list makes
  * against enforceDomainScope(): what we show is a hint, what we refuse is a
  * boundary.
+ *
+ * RETURNS WHICH CASE IT WAS, not just success. 'already' means the terms were
+ * current and nothing was shown; 'accepted' means the gate appeared and the
+ * person agreed; 'skipped' means the check itself failed and it fell open.
+ * Callers that start their data fetch in PARALLEL with this need the
+ * distinction: a fetch issued before an acceptance was recorded comes back 403
+ * from a server that is quite right to refuse it, and only 'already' says the
+ * parallel result can be trusted. Every value is a non-empty string, so the
+ * callers that still just await it are unaffected.
  */
 export async function enforceTerms(authToken) {
   let terms;
   try {
     const res = await fetch('/api/terms', { headers: { Authorization: 'Bearer ' + authToken } });
-    if (!res.ok) return true;
+    if (!res.ok) return 'skipped';
     terms = await res.json();
   } catch (e) {
     /**
@@ -29,10 +38,10 @@ export async function enforceTerms(authToken) {
      * the server already covers.
      */
     console.warn('[terms] could not check acceptance; the server still gates the data', e);
-    return true;
+    return 'skipped';
   }
 
-  if (terms.accepted) return true;
+  if (terms.accepted) return 'already';
 
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -141,7 +150,7 @@ export async function enforceTerms(authToken) {
 
         overlay.remove();
         document.body.style.overflow = '';
-        resolve(true);
+        resolve('accepted');
       } catch (e) {
         // Left on screen deliberately. If the acceptance was not recorded then
         // it did not happen, and letting somebody through on a failed write
