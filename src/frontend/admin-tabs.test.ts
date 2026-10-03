@@ -236,3 +236,65 @@ test('every tab loader only calls renderers that exist', () => {
     }
   }
 });
+
+/**
+ * The upload list: a result must land on the file it is about.
+ *
+ * The server groups a batch by venue and business date, emits the product mix
+ * before the operations report, handles hourly sales in a pass of its own
+ * afterwards, and pushes any parse failure ahead of all of it. So its results
+ * come back in ITS order and sometimes in a different count — and the page read
+ * `results[j]` onto `files[j]`.
+ *
+ * In the happy case every row says "Ingested" and nothing looks wrong, which is
+ * why it survived. The moment one file in a batch fails, the failure is reported
+ * against a DIFFERENT file, sending somebody to inspect a file that is fine.
+ * Exactly the shape of the bug that caused this: an accurate-looking message
+ * pointing at the wrong thing.
+ */
+test('an upload result is matched to its row by filename, not by position', () => {
+  const html = admin();
+  const body = functionBody(html, 'doUpload');
+
+  assert.ok(
+    /dataset\.fname === r\.filename/.test(body),
+    'doUpload no longer matches a result to its row by filename',
+  );
+  assert.ok(
+    !/document\.getElementById\('ufile-' \+ \(i\+j\)\)[^]]*?r\.status/s.test(body),
+    'doUpload is back to indexing results positionally against the batch',
+  );
+  // And the row must carry the name for that to find anything.
+  assert.ok(
+    /dataset\.fname\s*=\s*f\.name/.test(functionBody(html, 'renderUploadList')),
+    'renderUploadList no longer records the filename on the row',
+  );
+});
+
+test('the upload list shows what the server actually said', () => {
+  // Every failure path on /ingest/revel computes a `detail` — the parse error,
+  // the reconciliation difference, the row count — and this page used to throw
+  // all of them away and show a one-word status with nothing to act on.
+  const body = functionBody(admin(), 'doUpload');
+  assert.ok(/r\.detail/.test(body), 'doUpload ignores the detail the server returns');
+  assert.ok(admin().includes('.fdetail'), 'there is no style for the detail line, so it will squeeze into the row');
+});
+
+test('a Revel operations ingest checks the payments against the Grand Total', () => {
+  /**
+   * `paymentsReconcile()` existed and nothing called it, which is the failure
+   * this codebase keeps finding one layer up: a guard that is written, tested,
+   * and never reached. It must run on the ingest path, and it must WARN rather
+   * than block — a mismatch means the method/card-brand list does not recognise
+   * something, not that the figures are wrong, and refusing the day would throw
+   * away real sales over a classification question.
+   */
+  const src = server();
+  assert.ok(src.includes('paymentsReconcile(ops.operations.payments)'), 'the operations ingest no longer checks the payment totals');
+  assert.match(src, /WARNING: \$\{warning\}/, 'the payment mismatch is no longer reported in the upload result');
+
+  // The block it sits in must not bail out. `continue` there would lose the day.
+  const after = src.slice(src.indexOf('paymentsReconcile(ops.operations.payments)'));
+  const block = after.slice(0, after.indexOf('await logIngestion'));
+  assert.ok(!/\bcontinue\b|\bthrow\b/.test(block), 'a payment mismatch now blocks the ingest — it must only warn');
+});

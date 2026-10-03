@@ -6,7 +6,7 @@ import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
 import { injectConfig } from './lib/inject-config.js';
-import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
+import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile, paymentsReconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
@@ -355,7 +355,34 @@ app.post('/ingest/revel', async (c) => {
     if (ops?.operations) {
       try {
         const opsRows = await ingestOperations(venueId, businessDate, ops.operations);
-        results.push({ filename: ops.filename, status: 'ingested', detail: `${opsRows} sales-by-class rows` });
+
+        /**
+         * Do the payment METHODS add up to the report's own Grand Total?
+         *
+         * WARNING, NOT A BLOCK, and the distinction is the whole design. A
+         * mismatch here means our hardcoded method/card-brand list does not
+         * recognise something — the way `NETS` was read as a sub-type of House
+         * Account — and not that the figures are wrong. The payment rows are
+         * stored verbatim either way, so refusing the day would throw away real
+         * sales over a classification question. Losing the day is the larger
+         * harm.
+         *
+         * It is REPORTED rather than only logged, because a check nobody can
+         * see is indistinguishable from one that stopped working — the same
+         * argument as the payroll exclusion counts on every Xero run.
+         */
+        let detail = `${opsRows} sales-by-class rows`;
+        const pay = paymentsReconcile(ops.operations.payments);
+        if (pay && !pay.passed) {
+          const warning =
+            `payment methods sum to $${pay.methodsTotal.toFixed(2)} against a stated ` +
+            `Grand Total of $${pay.grandTotal.toFixed(2)} — a payment type is probably ` +
+            `being read as a card brand, or the other way round`;
+          detail += ` — WARNING: ${warning}`;
+          console.warn(`[revel] ${ops.filename}: ${warning}`);
+        }
+
+        results.push({ filename: ops.filename, status: 'ingested', detail });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success', row_count: opsRows });
       } catch (e: any) {
         const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error');

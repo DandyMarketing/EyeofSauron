@@ -197,6 +197,43 @@ absent check and a passing check must not look the same.
 any venue using one that is not on it, and the next one will arrive the same
 way — silently, as a plausible number.
 
+**And the guard was then not wired in.** `paymentsReconcile()` was written,
+tested and called by nothing — the same defect one layer up, and the one this
+log keeps recording. It now runs on the operations ingest and **warns without
+blocking**: a mismatch means the method list does not recognise something, not
+that the figures are wrong, and refusing the day would throw away real sales
+over a classification question. A test asserts both that it is called and that
+the block it sits in contains no `continue`.
+
+### 1.8 The upload page reported each result against the wrong file
+**Symptom.** None visible, which is why it survived. Found while adding the
+warning above.
+**Root cause.** `/ingest/revel` returns a `results` array, and the upload page
+read `results[j]` onto `files[j]`. The server does not emit results in the order
+the files were sent: it groups the batch by venue and business date, emits the
+product mix before the operations report, handles hourly sales in a separate
+pass afterwards, and pushes any parse failure ahead of all of it. Upload an
+operations report and a product mix together and the two statuses swap.
+**Why it was invisible.** When every file succeeds, every row says "Ingested"
+and a swap cannot be seen. It only shows when something fails — which is the
+one moment the label matters, and it then sends you to inspect a file that is
+perfectly fine.
+**Fix.** The row carries `data-fname` and results are matched by filename. A
+test asserts the match and fails if the positional index returns.
+**Recurs?** **Every customer.** Any UI that zips a response array against a
+request array has assumed an ordering the server never promised.
+
+**The page also discarded every `detail` the server computed** — the parse
+error, the reconciliation difference, the row count — and showed a one-word
+status with nothing to act on. That is the same complaint as 5.11 (errors that
+were accurate and unreadable), except here the explanation was already being
+generated and thrown away at the last step.
+
+**This is 1.6 in a different medium.** Both produce an accurate-looking message
+pointing at the wrong thing — "line 4" that was line four of a section, and a
+failure attributed to the file above it. A wrong pointer is worse than no
+pointer, because it is acted on.
+
 ---
 
 ## 2. Data that is valid but wrong

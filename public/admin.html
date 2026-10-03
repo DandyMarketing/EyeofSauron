@@ -455,6 +455,13 @@
 
   .file-item {
     display: flex;
+    /**
+     * `wrap` so `.fdetail` can take a line of its own beneath the row rather
+     * than being squeezed into it. It changes nothing for the row itself: the
+     * filename is the only growing child and it has `min-width: 0`, so the
+     * fixed children never add up to an overflow even at 390px.
+     */
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
@@ -484,6 +491,15 @@
   .fstatus-ok { color: var(--success); background: rgba(64,192,96,0.1); }
   .fstatus-err { color: var(--error); background: rgba(232,64,64,0.1); }
   .fstatus-warn { color: #e8c840; background: rgba(232,200,64,0.1); }
+  /* What the server actually said, on its own line. Nothing showed it before. */
+  .file-item .fdetail {
+    flex-basis: 100%;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+    padding-top: 2px;
+  }
 
   .file-item .fremove {
     background: none; border: none; color: var(--text-muted);
@@ -2582,6 +2598,9 @@ function initUpload() {
       const item = document.createElement('div');
       item.className = 'file-item';
       item.id = 'ufile-' + i;
+      // The server returns its results in ITS order, not ours, so a result is
+      // matched back to its row by filename. See doUpload().
+      item.dataset.fname = f.name;
       const sz = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
       item.innerHTML = `<span class="fname">${esc(f.name)}</span><span class="fsize">${sz}</span>
         <span class="fstatus ${valid ? 'fstatus-pending' : 'fstatus-warn'}">${valid ? 'Ready' : 'Unknown'}</span>
@@ -2614,13 +2633,49 @@ function initUpload() {
         const res = await fetch('/ingest/revel', { method: 'POST', body: formData });
         const data = await res.json();
         if (data.results) {
-          data.results.forEach((r, j) => {
-            const el = document.getElementById('ufile-' + (i+j));
+          /**
+           * MATCHED BY FILENAME, NEVER BY POSITION.
+           *
+           * The server groups the batch by venue and business date, emits the
+           * product mix before the operations report, handles hourly sales in a
+           * separate pass afterwards, and pushes any parse failure before all of
+           * it. So its results come back in ITS order and sometimes in a
+           * different COUNT -- and the old code read result[j] onto file[j].
+           *
+           * In the happy case every row says "Ingested" and nothing looks wrong.
+           * The moment one file fails, the failure is reported against a
+           * different file -- sending somebody to inspect a file that is
+           * perfectly fine. Exactly the shape of the "Quote Not Closed at line
+           * 4" bug: an accurate message pointing at the wrong thing.
+           */
+          data.results.forEach(r => {
+            const el = [...document.querySelectorAll('.file-item')]
+              .find(e => e.dataset.fname === r.filename);
             if (!el) return;
             const st = el.querySelector('.fstatus');
-            if (r.status === 'ingested') { st.textContent = 'Ingested'; st.className = 'fstatus fstatus-ok'; ok++; }
+            const warned = r.status === 'ingested' && /WARNING/.test(r.detail || '');
+            if (warned) { st.textContent = 'Ingested, check'; st.className = 'fstatus fstatus-warn'; warn++; }
+            else if (r.status === 'ingested') { st.textContent = 'Ingested'; st.className = 'fstatus fstatus-ok'; ok++; }
             else if (r.status === 'reconciliation_failed') { st.textContent = 'Recon failed'; st.className = 'fstatus fstatus-warn'; warn++; }
             else { st.textContent = r.status; st.className = 'fstatus fstatus-err'; err++; }
+
+            /**
+             * And SHOW the detail. The server has always computed one -- the
+             * reconciliation difference, the parse error, the row count -- and
+             * this page threw every one of them away, leaving a one-word status
+             * and nothing to act on.
+             */
+            let note = el.querySelector('.fdetail');
+            if (r.detail && (warned || r.status !== 'ingested')) {
+              if (!note) {
+                note = document.createElement('div');
+                note.className = 'fdetail';
+                el.appendChild(note);
+              }
+              note.textContent = r.detail;
+            } else if (note) {
+              note.remove();
+            }
           });
         }
       } catch (e) {
