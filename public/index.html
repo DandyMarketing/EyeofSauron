@@ -516,7 +516,55 @@
    * step, the finished ones dimmed and ticked, the live one carrying the dot
    * that was the whole animation before.
    */
-  .progress { display: flex; flex-direction: column; gap: 7px; padding: 2px 0; }
+  .progress { padding: 2px 0; }
+
+  /**
+   * The current step, and the only line visible when it is shut.
+   *
+   * The default disclosure triangle is removed and drawn as a chevron on the
+   * right instead: the marker's place is beside the dot, and two markers at the
+   * start of one line reads as a bullet with a stutter.
+   */
+  .progress-live {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .progress-live::-webkit-details-marker { display: none; }
+
+  .progress-now { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+
+  /* The affordance. A chevron alone gives no reason to press it. */
+  .progress-count {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .progress-count::after {
+    content: ' \25BE';
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+
+  .progress[open] .progress-count::after { transform: rotate(180deg); }
+
+  /* Everything it has done, including the live step, so the expanded view is
+     the whole story rather than the story minus the bit you were reading. */
+  .progress-steps {
+    display: flex; flex-direction: column; gap: 7px;
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border);
+  }
+
+  .progress[open] .progress-live { color: var(--text-muted); }
 
   .progress-step {
     display: flex;
@@ -916,7 +964,23 @@ modelSelect.addEventListener('change', () => {
     ? 'Switched mid-conversation — the next answer rebuilds the cache, so it costs a little more than usual.'
     : '';
 });
-const welcome = document.getElementById('welcome');
+/**
+ * The welcome screen, and a copy of it to put back.
+ *
+ * `let`, not `const` — addMessage() clears this the first time anything is said,
+ * and starting a new chat restores it. It was a const and the assignment threw
+ * "Assignment to constant variable", which is why New chat emptied the page and
+ * then stopped: chat.innerHTML had already been cleared, and nothing after the
+ * throw ever ran.
+ *
+ * The HTML is captured because a new chat should look like the app does when
+ * you open it — the four suggestion chips included. Replacing it with a
+ * sentence saying "New chat" is strictly less useful than the screen that
+ * offers you four questions. The chips use inline onclick, so they work again
+ * the moment the markup is back.
+ */
+let welcome = document.getElementById('welcome');
+const WELCOME_HTML = welcome ? welcome.outerHTML : '';
 
 const appShell = document.getElementById('app-shell');
 function syncViewport() {
@@ -1409,8 +1473,8 @@ function createProgress() {
   chat.scrollTop = chat.scrollHeight;
 
   const started = Date.now();
-  let list = null;
-  let elapsedEl = null;
+  const steps = [];
+  let box = null, live = null, liveText = null, done = null, count = null, elapsedEl = null;
 
   // Only after six seconds, and only while something is still running. On a
   // fast answer a timer is noise; on a slow one it is the difference between
@@ -1421,42 +1485,79 @@ function createProgress() {
     elapsedEl.textContent = secs >= 6 ? secs + 's' : '';
   }, 1000);
 
-  function ensureList() {
-    if (list) return;
+  /**
+   * ONE LINE BY DEFAULT: what it is doing NOW, with everything it has done
+   * behind a chevron.
+   *
+   * The first version listed every step as it happened, which on a twelve-round
+   * question grew into a wall of ticks taller than the answer — and the only
+   * line anybody was reading was the last one. Khai pointed at the pattern:
+   * show the current task, let the history drop down.
+   *
+   * A native <details> carries the open/closed state, the keyboard behaviour
+   * and the semantics for free. The live step lives in the <summary> so it is
+   * the line you see when it is shut.
+   */
+  function ensureBox() {
+    if (box) return;
     bubble.innerHTML = '';
-    list = document.createElement('div');
-    list.className = 'progress';
-    bubble.appendChild(list);
+
+    box = document.createElement('details');
+    box.className = 'progress';
+
+    const summary = document.createElement('summary');
+    summary.className = 'progress-live';
+    live = document.createElement('span');
+    live.className = 'dot';
+    liveText = document.createElement('span');
+    liveText.className = 'progress-now';
+    count = document.createElement('span');
+    count.className = 'progress-count';
+    summary.appendChild(live);
+    summary.appendChild(liveText);
+    summary.appendChild(count);
+
+    done = document.createElement('div');
+    done.className = 'progress-steps';
+
     elapsedEl = document.createElement('div');
     elapsedEl.className = 'progress-elapsed';
-    bubble.appendChild(elapsedEl);
+
+    box.appendChild(summary);
+    box.appendChild(done);
+    box.appendChild(elapsedEl);
+    bubble.appendChild(box);
+  }
+
+  function render() {
+    liveText.textContent = steps[steps.length - 1] || '';
+
+    /**
+     * The count is the whole affordance: a chevron on its own gives no reason
+     * to press it. "4 done" says there is something behind it. Hidden at one
+     * step, because "0 done" is noise on a question that ran nothing.
+     */
+    const earlier = steps.length - 1;
+    count.textContent = earlier > 0 ? earlier + ' done' : '';
+
+    done.innerHTML = steps.map(function (label, i) {
+      const isLive = i === steps.length - 1;
+      return '<div class="progress-step ' + (isLive ? 'live' : 'done') + '">' +
+        '<span class="dot"></span><span>' + escapeHtml(label) + '</span></div>';
+    }).join('');
   }
 
   return {
     /**
-     * Add one or more steps, marking everything before them finished.
-     *
-     * Every earlier step is settled by the arrival of a new one — that is what
-     * "the next thing started" means, and it avoids a separate completion event
-     * that could be lost and leave a line spinning forever.
+     * Add one or more steps. The last one is what is happening now; everything
+     * before it is settled by its arrival — which is what "the next thing
+     * started" means, and avoids a completion event that could be lost and
+     * leave a line spinning for ever.
      */
     step(labels) {
-      ensureList();
-      for (const el of list.querySelectorAll('.progress-step.live')) {
-        el.classList.remove('live');
-        el.classList.add('done');
-      }
-      for (const label of labels) {
-        const row = document.createElement('div');
-        row.className = 'progress-step live';
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        const text = document.createElement('span');
-        text.textContent = label;
-        row.appendChild(dot);
-        row.appendChild(text);
-        list.appendChild(row);
-      }
+      ensureBox();
+      for (const label of labels) steps.push(label);
+      render();
       chat.scrollTop = chat.scrollHeight;
     },
     remove() {
@@ -1647,11 +1748,12 @@ async function loadConversations() {
 function startNewChat() {
   conversationId = null;
   history = [];
-  chat.innerHTML = '';
-  welcome = null;
+  // Back to how the app looks when you open it, chips and all.
+  chat.innerHTML = WELCOME_HTML;
+  welcome = document.getElementById('welcome');
   setConvoTitle('New chat');
-  addMessage('assistant', 'New chat. What would you like to know?');
   historyPanel(false);
+  chat.scrollTop = 0;
 }
 
 /**
