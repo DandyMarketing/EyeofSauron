@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
-import { SessionCache } from './session-cache.js';
+import { SessionCache, SingleFlight } from './session-cache.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -67,6 +67,12 @@ export async function acceptTerms(
 const sessionCache = new SessionCache<SessionUser>();
 
 /**
+ * One validation per token at a time. See SingleFlight for why a cache alone
+ * was not enough: twelve simultaneous requests all miss an empty cache.
+ */
+const inflight = new SingleFlight<SessionUser | null>();
+
+/**
  * Drop cached sessions, so the next request re-reads from the database.
  *
  * Called with a user id after anything that changes what they may see; called
@@ -77,6 +83,19 @@ export function forgetSessions(userId?: string): void {
 }
 
 export async function validateSession(accessToken: string): Promise<SessionUser | null> {
+  const cached = sessionCache.get(accessToken);
+  if (cached) return cached;
+
+  /**
+   * COALESCED, so a burst of simultaneous requests costs one lookup.
+   *
+   * The cache is checked above and again inside, because between the two a
+   * concurrent caller may have finished and populated it.
+   */
+  return inflight.run(accessToken, () => loadSession(accessToken));
+}
+
+async function loadSession(accessToken: string): Promise<SessionUser | null> {
   const cached = sessionCache.get(accessToken);
   if (cached) return cached;
 

@@ -5,6 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
+import { injectConfig } from './lib/inject-config.js';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
@@ -2164,6 +2165,25 @@ app.use('/*', async (c, next) => {
   // has been constructed, so setting on c.res directly silently does nothing.
   c.res = new Response(c.res.body, c.res);
   c.res.headers.set('Cache-Control', 'no-cache, must-revalidate');
+});
+
+app.use('/*', async (c, next) => {
+  await next();
+
+  const type = c.res.headers.get('Content-Type') ?? '';
+  if (!type.includes('text/html')) return;
+
+  const html = await c.res.text();
+  const injected = injectConfig(html, {
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  });
+
+  // Rebuilt rather than mutated: headers on a constructed Response are
+  // immutable, and the length has changed.
+  const headers = new Headers(c.res.headers);
+  headers.delete('Content-Length');
+  c.res = new Response(injected, { status: c.res.status, headers });
 });
 
 app.use('/*', serveStatic({ root: './public' }));

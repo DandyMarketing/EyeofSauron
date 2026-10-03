@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SessionCache, SESSION_TTL_MS, MAX_ENTRIES } from './session-cache.js';
+import { SessionCache, SingleFlight, SESSION_TTL_MS, MAX_ENTRIES } from './session-cache.js';
 
 interface U { id: string; isOwner?: boolean }
 
@@ -130,4 +130,75 @@ test('the TTL is short enough to be defensible', () => {
   // drift upward quietly.
   assert.ok(SESSION_TTL_MS <= 60_000, `TTL of ${SESSION_TTL_MS}ms is too long for an authorisation cache`);
   assert.ok(SESSION_TTL_MS >= 5_000, `TTL of ${SESSION_TTL_MS}ms is too short to be worth the risk`);
+});
+
+// --- coalescing ---------------------------------------------------------
+//
+// The cache alone only helps the SECOND caller, and the admin page's twelve
+// requests are simultaneous: they all miss an empty cache in the same
+// millisecond. Measured in production, one auth round trip costs about 275ms,
+// so twelve at once is both twelve times the work and a burst against one
+// endpoint. These assert that twelve become one.
+
+test('twelve simultaneous callers cost ONE lookup', async () => {
+  const flight = new SingleFlight<string>();
+  let calls = 0;
+  let release: (v: string) => void = () => {};
+  const work = () => {
+    calls++;
+    return new Promise<string>(r => { release = r; });
+  };
+
+  const all = Array.from({ length: 12 }, () => flight.run('same-token', work));
+  assert.equal(calls, 1, `twelve callers triggered ${calls} lookups`);
+
+  release('the-session');
+  const results = await Promise.all(all);
+  assert.deepEqual(results, Array(12).fill('the-session'), 'every caller must get the same answer');
+});
+
+test('different tokens are not coalesced together', async () => {
+  // Coalescing on the wrong key would hand one person another person's session,
+  // which is the only way this class could be dangerous.
+  const flight = new SingleFlight<string>();
+  const a = flight.run('token-a', async () => 'alice');
+  const b = flight.run('token-b', async () => 'bob');
+  assert.deepEqual(await Promise.all([a, b]), ['alice', 'bob']);
+});
+
+test('a settled call is not held, so the next caller does fresh work', async () => {
+  const flight = new SingleFlight<number>();
+  let calls = 0;
+  const work = async () => ++calls;
+
+  assert.equal(await flight.run('t', work), 1);
+  assert.equal(await flight.run('t', work), 2, 'the second call should not have been served the first result');
+  assert.equal(flight.pending, 0, 'nothing should still be in flight');
+});
+
+test('A FAILURE IS NOT CACHED FOR EVER', async () => {
+  /**
+   * The failure mode that matters. A rejected promise left in the map would be
+   * handed to every future caller, turning one transient Supabase error into a
+   * permanent lockout — with nothing in any log to explain why signing in
+   * stopped working.
+   */
+  const flight = new SingleFlight<string>();
+  let attempt = 0;
+  const work = async () => {
+    attempt++;
+    if (attempt === 1) throw new Error('supabase had a moment');
+    return 'recovered';
+  };
+
+  await assert.rejects(() => flight.run('t', work), /supabase had a moment/);
+  assert.equal(flight.pending, 0, 'the failed call must not still be in flight');
+  assert.equal(await flight.run('t', work), 'recovered', 'the next caller must get a fresh attempt');
+});
+
+test('every caller in a failed burst sees the error, and none hangs', async () => {
+  const flight = new SingleFlight<string>();
+  const work = async () => { throw new Error('boom'); };
+  const all = Array.from({ length: 5 }, () => flight.run('t', work).catch(e => e.message));
+  assert.deepEqual(await Promise.all(all), Array(5).fill('boom'));
 });

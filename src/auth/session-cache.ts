@@ -116,3 +116,50 @@ export class SessionCache<T extends CacheableSession> {
     return this.entries.size;
   }
 }
+
+/**
+ * One in-flight call per key, however many callers ask at once.
+ *
+ * WHY THIS IS NEEDED, and it is a flaw in the cache above rather than an extra.
+ * A cache only helps the SECOND caller. The admin page fires twelve
+ * authenticated requests SIMULTANEOUSLY, so all twelve miss an empty cache in
+ * the same millisecond, all twelve call Supabase, and the first answer arrives
+ * long after the other eleven have already been asked. The cache would then
+ * have served only a page load that happened within thirty seconds of another
+ * one — which is not the case anybody complained about.
+ *
+ * Measured against production on 3 Oct 2026: `/health`, which touches no
+ * Supabase, answers in 384ms; a request carrying a token, which forces one
+ * `getUser`, answers in 659ms. **One auth round trip costs about 275ms**, and
+ * that cost is Railway-to-Supabase, so it is the same from Singapore as from
+ * anywhere else. Twelve of them at once is both twelve times the work and a
+ * burst against one endpoint.
+ *
+ * Coalesced, the first caller does the work and the other eleven await the
+ * same promise. They all get the same answer at the same moment, which is also
+ * the correct answer: they were all asking about the same token.
+ *
+ * THE ENTRY IS REMOVED WHEN THE PROMISE SETTLES, success or failure. A rejected
+ * promise left in the map would be handed to every future caller for ever —
+ * one transient Supabase error becoming a permanent outage, which is the exact
+ * failure this codebase keeps writing down.
+ */
+export class SingleFlight<T> {
+  private inflight = new Map<string, Promise<T>>();
+
+  run(key: string, work: () => Promise<T>): Promise<T> {
+    const existing = this.inflight.get(key);
+    if (existing) return existing;
+
+    const started = work().finally(() => {
+      this.inflight.delete(key);
+    });
+    this.inflight.set(key, started);
+    return started;
+  }
+
+  /** For tests and for a diagnostic line; never for a decision. */
+  get pending(): number {
+    return this.inflight.size;
+  }
+}

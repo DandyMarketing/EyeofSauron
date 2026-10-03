@@ -660,6 +660,46 @@ mapped", which is the most misleading answer available.
 came entirely from reading code, because nothing measured anything. The next
 report should start with a lookup instead.
 
+**The cache as first shipped was a half-fix, and measuring production is what
+showed it.** Against the live app: `/health`, which touches no Supabase,
+answers in 384ms; the same request carrying a token, which forces one
+`getUser`, answers in 659ms. **One auth round trip costs about 275ms**, and it
+is Railway-to-Supabase, so it is the same from Singapore as from anywhere.
+
+A cache only helps the SECOND caller. The admin page's twelve requests are
+SIMULTANEOUS — they all miss an empty cache in the same millisecond, all twelve
+call Supabase, and the first answer arrives long after the other eleven have
+already been asked. As shipped, the cache would only have helped a page load
+that happened within thirty seconds of another one, which is not the case
+anybody complained about. `SingleFlight` coalesces them: the first caller does
+the work, the other eleven await the same promise. The entry is removed when
+the promise settles either way, because a rejected promise left in the map
+would be handed to every future caller — one transient Supabase error becoming
+a permanent lockout.
+
+**And the config fetch was removed entirely rather than parallelised.** It was
+a whole round trip at the front of every page for two values that are public by
+design and change only when the project does. It is now substituted into the
+HTML by the server, with the fetch kept as a fallback so a failed substitution
+costs a round trip instead of authentication. Measured after: login.html makes
+**one** subresource request — the auth client, started at 24ms by its
+modulepreload, while the document is still parsing.
+
+**What is deliberately NOT done.** The last serial link is that the API calls
+need a token, which needs the client. It could be broken by reading the session
+out of localStorage before the client loads — and it is not worth it: the
+vendored bundle is cached for a day, so on any visit after the first it arrives
+from browser cache in single-digit milliseconds and there is nothing to save.
+The cost would be a coupling to Supabase's private storage format, paid every
+day, for a saving that exists only on the first load of the day.
+
+**Three hours of this were wasted on a stale server.** A test kept showing the
+injection not happening; the middleware was correct and the local server had
+failed to restart with `EADDRINUSE`, so every check was reading the old build.
+The error was in a log file nobody looked at. **When a verification keeps
+failing in a way the code cannot explain, confirm what is actually running
+before debugging what you think is.**
+
 ### 5.8 Four layout bugs that only existed on a phone
 
 Reported from a real phone on 3 Oct 2026, with screenshots, and every one

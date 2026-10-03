@@ -155,11 +155,31 @@ for (const page of authPages) {
   test(`${page}: loads the auth client without a serial round trip in front of it`, () => {
     const html = readFileSync(`public/${page}`, 'utf8');
 
+    /**
+     * The config must be resolved IN THE SAME Promise.all as the client import,
+     * whether it comes from the inlined value or the fetch behind it. What is
+     * forbidden is awaiting it first — that is the round trip at the front of
+     * the chain that nothing else could start behind.
+     */
     assert.match(
       html,
-      /Promise\.all\(\[\s*\n\s*fetch\('\/api\/config'\)/,
-      `public/${page} fetches /api/config serially — put it in a Promise.all with the client import`,
+      /Promise\.all\(\[\s*\n\s*(window\.__SAURON_CONFIG__ \?\? )?fetch\('\/api\/config'\)/,
+      `public/${page} resolves /api/config outside the Promise.all with the client import — that is a serial round trip`,
     );
+
+    /**
+     * And the config should be inlined, so in the normal case there is no
+     * request at all. The fetch above is the fallback, not the path.
+     */
+    assert.ok(
+      html.includes('<!--SAURON_CONFIG-->'),
+      `public/${page} has no <!--SAURON_CONFIG--> marker — the server cannot inline the config, so every load pays a round trip for two public strings`,
+    );
+    assert.ok(
+      html.includes('window.__SAURON_CONFIG__'),
+      `public/${page} never reads the inlined config, so the marker is doing nothing`,
+    );
+
     assert.ok(
       html.includes('rel="modulepreload" href="/vendor/supabase.js"'),
       `public/${page} has no modulepreload for /vendor/supabase.js — the download then waits for the whole document to parse`,
