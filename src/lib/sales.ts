@@ -104,3 +104,53 @@ export function grossSalesOf(row: SalesRow): number | null {
   if (row.net_sales === null || row.net_sales === undefined) return null;
   return round2(n(row.net_sales) + totalDiscountsOf(row));
 }
+
+/**
+ * Every sales figure for one day, in the one shape every tool must return.
+ *
+ * WHY THIS EXISTS RATHER THAN FOUR CALLS AT EACH SITE. `query_sales` had two
+ * paths — one date, and a date range — and only the range used the functions
+ * above. The single-date path spread the warehouse row straight out, so the
+ * model received the COLUMN named `gross_sales`, which holds food plus beverage
+ * with no service charge, while the tool's own description told it that field
+ * includes service charge.
+ *
+ * What that produced, asked in front of Khai about Neon Pigeon on 29 Sep 2026:
+ *
+ *     Net sales    $3,759.26
+ *     Gross sales  $3,639.00     <- net larger than gross, every day, every venue
+ *
+ * Neither figure is wrong; they are two different bases, and the real gross
+ * ($3,980.76 — verified against that day's own GROSS PRODUCT SALES total)
+ * never appeared at all. The same question asked as a one-DAY RANGE came back
+ * correct, which is the worse half: two paths answering one question and
+ * disagreeing.
+ *
+ * So the block is built once here. A new tool returning day figures spreads
+ * this and cannot reintroduce the divergence by forgetting a call.
+ */
+export interface SalesFigures {
+  /** Food + beverage + service charge. The business's gross. */
+  gross_sales: number;
+  /** Food + beverage alone. The basis for every cost and per-head figure. */
+  food_bev_sales: number;
+  /** Gross less discounts. Revel's own "Total Sales". */
+  net_sales: number;
+  /** Implied, not stored. Null when there is no Revel figure to imply it from. */
+  service_charge: number | null;
+  /** Item + order. Coupons are excluded — see the note at the top of this file. */
+  total_discounts: number;
+}
+
+export function salesFiguresOf(row: SalesRow): SalesFigures {
+  return {
+    // Falls back to food+bev when there is no net sales to derive gross from,
+    // which is a Monday-board row. Reporting food+bev as gross understates it
+    // by the service charge; reporting null would lose the day entirely.
+    gross_sales: grossSalesOf(row) ?? foodAndBevSalesOf(row),
+    food_bev_sales: foodAndBevSalesOf(row),
+    net_sales: netSalesOf(row),
+    service_charge: serviceChargeOf(row),
+    total_discounts: totalDiscountsOf(row),
+  };
+}

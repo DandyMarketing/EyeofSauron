@@ -234,6 +234,64 @@ pointing at the wrong thing — "line 4" that was line four of a section, and a
 failure attributed to the file above it. A wrong pointer is worse than no
 pointer, because it is acted on.
 
+### 1.9 Net sales larger than gross sales, on every day and every venue
+**Symptom.** Asked "what were Neon Pigeon's sales on 29 September and covers",
+Sauron answered, in a table, in front of Khai:
+
+```
+Net sales      $3,759.26
+Gross sales    $3,639.00
+```
+
+Net larger than gross is not a thing that happens in a restaurant.
+**Root cause.** `daily_operations.gross_sales` does not hold what its name says.
+The ingest writes Revel's SALES BY CLASS total into it — food plus beverage,
+**no service charge** — while `net_sales` holds Revel's "Total Sales", which is
+food plus beverage **plus service charge, less discounts**. Two different bases
+in two adjacent columns. `src/lib/sales.ts` has documented this trap since
+BUILD_LOG 2.4 and exists precisely to resolve it.
+
+`query_sales` has two paths. The **date-range** path used those functions
+correctly. The **single-date** path spread the warehouse row straight out with
+`...data`, so the model received the raw column — while the tool's own
+description told it `gross_sales` includes the service charge. The real gross,
+$3,980.76, was never returned at all.
+**Fix.** `salesFiguresOf(row)` in `src/lib/sales.ts` builds the whole block —
+gross, food & bev, net, service charge, discounts — and **both paths now spread
+it**. Every derived figure is pinned in a test against a total stated separately
+in that day's own report: gross $3,980.76 against GROSS PRODUCT SALES > Total,
+service charge $341.76 against Taxed Service Fee, discounts $221.50 against
+DISCOUNTS > Total. A second test fails if any handler assembles the block by
+hand again.
+**Recurs?** **Every customer.** The column name will mislead the next person to
+read it, and the next tool that returns day figures.
+
+**Nothing was wrong with the formulas.** They were right, documented, and tested
+— in a file written specifically to stop this. The defect was one call site that
+did not use them, which no amount of care in `sales.ts` could prevent. That is
+why the fix is a single shared block rather than a corrected call: **a rule
+enforced by remembering is a rule that holds until the second code path.**
+
+**And the two paths disagreed with each other**, which is worse than both being
+wrong. Asking about one day and asking about a one-day range returned different
+figures for the same question, so whichever a reader happened to use decided
+whether they got a sensible answer.
+
+### 1.10 A table drawn with spaces, in a code block
+**Symptom.** The same answer's table arrived as fixed-width ASCII with a row of
+dashes under the header, inside a code block.
+**Root cause.** The system prompt said "write it as a markdown table; the app
+renders it properly" and the renderer does support them — but the prompt never
+said what one looks like, and never ruled out the ASCII alternative.
+**Why it matters.** It looks correct in the model's output and on a desktop. It
+is read on a phone between services, where fixed-width text cannot reflow: the
+table overflows sideways and the reader scrolls a column at a time. The
+WhatsApp image export bakes that in permanently.
+**Fix.** The prompt now names the pipe form, the separator row, and forbids the
+code-block version with the reason attached.
+**Recurs?** **Every customer.** An instruction that describes the goal without
+naming the form leaves the form to the model.
+
 ---
 
 ## 2. Data that is valid but wrong

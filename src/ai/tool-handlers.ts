@@ -8,7 +8,7 @@ import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
 import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
-import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf } from '../lib/sales.js';
+import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
@@ -1215,13 +1215,38 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     // Covers come from SevenRooms, revenue from Revel. See src/lib/covers.ts.
     const coversMap = await getCovers(venueId, dateFilter.single, dateFilter.single);
     const c = coversMap.get(dateFilter.single);
-    const gross = Number(data.gross_sales ?? 0);
+    const gross = foodAndBevSalesOf(data);
 
     const closedToday = isClosedDay(data);
     return JSON.stringify({
       venue: input.venue_slug,
       date: dateLabel(dateFilter),
       ...data,
+
+      /**
+       * THE DERIVED SALES FIGURES, OVERRIDING THE RAW COLUMNS ABOVE.
+       *
+       * `...data` spreads the warehouse row, and the COLUMN called
+       * `gross_sales` does not hold what that name means to this business: the
+       * ingest writes Revel's SALES BY CLASS total into it, which is food plus
+       * beverage with NO service charge. Gross as the business defines it —
+       * and as this tool's own description defines it — is that plus service
+       * charge, which `grossSalesOf()` derives as net sales plus discounts.
+       *
+       * Unfixed, a single-day question reported `gross_sales: 3639` beside
+       * `net_sales: 3759.26`: NET LARGER THAN GROSS, on every day, for every
+       * venue. It is not a data error — they are two different bases — but it
+       * reads as one, and the real gross never appeared at all. Neon Pigeon,
+       * 29 Sep 2026, in front of Khai.
+       *
+       * The DATE-RANGE path below has always done this correctly. The two
+       * paths answer the same question and disagreed, which is the worst of
+       * both: asking for one day and asking for a one-day range gave different
+       * figures. Same shape as the single/plural metric names in Meta — a name
+       * that looks like the thing it is not.
+       */
+      ...salesFiguresOf(data),
+
       closed: closedToday,
       closed_note: closedToday
         ? 'The venue was CLOSED on this date — zero sales and zero transactions. Report it as a closure, not as poor trading, and leave it out of averages.'
@@ -1314,11 +1339,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     return {
       date: d.business_date,
       closed: dayClosed || undefined,
-      gross_sales: grossSalesOf(d) ?? foodAndBevSalesOf(d),
-      food_bev_sales: foodAndBevSalesOf(d),
-      net_sales: netSalesOf(d),
-      service_charge: serviceChargeOf(d),
-      total_discounts: Number(d.item_discounts) + Number(d.order_discounts),
+      ...salesFiguresOf(d),
       covers: dayCovers,
       covers_by_meal_period: c?.by_shift ?? null,
       walk_in_covers: c?.walk_in_covers ?? null,
