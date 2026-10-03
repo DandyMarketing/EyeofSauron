@@ -1714,6 +1714,18 @@ async function loadConversations() {
     '</div>';
   }).join('');
 
+  /**
+   * Keep the bar in step with the list.
+   *
+   * The bar is set optimistically from the question the moment an answer comes
+   * back, because waiting would leave it saying "New chat" over a conversation
+   * that plainly is not new. The real title is written a second later by the
+   * cheap model, so the two disagree until something reloads — this is that
+   * something, and it costs nothing because the list has just been fetched.
+   */
+  const mine = items.find(function (c) { return c.id === conversationId; });
+  if (mine && mine.title) setConvoTitle(mine.title);
+
   list.querySelectorAll('.hp-item').forEach(function (row) {
     const id = row.dataset.id;
     row.querySelector('.hp-open').addEventListener('click', function () { openConversation(id); });

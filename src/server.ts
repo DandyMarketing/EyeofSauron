@@ -24,7 +24,7 @@ import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/da
 import { queryTools } from './ai/tools.js';
 import {
   createConversation, appendTurn, listConversations, readConversation,
-  renameConversation, deleteConversation,
+  renameConversation, deleteConversation, titleConversation,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { modelFor } from './ai/model-policy.js';
@@ -465,9 +465,24 @@ async function saveTurn(
   result: { answer?: string; toolCalls?: any[]; charts?: any },
 ): Promise<string | null> {
   try {
+    const isNew = !conversationId;
     const id = conversationId || await createConversation(user.id, question);
     if (!id) return null;
     await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null);
+
+    /**
+     * NOT AWAITED. The row already has a usable title — the first sixty
+     * characters of the question — and a better one is worth a second of a
+     * cheap model's time but not a second of the person's. This runs after the
+     * response has gone, and its failure mode is that the fallback stands.
+     *
+     * Only on a new thread: re-titling on every message would rename a
+     * conversation out from under somebody as it went on, and would undo a
+     * rename they had done by hand.
+     */
+    if (isNew) {
+      void titleConversation(id, question).catch(() => { /* logged inside */ });
+    }
     return id;
   } catch (e: any) {
     console.error(`[conversations] could not save a turn: ${e?.message ?? e}`);
