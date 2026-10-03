@@ -600,6 +600,66 @@ with the whole suite green. `src/frontend/pages.test.ts` now compiles every
 page's inline script without running it, and carries a test proving it still
 rejects broken code.
 
+### 5.9 The admin page was slow because authentication was, forty-eight times
+
+Reported as "admin.html loads very slow". The page is 24.6 KB gzipped and makes
+eleven API calls, so the obvious suspects were the payload and the request
+count. Neither was it.
+
+**`validateSession()` made FOUR serial round trips to Supabase** — `getUser`,
+then roles, then profile, then terms acceptances — and it runs on **every
+authenticated request** through `requireAuth`. Loading the admin console issues
+twelve of them. That is **forty-eight sequential network calls to answer "who is
+this" twelve times about the same person**, before a single admin query had run.
+
+Invisible from both ends, which is why it lasted: the browser sees twelve slow
+requests and the server said nothing at all.
+
+Three fixes, in descending order of effect:
+
+1. **A thirty-second session cache**, keyed on the access token. Twelve
+   validations become one. It is an authorisation cache, so the trade is stated
+   rather than buried: every path in this process that grants or revokes a role,
+   deletes a user or records an acceptance calls `forgetSessions()`, making the
+   staleness window **zero for anything the app itself does**. Only a change made
+   directly in the Supabase dashboard can be stale, and only for half a minute.
+   It caches an answer and never a refusal, so a transient Supabase error can
+   never be held as a lockout. It lives in its own file because the rules are
+   security-sensitive and `session.ts` cannot be imported by a test without
+   credentials.
+2. **The three remaining reads in parallel.** They are all keyed on the same
+   user id and none feeds another; they were sequential for no reason. Four
+   round trips become two on every cache miss.
+3. **The page's second wave started with its first.** `render()` kicked off the
+   account map, fee acknowledgements and StaffAny sections only after all seven
+   of the first batch had returned — so the slowest of the seven gated three
+   requests that depend on none of them.
+
+**And a correctness bug found while reading the slow query.**
+`/admin/api/account-map` computed "which ledger accounts are unmapped" by
+pulling every non-summary row of `profit_and_loss` **with no paging**. PostgREST
+caps a response at 1,000 rows; three venues over two years is several thousand.
+So any account appearing only past the first page was reported as mapped when
+nobody had mapped it — **a list whose entire purpose is to say what still needs
+attention was quietly short**. Migration 049 adds a view that does the DISTINCT
+in Postgres, which is both correct and a few dozen rows instead of a thousand.
+
+This is the fifth time the 1,000-row cap has cost this project data. The comment
+on `fetchAccountMap()` says four. **Recurs? Every customer, and it will keep
+recurring until a read without `.range()` is treated as a defect on sight.**
+
+Two things worth carrying forward. The view is `security_invoker = true`:
+without it a Postgres view runs as its owner and would have been a hole straight
+through the RLS on `profit_and_loss`, and `rls_audit()` does not inspect views.
+And the handler **falls back to the old query if the view is missing**, loudly,
+because a deploy lands the moment a branch is pushed and a migration is run by a
+person afterwards — in between, an empty unmapped list reads as "everything is
+mapped", which is the most misleading answer available.
+
+**A `[slow]` log line now reports any request over 400ms.** The diagnosis above
+came entirely from reading code, because nothing measured anything. The next
+report should start with a lookup instead.
+
 ### 5.8 Four layout bugs that only existed on a phone
 
 Reported from a real phone on 3 Oct 2026, with screenshots, and every one

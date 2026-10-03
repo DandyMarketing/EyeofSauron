@@ -596,6 +596,17 @@ let currentUserId = null;
     (err) => ({ err }),
   );
 
+  /**
+   * The second wave, started now rather than after render().
+   *
+   * None of these depends on the seven above or on /api/me — they are owner-
+   * gated server-side like everything else here. Started together, the whole
+   * page is one round of requests instead of two.
+   */
+  prefetch('/admin/api/account-map');
+  prefetch('/admin/api/fee-acknowledgements');
+  prefetch('/admin/api/staffany/sections');
+
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
   if (!meRes.ok) {
     window.location.href = '/login.html';
@@ -627,6 +638,38 @@ let currentUserId = null;
   applyAll(result.d);
 })();
 
+/**
+ * Requests started BEFORE render, so they are in flight rather than queued
+ * behind it.
+ *
+ * The page loads in two waves. Seven calls go out together, and then render()
+ * draws the sections — and only then does it kick off the account map, the fee
+ * acknowledgements and the StaffAny sections. Those three need nothing from the
+ * first seven; they were second simply because that is where the code that
+ * draws their panels happens to live. So the slowest of the seven gated three
+ * requests that could have run beside it.
+ *
+ * ONE SHOT, deliberately. loadAccountMap() is also called to REFRESH after an
+ * edit, and handing it the result of a fetch made before that edit would show
+ * the row the user just changed, unchanged. Taking an entry removes it, so the
+ * first call gets the head start and every later call fetches fresh.
+ */
+const prefetched = new Map();
+
+function prefetch(path) {
+  // Errors are captured as values: an unhandled rejection sitting in a map
+  // until somebody awaits it is reported by the browser as an error nobody
+  // caused, seconds before the code that would have handled it runs.
+  prefetched.set(path, api('GET', path).catch(e => ({ error: String((e && e.message) || e) })));
+}
+
+function take(path) {
+  const started = prefetched.get(path);
+  if (!started) return api('GET', path);
+  prefetched.delete(path);
+  return started;
+}
+
 async function api(method, path, body) {
   const opts = {
     method,
@@ -648,7 +691,7 @@ async function loadAccountMap() {
   const body = document.getElementById('map-body');
   if (!body) return;
 
-  const data = await api('GET', '/admin/api/account-map');
+  const data = await take('/admin/api/account-map');
   if (data.error) { body.innerHTML = '<div class="error-msg">' + esc(data.error) + '</div>'; return; }
 
   const venueName = {};
@@ -717,7 +760,7 @@ async function loadFeeAcks() {
   const body = document.getElementById('fee-body');
   if (!body) return;
 
-  const data = await api('GET', '/admin/api/fee-acknowledgements');
+  const data = await take('/admin/api/fee-acknowledgements');
   if (data.error) { body.innerHTML = '<div class="error-msg">' + esc(data.error) + '</div>'; return; }
 
   const venueOpts = venues.map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
@@ -1380,7 +1423,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
   async function loadStaffAnySections() {
     const out = document.getElementById('staffany-sections');
-    const res = await api('GET', '/admin/api/staffany/sections');
+    const res = await take('/admin/api/staffany/sections');
     const list = res.sections || [];
 
     if (res.error) {

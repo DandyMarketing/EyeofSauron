@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
+import { SessionCache } from './session-cache.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -51,22 +52,61 @@ export async function acceptTerms(
       user_agent: meta.userAgent ?? null,
     });
   if (error) throw new Error(error.message);
+  /**
+   * Immediately, or the person accepts the terms and the very next request
+   * still refuses them — for up to thirty seconds, with no way to tell why.
+   * The acceptance IS the thing the cached session was gating on.
+   */
+  forgetSessions(userId);
+}
+
+/**
+ * The session cache. See src/auth/session-cache.ts for what is being traded,
+ * and session-cache.test.ts for the rules that are asserted.
+ */
+const sessionCache = new SessionCache<SessionUser>();
+
+/**
+ * Drop cached sessions, so the next request re-reads from the database.
+ *
+ * Called with a user id after anything that changes what they may see; called
+ * with nothing after a change that could affect several people at once.
+ */
+export function forgetSessions(userId?: string): void {
+  sessionCache.forget(userId);
 }
 
 export async function validateSession(accessToken: string): Promise<SessionUser | null> {
+  const cached = sessionCache.get(accessToken);
+  if (cached) return cached;
+
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
-  if (error || !user) return null;
+  if (error || !user) {
+    // A token that no longer validates must not leave an entry behind.
+    sessionCache.drop(accessToken);
+    return null;
+  }
 
-  const { data: roles } = await supabaseAdmin
-    .from('user_venue_roles')
-    .select('venue_id, role, venues(slug)')
-    .eq('user_id', user.id);
-
-  const { data: profile } = await supabaseAdmin
-    .from('profiles')
-    .select('full_name')
-    .eq('id', user.id)
-    .maybeSingle();
+  /**
+   * THE THREE READS AT ONCE. They were sequential, and nothing about them is
+   * ordered: all three are keyed on the same user id and none feeds another.
+   * Three round trips became one, on every request that misses the cache.
+   */
+  const [{ data: roles }, { data: profile }, termsResult] = await Promise.all([
+    supabaseAdmin
+      .from('user_venue_roles')
+      .select('venue_id, role, venues(slug)')
+      .eq('user_id', user.id),
+    supabaseAdmin
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('terms_acceptances')
+      .select('terms_version, accepted_at')
+      .eq('user_id', user.id),
+  ]);
 
   const isOwner = (roles ?? []).some((r: any) => r.role === 'owner');
 
@@ -79,10 +119,7 @@ export async function validateSession(accessToken: string): Promise<SessionUser 
    * the same reason enforceDomainScope() sits at the top of handleToolCall
    * rather than inside each tool.
    */
-  const { data: acceptances, error: termsError } = await supabaseAdmin
-    .from('terms_acceptances')
-    .select('terms_version, accepted_at')
-    .eq('user_id', user.id);
+  const { data: acceptances, error: termsError } = termsResult;
 
   /**
    * "CANNOT CHECK" AND "HAS NOT ACCEPTED" ARE DIFFERENT, and conflating them
@@ -109,7 +146,7 @@ export async function validateSession(accessToken: string): Promise<SessionUser 
     );
   }
 
-  return {
+  const session: SessionUser = {
     id: user.id,
     email: user.email!,
     fullName: profile?.full_name ?? '',
@@ -121,6 +158,17 @@ export async function validateSession(accessToken: string): Promise<SessionUser 
     })),
     isOwner,
   };
+
+  /**
+   * NOT CACHED WHEN THE TERMS READ FAILED. That path deliberately lets the
+   * person through so a missing migration cannot lock the company out — a
+   * decision about a degraded state, not a fact about the user. Storing it
+   * would hold the degraded answer for half a minute after the table came
+   * back, and make a fault look intermittent.
+   */
+  if (!termsError) sessionCache.set(accessToken, session);
+
+  return session;
 }
 
 export async function listUsers() {
@@ -228,6 +276,10 @@ export async function assignRole(userId: string, venueId: string, role: string) 
     .select()
     .single();
   if (error) throw new Error(error.message);
+  // The grant changes what this person may see, so their cached session is
+  // wrong from this moment. Without this the new venue would appear up to
+  // thirty seconds late, and a REVOKED one would keep working that long.
+  forgetSessions(userId);
   return data;
 }
 
@@ -237,6 +289,13 @@ export async function removeRole(roleId: string) {
     .delete()
     .eq('id', roleId);
   if (error) throw new Error(error.message);
+  /**
+   * Everybody, because the row is identified by its OWN id and we never learn
+   * whose it was. Clearing the whole cache costs one re-validation per active
+   * user and is the only answer that cannot be wrong; holding a revoked role
+   * for half a minute is not a trade worth making to save a lookup.
+   */
+  forgetSessions();
 }
 
 export async function deleteUser(userId: string) {
@@ -245,6 +304,7 @@ export async function deleteUser(userId: string) {
   // Auth user may not exist for seeded/test profiles — ignore that error
   const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
   if (error && !error.message.includes('not found')) throw new Error(error.message);
+  forgetSessions(userId);
 }
 
 export async function resetUserPassword(userId: string, newPassword: string) {

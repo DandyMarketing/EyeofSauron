@@ -80,6 +80,33 @@ const app = new Hono();
  */
 app.use('*', compress());
 
+/**
+ * How long a slow request actually took, and which one it was.
+ *
+ * WHY. "The admin page loads slowly" took an afternoon to diagnose from the
+ * code alone, and the answer — validateSession making four serial round trips
+ * on each of twelve requests — was invisible from both ends: the browser sees
+ * twelve slow requests, and the server said nothing at all. One line per slow
+ * request turns the next report into a lookup.
+ *
+ * ONLY WHAT IS SLOW. A line per request would bury the ingest logs that
+ * actually matter, so the threshold is 400ms: fast enough that a genuinely
+ * sluggish endpoint always appears, slow enough that a healthy page load is
+ * silent. A page that is slow because of TWELVE requests at 300ms each would
+ * not trip it — which is why the count matters as much as the duration, and is
+ * why the fix was a cache rather than a faster query.
+ */
+const SLOW_REQUEST_MS = 400;
+
+app.use('*', async (c, next) => {
+  const started = Date.now();
+  await next();
+  const ms = Date.now() - started;
+  if (ms >= SLOW_REQUEST_MS) {
+    console.warn(`[slow] ${c.req.method} ${c.req.path} — ${ms}ms (status ${c.res.status})`);
+  }
+});
+
 app.use('/ask', cors());
 app.use('/ask/stream', cors());
 app.use('/api/*', cors());
@@ -1271,12 +1298,71 @@ app.get('/admin/api/account-map', async (c) => {
     supabaseAdmin.from('venues').select('id, name, slug'),
   ]);
 
-  // Every account the ledger actually holds, so "missing from the map" can be
-  // computed rather than assumed.
-  const { data: ledger } = await supabaseAdmin
-    .from('profit_and_loss')
-    .select('venue_id, account_name')
-    .eq('is_summary', false);
+  /**
+   * Every account the ledger actually holds, so "missing from the map" can be
+   * computed rather than assumed.
+   *
+   * READ FROM A VIEW THAT DOES THE DISTINCT (migration 049), because the
+   * obvious version of this was silently wrong. It selected from
+   * profit_and_loss directly with no paging, and PostgREST caps a response at
+   * 1,000 rows — three venues over two years is several thousand, so any
+   * account appearing only outside that first page was reported as MAPPED when
+   * nobody had mapped it. A list whose whole job is to say what still needs
+   * attention was quietly short, and nothing said so.
+   *
+   * Same cap as BUILD_LOG 1.x, and as the comment on fetchAccountMap() that
+   * says it has cost this project data four times.
+   */
+  let { data: ledger, error: ledgerError } = await supabaseAdmin
+    .from('profit_and_loss_accounts')
+    .select('venue_id, account_name');
+
+  /**
+   * FALLS BACK IF THE VIEW IS NOT THERE YET, loudly.
+   *
+   * A deploy reaches Railway the moment the branch is pushed; a migration is
+   * run by a person, afterwards. Between the two this view does not exist, and
+   * without this the account map would show an empty "unmapped" list — which
+   * reads as "everything is mapped" and is the most misleading possible answer.
+   * Same rule as warnSchema() and the terms gate: a degraded feature beats a
+   * wrong one presented as fine.
+   *
+   * The fallback is the OLD query, truncation and all, so the page keeps
+   * working until migration 049 is run. It says so every time, because an
+   * unapplied migration that nothing reports is how this project has been
+   * caught before.
+   */
+  if (ledgerError) {
+    console.error(
+      `[account-map] profit_and_loss_accounts is unavailable (${ledgerError.message}). ` +
+      'Run migration 049. Falling back to a direct read, which PostgREST caps at ' +
+      '1,000 rows — the unmapped list below may be INCOMPLETE until then.',
+    );
+    const fallback = await supabaseAdmin
+      .from('profit_and_loss')
+      .select('venue_id, account_name')
+      .eq('is_summary', false);
+    ledger = fallback.data;
+  }
+
+  /**
+   * Say so if either read came back at the cap.
+   *
+   * The view removes the truncation we know about; it does not make the cap go
+   * away. Both of these answers are small today — about sixty accounts a venue
+   * — and both grow with customers, and a truncated read here does not look
+   * like an error: it produces a SHORTER list of unmapped accounts, which reads
+   * as good news. This is the cheapest possible way to make that visible, and
+   * when it fires the fix is a paging loop like fetchAccountMap's.
+   */
+  for (const [name, rows] of [['account_map', mappings], ['ledger accounts', ledger]] as const) {
+    if ((rows?.length ?? 0) >= 1000) {
+      console.warn(
+        `[account-map] ${name} came back with ${rows!.length} rows — at or over PostgREST's ` +
+        '1,000-row cap. The unmapped list below is incomplete. Add a paging loop.',
+      );
+    }
+  }
 
   const mapped = new Set((mappings ?? []).map(m => `${m.venue_id}|${m.account_name}`));
   const unmapped: Array<{ venue_id: string; account_name: string }> = [];
