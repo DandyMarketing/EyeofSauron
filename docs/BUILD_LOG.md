@@ -130,6 +130,73 @@ success, and written zero labour rows for ever. `checkDataGaps` watches for
 missing *days*, not for a source that consistently returns nothing, so the
 watchdog would have been green too.
 
+### 1.6 A line break typed into a discount reason rejected the whole day's report
+**Symptom.** Neon Pigeon's operations report for **29 Sep 2026** would not
+ingest. The error was `Quote Not Closed: the parsing is finished with an opening
+quote at line 4` — and line 4 of the file is `Total,170,3723.00,...`, which has
+no quote in it. Nothing was ingested for the day.
+**Root cause.** Somebody had typed a discount reason over three lines in Revel.
+It arrives in the CSV like this:
+
+```
+Dandy Family,5,65.50
+"Josh
+                      <- a blank line, INSIDE the quotes
+Runaway",1,42.00
+```
+
+**The file is valid.** RFC 4180 explicitly permits a newline inside a quoted
+field, Revel emits it correctly, and `csv-parse` handles it correctly. The
+defect was ours: the operations report is a dozen little tables separated by
+blank lines, and `splitSections()` split on blank lines **before** any CSV
+parsing, so it knew nothing about quotes. It cut the `DISCOUNT REASON` table
+after `"Josh` and handed the parser an unclosed quote. "Line 4" was line four
+*of that section*, which is exactly why the number pointed at nothing.
+**Fix.** `splitSections()` now scans character by character tracking quote
+state, and only treats a line ending as a line ending when it is outside a
+quoted field (`""` is an escaped quote and toggles nothing). The reason text is
+then whitespace-collapsed by `label()` rather than preserved, because a newline
+inside a cell terminates a markdown table and the line break carries no
+information. `src/parsers/revel/operations.test.ts` is the regression — the
+parser had no tests at all before this.
+**Recurs?** **Every customer.** Any free-text field somebody can type a newline
+into does this: a discount reason, a void reason, a product name, a modifier.
+
+**It is in section 1 but it is the opposite failure, and that is the point.**
+Every other entry here returned a confident answer on partial data. This one
+refused the file outright, which is the *good* direction to fail in — the day
+was visibly missing rather than quietly wrong. What it shares with the rest is
+that **the error blamed the source**: the message said the file was malformed,
+the file was fine, and an operator reading it would have gone back to Revel.
+
+**The generalisable rule.** Never pre-split a CSV on anything before parsing it.
+Line endings, commas and blank lines are all legal inside a quoted field, so any
+code that chops the text up first has silently decided no customer will ever
+type one. The same hazard applies to a product name with a comma in it, which
+this parser gets right only because `csv-parse` does the splitting there.
+
+### 1.7 NETS was parsed as a sub-type of House Account
+**Symptom.** None. Found while verifying 1.6, because the payment rows were on
+screen.
+**Root cause.** The operations report carries **no indentation** — `American
+Express` sits flush against `Credit` in the CSV — so which payment rows are a
+method and which are a card brand underneath one has to come from a hardcoded
+list, `TOP_LEVEL_PAYMENTS`. `NETS` was missing from it, so it inherited the
+previous top-level row as its parent and was flagged `isSubType`. In Singapore
+NETS is the most common debit rail; anything summing `!isSubType` would have
+dropped it. It was $0.00 at Neon Pigeon that night, which is the only reason
+nothing was wrong yet.
+**Fix.** `NETS` added — the same file settles it, since the `TIPS` section lists
+NETS alongside Cash, Credit and Custom Payment, all methods. More usefully,
+`paymentsReconcile()` now checks the methods against the report's own stated
+Grand Total, which is free and catches the *next* one: a method wrongly demoted
+vanishes from the sum, a brand wrongly promoted double-counts, and both show up
+as a mismatch. It returns `null` when there is no Grand Total row, because an
+absent check and a passing check must not look the same.
+**Recurs?** **Every customer.** A hardcoded list of payment methods is wrong for
+any venue using one that is not on it, and the next one will arrive the same
+way — silently, as a plausible number.
+
 ---
 
 ## 2. Data that is valid but wrong
