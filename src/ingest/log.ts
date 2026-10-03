@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { explainIngestError, describeStatus } from '../lib/explain-error.js';
 import { isExpectedClosure } from './closures.js';
+import { resolutionFor } from './resolved.js';
 
 /** How far back a failure keeps showing in the watchdog before it is history. */
 const ERROR_WINDOW_DAYS = 7;
@@ -42,6 +43,15 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
     explanation: string | null;
     /** 'wait' | 'fix' | 'watch', or null alongside a null explanation. */
     action: string | null;
+    /**
+     * When a later successful run repaired this, or null if none has.
+     *
+     * A resolved failure is still SHOWN — a week of self-healing blips is a
+     * pattern worth seeing — but it stops counting as something to do.
+     */
+    resolved_at: string | null;
+    /** Why we believe it is repaired. Shown to the reader verbatim. */
+    resolved_because: string | null;
     created_at: string;
   }>;
   open_alerts: Array<{ venue: string; date: string; type: string; detail: string; since: string }>;
@@ -104,14 +114,29 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   const cutoff = new Date(today);
   cutoff.setDate(cutoff.getDate() - errorWindowDays);
 
-  const { data: errors } = await supabase
-    .from('ingestion_log')
-    .select('filename, status, error_message, created_at')
-    // 'closed' is a normal outcome for a venue that does not trade that day.
-    .not('status', 'in', '(success,closed)')
-    .gte('created_at', cutoff.toISOString())
-    .order('created_at', { ascending: false })
-    .limit(10);
+  /**
+   * The failures, and the successes that may already have repaired them.
+   *
+   * Both reads, because a failure on its own cannot say whether it still
+   * matters. venue_id, report_type and business_date come back now so the two
+   * can be matched — see resolved.ts for why a dated failure and a run-level
+   * one are repaired by different things.
+   */
+  const [{ data: errors }, { data: successes }] = await Promise.all([
+    supabase
+      .from('ingestion_log')
+      .select('venue_id, report_type, business_date, filename, status, error_message, created_at')
+      // 'closed' is a normal outcome for a venue that does not trade that day.
+      .not('status', 'in', '(success,closed)')
+      .gte('created_at', cutoff.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(10),
+    supabase
+      .from('ingestion_log')
+      .select('venue_id, report_type, business_date, created_at')
+      .eq('status', 'success')
+      .gte('created_at', cutoff.toISOString()),
+  ]);
 
   // Unresolved reconciliation alerts -- data problems, as distinct from the
   // job failures above. These have no time bound on purpose: an unreconciled
@@ -144,7 +169,11 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
       // BOTH, never one instead of the other: the sentence is for deciding what
       // to do, the raw message is what you quote to a vendor's support desk.
       const explained = explainIngestError(raw);
+      // Repaired already, or still outstanding. The row stays either way.
+      const resolved = resolutionFor(e, successes ?? []);
       return {
+        resolved_at: resolved?.at ?? null,
+        resolved_because: resolved?.because ?? null,
         filename: e.filename,
         // Both: the plain label is read first, the raw value stays searchable
         // on the technical line beneath it.

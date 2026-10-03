@@ -17,6 +17,7 @@ import { ingestProfitAndLoss } from './ingest/xero-pl.js';
 import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment, askMetaForValidMetrics } from './ingest/meta.js';
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
+import { countUnresolved } from './ingest/resolved.js';
 import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
@@ -1987,6 +1988,32 @@ app.get('/admin/api/summary', async (c) => {
   // cannot disagree about what counts as recent.
   const since = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
+  /**
+   * Bounded deliberately: this runs on every admin page load, so it reads the
+   * same short window the panel does and nothing more. A failure to read it is
+   * zero, like every other count here — a missing badge beats a dead page.
+   */
+  const unresolvedIngestionErrors = async (sinceISO: string): Promise<number> => {
+    try {
+      const [{ data: failures }, { data: successes }] = await Promise.all([
+        supabaseAdmin
+          .from('ingestion_log')
+          .select('venue_id, report_type, business_date, created_at')
+          .not('status', 'in', '(success,closed)')
+          .gte('created_at', sinceISO),
+        supabaseAdmin
+          .from('ingestion_log')
+          .select('venue_id, report_type, business_date, created_at')
+          .eq('status', 'success')
+          .gte('created_at', sinceISO),
+      ]);
+      return countUnresolved(failures ?? [], successes ?? []);
+    } catch (e: any) {
+      console.warn(`[summary] could not count unresolved ingestion errors: ${e?.message ?? e}`);
+      return 0;
+    }
+  };
+
   const [alerts, pendingNotes, ingestionErrors] = await Promise.all([
     // `.eq('resolved', false)` is what /admin/api/alerts uses. Matched exactly,
     // because a badge that counts differently from the panel it points at is
@@ -2002,18 +2029,21 @@ app.get('/admin/api/summary', async (c) => {
         .select('id', { count: 'exact', head: true })
         .eq('status', 'pending')),
     /**
-     * NOT `status = 'error'`. checkDataGaps() counts anything that is not
-     * `success` or `closed`, because 'closed' is a normal outcome for a venue
-     * that does not trade that day and the other failure statuses are not all
-     * spelled 'error'. Copied rather than re-derived, so the badge and System
-     * Health cannot drift apart.
+     * UNRESOLVED failures only, which is why this one is not a count query.
+     *
+     * A failure a later run has already repaired must not sit on the badge:
+     * the SevenRooms auth error of 29 Sep was still being shown as something to
+     * do on 3 Oct, four days after the missed data had been re-read. The panel
+     * now marks those resolved, and a badge that counted them anyway would
+     * disagree with the panel it points at — the exact fault this file already
+     * guards against for the alert count.
+     *
+     * Not `status = 'error'` either: checkDataGaps() counts anything that is
+     * neither `success` nor `closed`, because 'closed' is a normal outcome for
+     * a venue that does not trade that day and the failure statuses are not all
+     * spelled 'error'.
      */
-    count('recent ingestion errors', () =>
-      supabaseAdmin
-        .from('ingestion_log')
-        .select('id', { count: 'exact', head: true })
-        .not('status', 'in', '(success,closed)')
-        .gte('created_at', since)),
+    unresolvedIngestionErrors(since),
   ]);
 
   return c.json({ alerts, pending_notes: pendingNotes, ingestion_errors: ingestionErrors });

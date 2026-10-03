@@ -538,6 +538,26 @@
   .ie-fix   { background: rgba(232, 64, 64, 0.15);  color: var(--error); }
   .ie-wait  { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
   .ie-watch { background: rgba(232, 200, 64, 0.15);  color: #e8c840; }
+  .ie-resolved { background: rgba(64, 192, 96, 0.15); color: var(--success); }
+
+  /**
+   * Dimmed, not hidden. A repaired failure is history rather than a task, but a
+   * week of blips that each self-healed is a pattern about the vendor worth
+   * seeing. Full opacity on hover so it can still be read properly.
+   *
+   * A DIFFERENT CLASS FROM THE BADGE on purpose: `.ie-resolved` is the green
+   * chip, and reusing it here put a green background on the whole row and this
+   * dimming on the chip. Caught by rendering it.
+   */
+  .ie-is-resolved { opacity: 0.55; }
+  .ie-is-resolved:hover { opacity: 1; }
+
+  .ie-fixed {
+    color: var(--success);
+    font-size: 12px;
+    line-height: 1.45;
+    margin-bottom: 5px;
+  }
 
   .ie-plain { line-height: 1.5; margin-bottom: 5px; }
 
@@ -1436,7 +1456,17 @@ function renderSystem(root, system) {
   const errCard = el('div', 'system-card');
   errCard.innerHTML = '<h4>Recent Errors</h4>';
   if (system.recent_errors && system.recent_errors.length > 0) {
-    for (const err of system.recent_errors) {
+    /**
+     * UNRESOLVED FIRST. A failure a later run already repaired is history, not
+     * a task, and leaving it interleaved at the top by timestamp means the
+     * thing needing attention can sit below three that do not.
+     */
+    const ordered = system.recent_errors.slice().sort((a, b) => {
+      const ar = a.resolved_at ? 1 : 0, br = b.resolved_at ? 1 : 0;
+      return ar - br || String(b.created_at).localeCompare(String(a.created_at));
+    });
+
+    for (const err of ordered) {
       /**
        * WHAT IT MEANS FIRST, then what it said.
        *
@@ -1451,19 +1481,39 @@ function renderSystem(root, system) {
        * problem rather than solve it. Where we do not recognise an error there
        * is no sentence and the raw message appears alone, exactly as before.
        */
-      const row = el('div', 'ingestion-error');
-      const label = err.action === 'fix' ? 'Needs fixing'
+      const row = el('div', 'ingestion-error' + (err.resolved_at ? ' ie-is-resolved' : ''));
+
+      /**
+       * A RESOLVED FAILURE SAYS SO INSTEAD OF SAYING WHAT TO DO.
+       *
+       * The SevenRooms auth error of 29 Sep was still presented as a live
+       * problem on 3 Oct, four days after the data it missed had been re-read
+       * and loaded. Accurate about the past, misleading about the present — and
+       * a panel full of those stops being read.
+       *
+       * It is marked rather than hidden, deliberately: a week of blips that
+       * each self-healed is a pattern about the vendor that somebody should be
+       * able to see. What changes is that it no longer looks like a task, and
+       * no longer counts on the tab.
+       */
+      const label = err.resolved_at ? 'Resolved'
+        : err.action === 'fix' ? 'Needs fixing'
         : err.action === 'wait' ? 'Should clear itself'
         : err.action === 'watch' ? 'Worth a look'
         : '';
+      const kind = err.resolved_at ? 'resolved' : err.action;
 
       row.innerHTML =
         '<div class="ie-head">' +
           '<span class="status-err">' + esc(err.status) + '</span>' +
-          (label ? '<span class="ie-action ie-' + esc(err.action) + '">' + label + '</span>' : '') +
+          (label ? '<span class="ie-action ie-' + esc(kind) + '">' + label + '</span>' : '') +
           '<span class="ie-when">' + fmtTime(err.created_at) + '</span>' +
         '</div>' +
         (err.explanation ? '<div class="ie-plain">' + esc(err.explanation) + '</div>' : '') +
+        (err.resolved_at
+          ? '<div class="ie-fixed">Already put right — ' + esc(err.resolved_because || 'a later run succeeded') +
+            ' on ' + fmtTime(err.resolved_at) + '.</div>'
+          : '') +
         '<div class="ie-raw">' + esc(err.status_raw || err.status) + ' · ' + esc(err.filename) + (err.error ? ' — ' + esc(err.error) : '') + '</div>';
       errCard.appendChild(row);
     }

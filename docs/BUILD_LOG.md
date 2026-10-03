@@ -632,6 +632,40 @@ SevenRooms been down eight days, the hole would have been permanent and silent,
 because the watchdog reports ingestion ERRORS and a venue with no past
 reservations for a week does not look different from a quiet week.
 
+### 5.12 An alert that was true four days ago and false now
+
+Khai, on seeing the SevenRooms 503 still sitting in the console on 3 Oct: *"It
+recovered on its own and no data was lost — so it should not also display the
+error, or it could display the error but define it as resolved."*
+
+He was right, and the second option is the better one. The panel was **accurate
+about the past and misleading about the present**, which is the worst kind of
+alert: read enough of them and the panel stops being read at all.
+
+`resolutionFor()` matches each failure against the successful runs that came
+after it. **The error is marked, not hidden** — a week of blips that each
+self-healed is a pattern about a vendor somebody should be able to see. What
+changes is that it stops looking like a task, stops counting on the tab, and
+sorts below the failures that are still live.
+
+**Two kinds of failure, repaired by different things, and conflating them would
+be the easy mistake.** A DATED failure — a Revel file for 29 Sep that would not
+parse — is repaired only by that date later loading; the 30th loading proves
+nothing about it, and treating it as proof would close a real gap on screen
+while leaving it open in the warehouse. A RUN failure has no business date
+because it never got far enough to be about a day, and those sources re-read a
+rolling window, so the next successful run of the same type covers the same
+ground.
+
+**What it deliberately does NOT claim.** For a run failure it says a later run
+succeeded, not that every missing row is back. The second is only true while the
+outage is shorter than the source's lookback, and the log does not record what
+that lookback was. Saying the weaker, true thing is the point.
+
+The badge had to move with it: it counted every recent failure, so a repaired
+one would have sat on the tab while the panel greyed it out — the
+badge-disagrees-with-panel fault this file already treats as worse than no badge.
+
 ### 5.11 The error messages were accurate and unreadable
 
 The same panel showed, verbatim:
