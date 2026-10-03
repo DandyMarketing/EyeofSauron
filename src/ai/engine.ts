@@ -12,6 +12,8 @@ import {
   type ModelChoice,
 } from './model-policy.js';
 import { isTransientCapacityError, transientReason } from '../lib/api-fatal.js';
+import { labelsForRound } from './progress.js';
+import type { ProgressEvent, VenueNames } from './progress.js';
 import type { Role } from './data-domains.js';
 import {
   webSearchTool,
@@ -177,7 +179,46 @@ export async function askSauron(
    * surfaces, two prefixes, neither poisoning the other.
    */
   systemOverride?: string,
+  /**
+   * Where to report what is happening, while it happens.
+   *
+   * OPTIONAL AND IGNORED BY DEFAULT, which is the point: every existing caller
+   * -- the JSON /ask route, the recommendation engine, the dry-run script --
+   * is unchanged and unaffected. Only the streaming route passes one.
+   *
+   * NEVER AWAITED AND NEVER ALLOWED TO THROW. A progress line is a courtesy;
+   * an answer is the product. A reporter that blew up or blocked would take
+   * down the question it was describing, which would make this feature strictly
+   * worse than the spinner it replaces. See `report()` below.
+   */
+  onProgress?: (event: ProgressEvent) => void,
+  /**
+   * The venues this reader may see, slug -> display name, for progress labels
+   * ONLY. Not a security boundary and not used for anything else: the tool
+   * layer enforces scope on its own. It is here because a label is drawn BEFORE
+   * the tool runs, so without it a refused query would still have announced the
+   * venue's name. See progress.ts.
+   */
+  venueNames?: VenueNames | null,
 ): Promise<QueryResult> {
+  /**
+   * Progress reporting that cannot hurt the answer.
+   *
+   * Swallowing the error is deliberate and is the same judgement as the terms
+   * gate failing open: the thing being protected is handled elsewhere, so a
+   * failure here should cost its own feature and nothing else. It is logged,
+   * because a reporter that silently stopped working would leave the dots back
+   * on screen with no explanation -- and "it worked, it looked fine, it was
+   * doing nothing" is the defect this codebase keeps finding.
+   */
+  const report = (event: ProgressEvent): void => {
+    if (!onProgress) return;
+    try {
+      onProgress(event);
+    } catch (e: any) {
+      console.warn(`[engine] progress reporter threw, continuing: ${e?.message ?? e}`);
+    }
+  };
   /**
    * Chosen ONCE, before the first call, and used for every turn.
    *
@@ -383,7 +424,34 @@ export async function askSauron(
     const call = async (params: any): Promise<Anthropic.Message> => {
       for (let attempt = 0; ; attempt++) {
         try {
-          return await client.messages.stream(params).finalMessage() as Anthropic.Message;
+          const stream = client.messages.stream(params);
+
+          /**
+           * The one honest signal that the answer itself is being written.
+           *
+           * The comment above says every event is discarded; this is the single
+           * exception, and it is taken from the stream rather than guessed at
+           * from the loop's shape because the loop CANNOT know a round is the
+           * last one until the response comes back with no tool_use in it. By
+           * then the writing has already happened.
+           *
+           * `.on('text')` fires for visible text deltas only -- thinking has its
+           * own event -- so this means the model has begun producing the reply.
+           * Fired once per call, because the UI wants a state change and not a
+           * line per token.
+           *
+           * It can fire and then be superseded by more queries, when a model
+           * writes a sentence of preamble before its tool calls. That is not a
+           * glitch, it is what happened: the next `working` event replaces it.
+           */
+          let announced = false;
+          stream.on('text', () => {
+            if (announced) return;
+            announced = true;
+            report({ kind: 'writing' });
+          });
+
+          return await stream.finalMessage() as Anthropic.Message;
         } catch (e: any) {
           if (attempt >= OVERLOAD_RETRIES || !isTransientCapacityError(e)) throw e;
           const waitMs = OVERLOAD_BACKOFF_MS * 2 ** attempt;
@@ -502,6 +570,7 @@ export async function askSauron(
   const deadline = choice.toolBudgetMs === null ? null : Date.now() + choice.toolBudgetMs;
   let outOfTime = false;
 
+  report({ kind: 'thinking' });
   let response = await send();
 
   // Tool use loop
@@ -591,6 +660,15 @@ export async function askSauron(
       toolCalls.push({ name: block.name, input: block.input as Record<string, any> });
     }
 
+    /**
+     * Reported BEFORE the queries run, not after.
+     *
+     * After would be a log; before is progress. The round is included because a
+     * loop that reaches round nine should look like it is making its way
+     * through something rather than repeating itself.
+     */
+    report({ kind: 'working', round: rounds, labels: labelsForRound(uses, venueNames === undefined ? {} : venueNames) });
+
     const results = await Promise.all(
       uses.map(block => handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role)),
     );
@@ -637,6 +715,10 @@ export async function askSauron(
     messages.push({ role: 'user', content: toolResults });
     markLastBlockForCaching(messages);
 
+    // Back to the model with what the queries returned. Reported so the gap
+    // between a round finishing and the next one starting is not blank -- on a
+    // hard question that gap is where most of the wall clock goes.
+    report({ kind: 'thinking' });
     response = await send();
   }
 

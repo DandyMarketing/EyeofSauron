@@ -15,6 +15,7 @@
 -->
 <link rel="modulepreload" href="/vendor/supabase.js">
 <link rel="modulepreload" href="/terms-gate.js">
+<link rel="modulepreload" href="/sse-parse.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -374,6 +375,88 @@
   @keyframes pulse {
     0%, 80%, 100% { opacity: 0.4; transform: scale(1); }
     40% { opacity: 1; transform: scale(1.2); }
+  }
+
+  /**
+   * What it is doing, while it does it.
+   *
+   * Replaces the three dots on a question that runs queries. Sized and spaced
+   * to be read on a phone at arm's length rather than studied: one line per
+   * step, the finished ones dimmed and ticked, the live one carrying the dot
+   * that was the whole animation before.
+   */
+  .progress { display: flex; flex-direction: column; gap: 7px; padding: 2px 0; }
+
+  .progress-step {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--text-muted);
+    /* Steps arrive while the reader is looking at the panel, so they fade in
+       rather than snapping — a line appearing instantly reads as a flicker. */
+    animation: step-in 0.25s ease-out;
+  }
+
+  @keyframes step-in {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /**
+   * A fixed-size slot, so a step does not shift sideways when its dot becomes
+   * a tick. The marks are drawn INSIDE it by ::after, because the tick and the
+   * dot are different shapes and sizes and sharing one box made the tick come
+   * out as a chevron — which is what rendering it and looking showed.
+   */
+  .progress-step .dot {
+    position: relative;
+    width: 10px; height: 10px;
+    flex-shrink: 0;
+  }
+
+  .progress-step .dot::after {
+    content: '';
+    position: absolute;
+    left: 2px; top: 2px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .progress-step.done { opacity: 0.55; }
+  .progress-step.done .dot::after {
+    /* A tick: an L rotated 45°, and it only reads as one if it is TALLER than
+       it is wide. Equal sides draw a chevron. */
+    left: 3px; top: 0;
+    width: 4px; height: 8px;
+    border-radius: 0;
+    background: none;
+    border-right: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+    transform: rotate(45deg);
+  }
+
+  .progress-step.live { color: var(--text); }
+  .progress-step.live .dot::after { animation: pulse 1.4s infinite; }
+
+  /**
+   * A label wraps rather than running off the screen.
+   *
+   * "Reading daily trade — Neon Pigeon, 2026-09-22 to 2026-09-28" is longer
+   * than a phone is wide, and without min-width:0 a flex child refuses to
+   * shrink below its content and overflows the bubble instead — clipped, with
+   * the dates cut off, which is the half of the line worth reading.
+   */
+  .progress-step > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+
+  /* The elapsed seconds, so a long answer is visibly long rather than stuck. */
+  .progress-elapsed {
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.7;
+    margin-left: 16px;
   }
 
   .tool-indicator {
@@ -1135,7 +1218,20 @@ function addMessage(role, content, isHtml) {
   return bubble;
 }
 
-function addTyping() {
+/**
+ * The live progress panel.
+ *
+ * WHY IT REPLACED THE DOTS. A question that runs a twelve-round tool loop takes
+ * well over a minute, and three bouncing dots say nothing about whether it is
+ * working, stuck, or dead. The steps here are the engine's own account of what
+ * it is doing, streamed as it happens.
+ *
+ * IT STARTS AS THE DOTS AND BECOMES A LIST. The first thing shown is still the
+ * old indicator, because a quick lookup finishes before any step arrives and a
+ * panel that flashes up and vanishes is worse than the dots it replaced. The
+ * list appears only once there is something true to put in it.
+ */
+function createProgress() {
   if (welcome) welcome.remove();
 
   const msg = document.createElement('div');
@@ -1153,11 +1249,136 @@ function addTyping() {
   msg.appendChild(bubble);
   chat.appendChild(msg);
   chat.scrollTop = chat.scrollHeight;
+
+  const started = Date.now();
+  let list = null;
+  let elapsedEl = null;
+
+  // Only after six seconds, and only while something is still running. On a
+  // fast answer a timer is noise; on a slow one it is the difference between
+  // "this is taking a while" and "this has died".
+  const ticker = setInterval(() => {
+    if (!elapsedEl) return;
+    const secs = Math.round((Date.now() - started) / 1000);
+    elapsedEl.textContent = secs >= 6 ? secs + 's' : '';
+  }, 1000);
+
+  function ensureList() {
+    if (list) return;
+    bubble.innerHTML = '';
+    list = document.createElement('div');
+    list.className = 'progress';
+    bubble.appendChild(list);
+    elapsedEl = document.createElement('div');
+    elapsedEl.className = 'progress-elapsed';
+    bubble.appendChild(elapsedEl);
+  }
+
+  return {
+    /**
+     * Add one or more steps, marking everything before them finished.
+     *
+     * Every earlier step is settled by the arrival of a new one — that is what
+     * "the next thing started" means, and it avoids a separate completion event
+     * that could be lost and leave a line spinning forever.
+     */
+    step(labels) {
+      ensureList();
+      for (const el of list.querySelectorAll('.progress-step.live')) {
+        el.classList.remove('live');
+        el.classList.add('done');
+      }
+      for (const label of labels) {
+        const row = document.createElement('div');
+        row.className = 'progress-step live';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        const text = document.createElement('span');
+        text.textContent = label;
+        row.appendChild(dot);
+        row.appendChild(text);
+        list.appendChild(row);
+      }
+      chat.scrollTop = chat.scrollHeight;
+    },
+    remove() {
+      clearInterval(ticker);
+      if (msg.parentNode) msg.remove();
+    },
+  };
 }
 
-function removeTyping() {
-  const el = document.getElementById('typing-indicator');
-  if (el) el.remove();
+/**
+ * Ask over the event stream, reporting progress, and return the answer.
+ *
+ * Throws on anything that means "this route did not work" — a non-2xx, a body
+ * that is not a stream, or a stream that ended without a `done` event — so the
+ * caller can fall back to /ask. It deliberately does NOT throw for an `error`
+ * event, which is the server answering properly with bad news: retrying that on
+ * the other route would just ask a failing question twice.
+ */
+async function askStreaming(question, progress) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+  const res = await fetch('/ask/stream', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ question, history, model: modelSelect.value }),
+  });
+
+  // 401 and 403 are real answers about this person, not a broken route, so they
+  // must not fall through to /ask and produce the same refusal a second time.
+  if (res.status === 401 || res.status === 403) {
+    const err = await res.json().catch(() => ({ error: 'Not authorised' }));
+    return { fatal: err.error || 'Not authorised' };
+  }
+  if (!res.ok || !res.body) throw new Error('stream unavailable: ' + res.status);
+
+  // Preloaded in <head>, so this is already in cache and costs no round trip.
+  const { createEventParser, progressLines } = await import('/sse-parse.js');
+  const parser = createEventParser();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let result = null;
+  let failure = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    for (const event of parser.push(decoder.decode(value, { stream: true }))) {
+      if (event.kind === 'done') { result = event.result; continue; }
+      if (event.kind === 'error') { failure = event.error; continue; }
+
+      const lines = progressLines(event);
+      if (lines.length) progress.step(lines);
+    }
+  }
+
+  if (failure) return { fatal: failure };
+  // A stream that ended without an answer is a broken route, not an answer.
+  if (!result) throw new Error('stream ended without a result');
+  return { data: result };
+}
+
+/** The original route, unchanged, used when the stream cannot be had. */
+async function askPlain(question) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+  const res = await fetch('/ask', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ question, history, model: modelSelect.value }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }));
+    return { fatal: err.error || 'Something went wrong' };
+  }
+  return { data: await res.json() };
 }
 
 async function send() {
@@ -1170,29 +1391,36 @@ async function send() {
   autoResize();
 
   addMessage('user', question);
-  addTyping();
+  const progress = createProgress();
 
   try {
-    const headers = { 'Content-Type': 'application/json' };
-    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+    /**
+     * The stream first, the old route if it cannot be had.
+     *
+     * An intermediary that buffers an event stream is a real thing and gives no
+     * sign that it is doing it, so the fallback is not ceremony — without it,
+     * one proxy between a venue and Railway would turn a nicety into a chat
+     * that does not answer. Falling back costs the progress display and nothing
+     * else: /ask is exactly what shipped before today.
+     */
+    let outcome;
+    try {
+      outcome = await askStreaming(question, progress);
+    } catch (streamError) {
+      console.warn('[ask] event stream unavailable, falling back to /ask:', streamError.message);
+      outcome = await askPlain(question);
+    }
 
-    const res = await fetch('/ask', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ question, history, model: modelSelect.value }),
-    });
+    progress.remove();
 
-    removeTyping();
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Request failed' }));
-      addMessage('assistant', '<div class="error-msg">Error: ' + escapeHtml(err.error || 'Something went wrong') + '</div>', true);
+    if (outcome.fatal) {
+      addMessage('assistant', '<div class="error-msg">Error: ' + escapeHtml(outcome.fatal) + '</div>', true);
       busy = false;
       sendBtn.disabled = false;
       return;
     }
 
-    const data = await res.json();
+    const data = outcome.data;
 
     if (data.toolCalls && data.toolCalls.length > 0) {
       const toolNames = [...new Set(data.toolCalls.map(t => t.name.replace(/_/g, ' ')))];
@@ -1265,7 +1493,7 @@ async function send() {
     }
 
   } catch (e) {
-    removeTyping();
+    progress.remove();
     addMessage('assistant', '<div class="error-msg">Network error. Check your connection and try again.</div>', true);
   }
 

@@ -600,6 +600,47 @@ with the whole suite green. `src/frontend/pages.test.ts` now compiles every
 page's inline script without running it, and carries a test proving it still
 rejects broken code.
 
+### 5.7 Three dots for ninety seconds, and two wrong assumptions on the way to fixing it
+
+A question that runs a twelve-round tool loop takes well over a minute, and the
+only thing in front of the person asking was the bouncing-dots indicator. 5.1
+and the `/ask` error handler had already written down why that is worse than
+dull: *"a six-minute answer and a crash look identical from the front end and
+are nothing alike."* `/ask/stream` reports the engine's own account of what it
+is doing -- Thinking, then each query in plain language, then Writing -- and
+keeps the old `/ask` as a fallback, so an intermediary that buffers an event
+stream costs the progress display and never the answer.
+
+**The answer text is deliberately NOT streamed.** Sauron's replies are mostly
+tables, by instruction, and a table streamed as raw markdown is a wall of pipes
+and asterisks that only becomes readable at the end. Khai's call, 3 Oct 2026.
+
+**Two assumptions were wrong, and both were caught by measuring rather than
+reasoning. They are the point of this entry.**
+
+*gzip would buffer the event frames.* Plausible -- a compressor holds small
+writes back, and a progress frame is about eighty bytes -- so a path exclusion
+was written, with a comment stating it had been measured. It had not. Measured
+afterwards, the frames arrive at 0.00s, 0.40s, 0.80s, 1.20s, 1.60s **with
+compression enabled**, because Hono excludes `text/event-stream` from its own
+compressible set by an explicit negative lookahead. The exclusion was removed:
+a redundant guard that looks load-bearing hides the real reason something
+works, and the next person to touch it reasons from the wrong fact.
+`server.compress.test.ts` pins the real protection instead.
+
+*A screenshot showed the progress labels overflowing the bubble.* They were not.
+Headless Chromium laid the page out at 500px while writing a 390px image, so a
+perfectly contained bubble was CROPPED and read as broken. Measured properly
+inside a 390px iframe: `scrollWidth === clientWidth`, no overflow. **A rendered
+image is evidence of layout only if you know what width it was laid out at** --
+otherwise it is as likely to invent a bug as to find one.
+
+What rendering it DID find, correctly, was a real defect no test could see: the
+completed-step tick is an L rotated 45°, and it only reads as a tick if it is
+taller than it is wide. At 7×7 it drew a chevron. Every test passed. Same
+lesson as the chart palette in 5.3 and the legend order: **render it and look
+at it.**
+
 ---
 
 ## 6. Process failures

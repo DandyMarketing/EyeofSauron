@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
+import { streamSSE } from 'hono/streaming';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
@@ -21,6 +22,8 @@ import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/da
 import { queryTools } from './ai/tools.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { modelFor } from './ai/model-policy.js';
+import { prettyVenue } from './ai/progress.js';
+import type { ProgressEvent } from './ai/progress.js';
 import Anthropic from '@anthropic-ai/sdk';
 
 /**
@@ -56,10 +59,29 @@ const app = new Hono();
  * handler that produces the body, so its `await next()` returns with the
  * finished response. Put it after serveStatic and it compresses nothing,
  * silently, while looking exactly as installed as it does here.
+ *
+ * THE /ask/stream EVENT STREAM IS SAFE HERE, and it was checked rather than
+ * assumed, because the hazard is real: a gzip stream buffers until it has
+ * enough bytes to be worth emitting, and an SSE progress frame is about eighty
+ * of them. Compressed naively, those frames would sit in the compressor and
+ * arrive together at the END of the answer -- the one moment they are
+ * worthless, and a failure with nothing in any log to explain it.
+ *
+ * Hono already prevents that. `text/event-stream` is excluded from
+ * COMPRESSIBLE_CONTENT_TYPE_REGEX by an explicit negative lookahead, so
+ * compress() passes the stream through untouched. Measured end to end: with
+ * `Accept-Encoding: gzip`, frames arrive at 0.00s, 0.40s, 0.80s, 1.20s, 1.60s
+ * -- identical to an uncompressed route, in five separate chunks.
+ *
+ * So there is NO path exclusion here on purpose; one was written and removed
+ * once this was measured, because a redundant guard that looks load-bearing is
+ * its own kind of lie. `server.compress.test.ts` pins the behaviour, so a
+ * future `contentTypeFilter` option cannot quietly take the protection away.
  */
 app.use('*', compress());
 
 app.use('/ask', cors());
+app.use('/ask/stream', cors());
 app.use('/api/*', cors());
 app.use('/admin/api/*', cors());
 
@@ -304,6 +326,112 @@ app.post('/ingest/revel', async (c) => {
 });
 
 // --- AI query endpoint (auth required) ---
+
+/**
+ * The same question as /ask, answered over an event stream.
+ *
+ * WHY IT EXISTS. A question that runs a twelve-round tool loop takes well over
+ * a minute, and until now the only thing on screen was three bouncing dots.
+ * Worse than dull: the error handler on /ask already records that "a six-minute
+ * answer and a crash look identical from the front end and are nothing alike".
+ * This makes them different, and it does it with the engine's own account of
+ * what it is doing rather than a guess.
+ *
+ * ADDITIVE, NOT A REPLACEMENT, and /ask below is untouched. A browser that
+ * cannot hold a stream -- or an intermediary that buffers one, which is a real
+ * thing and invisible when it happens -- falls back to /ask and gets exactly
+ * today's behaviour. Converting /ask in place would have made a proxy's
+ * buffering into a broken product instead of a missing nicety.
+ *
+ * THE STREAM CARRIES THE ANSWER TOO, in a final `done` event, so there is no
+ * second request and no window where the work is finished but the reply has not
+ * arrived. An `error` event carries the same sentence /ask would have returned.
+ */
+app.post('/ask/stream', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string }>();
+  if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
+
+  const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+
+  /**
+   * Which venues a progress label may NAME. Labels only; not a boundary.
+   *
+   * A label is drawn from the model's chosen tool input BEFORE the tool runs,
+   * so before enforceVenueScope() has refused anything. Without this, a model
+   * that asked for a venue this reader cannot see would have had that venue's
+   * name printed on their screen, by us, a moment before we refused the query.
+   *
+   * An owner passes `null`, meaning unrestricted -- there is no venue they may
+   * not be told about, and the same `undefined` venueFilter is what the tool
+   * layer already gets for them. Everyone else gets exactly their own venues,
+   * and anything else renders as "another venue".
+   */
+  const venueNames = user.isOwner
+    ? null
+    : Object.fromEntries(user.venues.map(v => [v.slug, prettyVenue(v.slug)]));
+
+  return streamSSE(c, async (stream) => {
+    /**
+     * Writes are CHAINED, not fired in parallel.
+     *
+     * The engine reports synchronously and writeSSE is async, so calling it
+     * without sequencing would interleave frames under load and put a `done`
+     * event on the wire before the `working` event that preceded it. A promise
+     * chain keeps the order the engine produced, and never makes the engine
+     * wait: the callback returns immediately whatever the socket is doing.
+     */
+    let chain: Promise<void> = Promise.resolve();
+    const push = (event: ProgressEvent | { kind: 'done' | 'error'; [k: string]: any }) => {
+      chain = chain
+        .then(() => stream.writeSSE({ data: JSON.stringify(event) }))
+        /**
+         * A closed socket is the normal case, not an incident: the person
+         * navigated away or closed the tab. Swallowed so it cannot reject the
+         * chain and silence every write after it.
+         */
+        .catch(() => {});
+    };
+
+    /**
+     * A comment frame every fifteen seconds.
+     *
+     * Not decoration. A single model call can think for well over a minute with
+     * nothing to report, and an idle connection is exactly what a proxy or load
+     * balancer decides to close -- which would look to the reader like the
+     * answer dying partway through. ": " starts an SSE comment, which clients
+     * ignore and intermediaries count as traffic.
+     */
+    const heartbeat = setInterval(() => {
+      chain = chain.then(async () => { await stream.write(': ping\n\n'); }).catch(() => {});
+    }, 15_000);
+
+    try {
+      const result = await askSauron(
+        body.question, body.history ?? [], venueFilter, 'chat',
+        effectiveRole(user), undefined, body.model, undefined,
+        push, venueNames,
+      );
+      push({ kind: 'done', result });
+    } catch (e: any) {
+      // Logged for the same reason /ask logs: this used to be invisible in
+      // Railway, and a log export covering a real failure held one line.
+      console.error(`[ask/stream] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+      push({ kind: 'error', error: humanApiError(e) });
+    } finally {
+      clearInterval(heartbeat);
+      // The chain holds every queued write; the stream must not close before
+      // they have gone out, or the `done` event is lost and the browser sees a
+      // clean end with no answer in it.
+      await chain;
+    }
+  });
+});
 
 app.post('/ask', async (c) => {
   const user = await requireAuth(c);
