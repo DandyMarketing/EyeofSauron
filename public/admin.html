@@ -1193,11 +1193,10 @@ function renderInvite(root) {
       await loadAll();
     }
   });
-
-  /**
 }
 
 function renderRoleSlot(root) {
+  /**
    * The reference, once, above the list.
    *
    * NOT awaited: render() is synchronous and making it async would change when
@@ -1579,6 +1578,30 @@ function renderNotes(root, notes) {
 
   notesSection.innerHTML = notesHtml;
   root.appendChild(notesSection);
+
+  /**
+   * Attached HERE, beside the form it drives.
+   *
+   * It used to sit four hundred lines below, after the Meta handlers, because
+   * render() built everything into one page and the order did not matter. It
+   * matters now: the form is on the Knowledge tab and those handlers are on
+   * Connections, so this ran when a tab that has no note form was opened and
+   * took the whole tab down with "Cannot read properties of null".
+   */
+  document.getElementById('note-add-btn').addEventListener('click', async () => {
+    const noteText = document.getElementById('note-text').value.trim();
+    if (!noteText) return;
+    const venueId = document.getElementById('note-venue').value;
+    const category = document.getElementById('note-category').value;
+    const res = await api('POST', '/admin/api/notes', { venue_id: venueId || null, note: noteText, category });
+    if (res.error) {
+      toast('error', res.error);
+    } else {
+      toast('success', 'Note added');
+      document.getElementById('note-text').value = '';
+      await loadAll();
+    }
+  });
 
 }
 
@@ -2100,21 +2123,6 @@ function renderIntegrations(root) {
         (r.error ? '<div style="font-size:12px;color:var(--error)">' + escapeHtml(r.error) + '</div>' : '') +
         '</div>';
     }).join('');
-  });
-
-  document.getElementById('note-add-btn').addEventListener('click', async () => {
-    const noteText = document.getElementById('note-text').value.trim();
-    if (!noteText) return;
-    const venueId = document.getElementById('note-venue').value;
-    const category = document.getElementById('note-category').value;
-    const res = await api('POST', '/admin/api/notes', { venue_id: venueId || null, note: noteText, category });
-    if (res.error) {
-      toast('error', res.error);
-    } else {
-      toast('success', 'Note added');
-      document.getElementById('note-text').value = '';
-      await loadAll();
-    }
   });
 
 }

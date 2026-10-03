@@ -131,3 +131,108 @@ test('a failed tab can be retried', () => {
   assert.ok(openTab.includes('loaded.add(id)'), 'openTab no longer guards against a double click');
   assert.ok(openTab.includes('loaded.delete(id)'), 'a failed tab is never retried — it stays empty for ever');
 });
+
+// --- what splitting render() into tabs can silently break -------------------
+
+/**
+ * Extract a top-level function's source from admin.html.
+ *
+ * Handles `async function`, destructured parameters and nested braces, because
+ * the naive versions of all three produced wrong answers while debugging this.
+ */
+function functionBody(src: string, name: string): string {
+  let start = src.indexOf(`function ${name}(`);
+  assert.ok(start > 0, `${name} is not defined in admin.html`);
+  if (src.slice(start - 6, start) === 'async ') start -= 6;
+
+  let k = src.indexOf('(', src.indexOf(`function ${name}(`));
+  let parens = 0;
+  for (;; k++) {
+    if (src[k] === '(') parens++;
+    else if (src[k] === ')' && --parens === 0) break;
+  }
+  const open = src.indexOf('{', k);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return src.slice(start, i + 1);
+  }
+  throw new Error(`unbalanced braces in ${name}`);
+}
+
+const SECTION_RENDERERS = [
+  'renderInvite', 'renderRoleSlot', 'renderUsers', 'renderSystem', 'renderAlerts',
+  'renderPending', 'renderNotes', 'renderXero', 'renderAccountMap', 'renderFees',
+  'renderIntegrations', 'renderUpload',
+];
+
+test('NO SECTION TOUCHES AN ELEMENT FROM ANOTHER TAB', () => {
+  /**
+   * The defect this test exists for, and it shipped. render() was one 950-line
+   * function building every section into one page, so a handler could be
+   * written four hundred lines below the markup it drives and nothing cared —
+   * everything was on screen by the end. Split into tabs it matters
+   * enormously: the note form's handler had ended up among the Meta handlers,
+   * so opening CONNECTIONS ran `getElementById('note-add-btn').addEventListener`
+   * against a form that lives on KNOWLEDGE, and took the whole tab down with
+   * "Cannot read properties of null".
+   *
+   * A section may only reach for ids it creates itself.
+   */
+  const html = admin();
+  const offenders: string[] = [];
+
+  for (const name of SECTION_RENDERERS) {
+    const body = functionBody(html, name);
+    const used = new Set([...body.matchAll(/getElementById\('([^']+)'\)/g)].map(m => m[1]));
+    const made = new Set([
+      ...[...body.matchAll(/id="([^"]+)"/g)].map(m => m[1]),
+      ...[...body.matchAll(/\.id = '([^']+)'/g)].map(m => m[1]),
+    ]);
+    for (const id of used) {
+      if (!made.has(id)) offenders.push(`${name} reaches for #${id}, which it does not create`);
+    }
+  }
+
+  assert.deepEqual(offenders, [], offenders.join('\n'));
+});
+
+test('no section function is swallowed by an unclosed comment', () => {
+  /**
+   * The other defect that shipped, and the nastier one: the cut between two
+   * sections landed INSIDE a comment block, so `renderInvite` ended with a
+   * dangling `/**` that swallowed its own closing brace and the whole
+   * `function renderRoleSlot(root) {` line after it. The result is valid
+   * JavaScript — it parses, the compile check passes — and renderRoleSlot
+   * simply does not exist. Opening People died with "renderRoleSlot is not
+   * defined".
+   *
+   * Every section function must therefore actually BE a function at runtime,
+   * which is what a balanced body proves.
+   */
+  const html = admin();
+  for (const name of SECTION_RENDERERS) {
+    const body = functionBody(html, name);
+    assert.ok(body.startsWith('function ') || body.startsWith('async function '), `${name} is not a top-level function`);
+    // A body whose first statement is a comment continuation means the cut
+    // landed mid-comment, even when the braces happen to balance.
+    const firstLine = body.split('\n')[1] ?? '';
+    assert.ok(
+      !/^\s*\*(?!\/)/.test(firstLine),
+      `${name} starts inside a comment block — the previous function is swallowing it: ${firstLine.trim()}`,
+    );
+  }
+});
+
+test('every tab loader only calls renderers that exist', () => {
+  const html = admin();
+  for (const loader of ['loadAttention', 'loadPeople', 'loadConnections', 'loadAccounting', 'loadKnowledge']) {
+    const body = functionBody(html, loader);
+    for (const called of [...body.matchAll(/\b(render[A-Z]\w*)\(/g)].map(m => m[1])) {
+      assert.ok(
+        html.includes(`function ${called}(`),
+        `${loader} calls ${called}(), which is not defined — the tab will fail to open`,
+      );
+    }
+  }
+});
