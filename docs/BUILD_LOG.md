@@ -635,18 +635,37 @@ Three fixes, in descending order of effect:
    of the first batch had returned — so the slowest of the seven gated three
    requests that depend on none of them.
 
-**And a correctness bug found while reading the slow query.**
+**And a latent correctness bug found while reading the slow query.**
 `/admin/api/account-map` computed "which ledger accounts are unmapped" by
 pulling every non-summary row of `profit_and_loss` **with no paging**. PostgREST
-caps a response at 1,000 rows; three venues over two years is several thousand.
-So any account appearing only past the first page was reported as mapped when
-nobody had mapped it — **a list whose entire purpose is to say what still needs
-attention was quietly short**. Migration 049 adds a view that does the DISTINCT
-in Postgres, which is both correct and a few dozen rows instead of a thousand.
+caps a response at 1,000 rows, and the table holds 2,898 — so it was reading
+35% of the ledger, in Postgres's physical order, with no `ORDER BY`. Which rows
+it saw was not even stable between page loads. Migration 049 adds a view that
+does the DISTINCT in Postgres: 159 rows instead of a thousand, and correct.
 
-This is the fifth time the 1,000-row cap has cost this project data. The comment
-on `fetchAccountMap()` says four. **Recurs? Every customer, and it will keep
-recurring until a read without `.range()` is treated as a defect on sight.**
+**IT HAD NOT ACTUALLY COST ANYTHING, and that was checked rather than assumed.**
+Measured after the migration: 2,898 non-summary rows, 159 distinct accounts,
+and **zero unmapped**. `account_map` was seeded by migration 024 in server-side
+SQL, which has no PostgREST cap, so it already held all 159 — and truncation can
+only produce FALSE NEGATIVES. It can hide an unmapped account; it cannot invent
+one. With nothing unmapped there was nothing to hide.
+
+I had written here that the unmapped list "was quietly short" and told Khai to
+expect it to get longer. It did not, and the claim was wrong. **A truncated read
+is a real defect and its damage is still a separate question — ask what the
+missing rows would have CHANGED before describing the harm.**
+
+So 049 is prospective protection rather than a repair, and it is still worth
+having for the case that was waiting: the moment Xero gains a new expense
+category it arrives as an unmapped account, lands outside an arbitrary
+1,000-row window, and is reported as mapped — then quietly rolls up under its
+own name in exactly the cross-venue comparison `account_map` exists to make
+possible.
+
+This is the fifth time the 1,000-row cap has been found in this codebase; the
+comment on `fetchAccountMap()` counts four that cost data. **Recurs? Every
+customer, and it will keep recurring until a read without `.range()` is treated
+as a defect on sight.**
 
 Two things worth carrying forward. The view is `security_invoker = true`:
 without it a Postgres view runs as its owner and would have been a hole straight
