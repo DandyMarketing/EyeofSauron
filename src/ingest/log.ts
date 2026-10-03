@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { explainIngestError, describeStatus } from '../lib/explain-error.js';
 import { isExpectedClosure } from './closures.js';
 
 /** How far back a failure keeps showing in the watchdog before it is history. */
@@ -23,7 +24,26 @@ export async function logIngestion(entry: LogEntry): Promise<void> {
 
 export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   missing: Array<{ venue: string; slug: string; date: string; missing: string[] }>;
-  recent_errors: Array<{ filename: string; status: string; error: string; created_at: string }>;
+  recent_errors: Array<{
+    filename: string;
+    /** The status in plain words, e.g. 'Could not fetch'. */
+    status: string;
+    /** The stored value, e.g. 'ingestion_error'. Shown on the technical line. */
+    status_raw: string;
+    /** The raw message, exactly as it was recorded. Always present. */
+    error: string;
+    /**
+     * The same failure in plain language, where we recognise it.
+     *
+     * NULL when we do not, and the console then shows the raw message alone —
+     * which is all it ever showed. An invented explanation would send somebody
+     * to check credentials that are fine, so this only speaks when it is sure.
+     */
+    explanation: string | null;
+    /** 'wait' | 'fix' | 'watch', or null alongside a null explanation. */
+    action: string | null;
+    created_at: string;
+  }>;
   open_alerts: Array<{ venue: string; date: string; type: string; detail: string; since: string }>;
 }> {
   const { data: venues } = await supabase.from('venues').select('id, name, slug, closed_weekdays');
@@ -119,11 +139,22 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   return {
     missing,
     open_alerts,
-    recent_errors: (errors ?? []).map(e => ({
-      filename: e.filename,
-      status: e.status,
-      error: e.error_message ?? '',
-      created_at: e.created_at,
-    })),
+    recent_errors: (errors ?? []).map(e => {
+      const raw = e.error_message ?? '';
+      // BOTH, never one instead of the other: the sentence is for deciding what
+      // to do, the raw message is what you quote to a vendor's support desk.
+      const explained = explainIngestError(raw);
+      return {
+        filename: e.filename,
+        // Both: the plain label is read first, the raw value stays searchable
+        // on the technical line beneath it.
+        status: describeStatus(e.status),
+        status_raw: e.status,
+        error: raw,
+        explanation: explained?.plain ?? null,
+        action: explained?.action ?? null,
+        created_at: e.created_at,
+      };
+    }),
   };
 }

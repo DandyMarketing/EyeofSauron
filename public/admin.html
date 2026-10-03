@@ -514,6 +514,41 @@
   .upload-summary .ustat .ulabel { color: var(--text-muted); }
 
   /**
+   * An ingestion error, as something readable rather than a row of fragments.
+   *
+   * It was four columns squeezed side by side — status, filename, message,
+   * time — which on a phone gave the message about ten characters of width.
+   * Stacked, the plain sentence gets the room it needs to be read, and the
+   * technical line sits under it in a smaller, dimmer type so it is obviously
+   * the reference rather than the point.
+   */
+  .ingestion-error {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .ingestion-error:last-child { border-bottom: none; }
+
+  .ie-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 5px; }
+  .ie-when { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+
+  /* What to DO, which is the thing somebody scanning this page is after. */
+  .ie-action { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+  .ie-fix   { background: rgba(232, 64, 64, 0.15);  color: var(--error); }
+  .ie-wait  { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
+  .ie-watch { background: rgba(232, 200, 64, 0.15);  color: #e8c840; }
+
+  .ie-plain { line-height: 1.5; margin-bottom: 5px; }
+
+  .ie-raw {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow-wrap: anywhere;
+  }
+
+  /**
    * The tab bar.
    *
    * Scrolls sideways rather than wrapping: five tabs do not fit across a phone,
@@ -1402,11 +1437,34 @@ function renderSystem(root, system) {
   errCard.innerHTML = '<h4>Recent Errors</h4>';
   if (system.recent_errors && system.recent_errors.length > 0) {
     for (const err of system.recent_errors) {
-      const row = el('div', 'ingestion-row');
-      row.innerHTML = `<span class="status-err">${esc(err.status)}</span>
-        <span>${esc(err.filename)}</span>
-        <span style="color:var(--text-muted)">${esc(err.error)}</span>
-        <span style="color:var(--text-muted)">${fmtTime(err.created_at)}</span>`;
+      /**
+       * WHAT IT MEANS FIRST, then what it said.
+       *
+       * "SevenRooms auth failed: HTTP 503" is precise and useless to most
+       * people who will read this page: it does not say whether our password is
+       * wrong or their server is down, and those need opposite responses — one
+       * is a thing to fix, the other a thing to wait out. Somebody who cannot
+       * tell them apart either escalates every blip or ignores a real outage.
+       *
+       * The raw message STAYS, underneath. It is what you quote to a vendor's
+       * support desk and what you search for, and replacing it would move the
+       * problem rather than solve it. Where we do not recognise an error there
+       * is no sentence and the raw message appears alone, exactly as before.
+       */
+      const row = el('div', 'ingestion-error');
+      const label = err.action === 'fix' ? 'Needs fixing'
+        : err.action === 'wait' ? 'Should clear itself'
+        : err.action === 'watch' ? 'Worth a look'
+        : '';
+
+      row.innerHTML =
+        '<div class="ie-head">' +
+          '<span class="status-err">' + esc(err.status) + '</span>' +
+          (label ? '<span class="ie-action ie-' + esc(err.action) + '">' + label + '</span>' : '') +
+          '<span class="ie-when">' + fmtTime(err.created_at) + '</span>' +
+        '</div>' +
+        (err.explanation ? '<div class="ie-plain">' + esc(err.explanation) + '</div>' : '') +
+        '<div class="ie-raw">' + esc(err.status_raw || err.status) + ' · ' + esc(err.filename) + (err.error ? ' — ' + esc(err.error) : '') + '</div>';
       errCard.appendChild(row);
     }
   } else {

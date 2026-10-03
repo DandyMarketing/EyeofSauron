@@ -83,12 +83,56 @@ export function getSevenroomsVenues() {
  */
 export async function authenticate(clientId: string, clientSecret: string): Promise<string> {
   const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret });
-  const res = await fetch(`${API_BASE}/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  if (!res.ok) throw new Error(`SevenRooms auth failed: HTTP ${res.status}`);
+
+  /**
+   * RETRIED, on the same terms as a page fetch — and it was not, until now.
+   *
+   * isTransientHttp() lists 503 explicitly, and the retry above it was written
+   * on 21 Sep 2026 after SevenRooms returned 502 on three consecutive nights.
+   * That retry was wrapped around the page fetches only. This call, which
+   * happens FIRST and whose failure costs all three venues before a single
+   * reservation is read, was the one thing left unprotected by the mechanism
+   * built for exactly its failure.
+   *
+   * It duly happened: 29 Sep 2026 at 17:04, HTTP 503, three identical
+   * auth-error rows and no data for that run. Four attempts with 1s/2s/4s
+   * backoff would almost certainly have ridden through it. The 7-day lookback
+   * repaired the gap on the next successful run, which is why nothing was lost
+   * and also why nobody noticed — a recovery that depends on a lookback window
+   * is a recovery that stops working the moment an outage outlasts it.
+   *
+   * 401 and 403 are NOT retried, deliberately and for the same reason as
+   * above: those are answers rather than wobbles, and retrying them turns a
+   * credentials problem into a slow credentials problem.
+   */
+  let res!: Response;
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    try {
+      res = await fetch(`${API_BASE}/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+    } catch (networkErr: any) {
+      // Could not reach them at all. Same cause and same remedy as a 502.
+      if (attempt === FETCH_ATTEMPTS) throw networkErr;
+      await sleep(FETCH_BACKOFF_MS * 2 ** (attempt - 1), attempt, `auth network error: ${networkErr.message}`);
+      continue;
+    }
+
+    if (res.ok || !isTransientHttp(res.status)) break;
+    if (attempt === FETCH_ATTEMPTS) break;
+    await sleep(FETCH_BACKOFF_MS * 2 ** (attempt - 1), attempt, `auth HTTP ${res.status}`);
+  }
+
+  if (!res.ok) {
+    // The attempt count is part of the message: "503 after 4 attempts" says
+    // they were down for a while, where a bare 503 could be a single blip.
+    throw new Error(
+      `SevenRooms auth failed: HTTP ${res.status}` +
+      (isTransientHttp(res.status) ? ` after ${FETCH_ATTEMPTS} attempts` : ''),
+    );
+  }
   const json: any = await res.json();
   const token = json?.data?.token;
   if (!token) throw new Error(`SevenRooms auth returned no token: ${JSON.stringify(json).slice(0, 200)}`);

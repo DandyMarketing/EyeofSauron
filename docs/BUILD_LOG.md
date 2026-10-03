@@ -600,6 +600,68 @@ with the whole suite green. `src/frontend/pages.test.ts` now compiles every
 page's inline script without running it, and carries a test proving it still
 rejects broken code.
 
+### 5.10 The retry was wrapped around everything except the call that failed
+
+Spotted by Khai in the admin console: three `sevenrooms:auth-error` rows at
+**29 Sep 2026, 17:04**, one per venue, all reading `SevenRooms auth failed:
+HTTP 503`.
+
+**503 is their server, not our credentials** — a rejected key returns 401, which
+the script already distinguishes. SevenRooms was briefly unavailable, the run
+died before reading a single reservation, and it recovered on its own: the 3 Oct
+runs ingested 397 and 307 rows.
+
+**The defect is where the retry was, not whether there was one.**
+`isTransientHttp()` lists 503 explicitly, and was written on **21 Sep 2026**
+after SevenRooms returned 502 on three consecutive nights — its own comment says
+*"each one cost a night of the forward book."* But the retry loop was wrapped
+around the **page fetches**. `authenticate()` called `fetch()` directly and threw
+on the first non-OK response. **The one call that happens first, and whose
+failure costs all three venues before anything is read, was the only one not
+protected by the mechanism built for exactly its status code.** Eight days later
+it cost a run.
+
+**Recurs? Every customer, for every integration.** The general form: when a
+retry is added to a hot path, the setup call in front of it is easy to miss
+precisely because it is not the part that was failing at the time.
+
+**Nothing was lost, and the reason is worth being uneasy about.** Each run
+re-reads today−7 to today+60, so the next success repaired the gap. That is a
+recovery which depends on an outage being shorter than the lookback — had
+SevenRooms been down eight days, the hole would have been permanent and silent,
+because the watchdog reports ingestion ERRORS and a venue with no past
+reservations for a week does not look different from a quiet week.
+
+### 5.11 The error messages were accurate and unreadable
+
+The same panel showed, verbatim:
+
+    ingestion_error   sevenrooms:auth-error   SevenRooms auth failed: HTTP 503
+    parse_error       Operations_Report_…csv  Quote Not Closed: the parsing is
+                                              finished with an opening quote at line 4
+
+Both precise, both useless to most people who open this page. "HTTP 503" does
+not say whether our password is wrong or their server is down, and those need
+**opposite responses** — one is a thing to fix today, the other a thing to wait
+out. Somebody who cannot tell them apart either escalates every blip or ignores
+a real outage. `ingestion_error` and `parse_error` are our own vocabulary,
+printed first, where they are read first.
+
+`explainIngestError()` now returns a sentence and an action — *needs fixing*,
+*should clear itself*, *worth a look* — and `describeStatus()` says the status in
+words.
+
+**BOTH ARE SHOWN, never one instead of the other.** The sentence is for deciding
+what to do; the raw message and the raw status are what you quote to a vendor's
+support desk and what you search for. Replacing them would move the problem.
+
+**An unrecognised error returns null and the raw message appears alone**, which
+is all the panel ever showed — so silence is never a regression, and a wrong
+explanation (which would send somebody to check credentials that are fine) is
+never possible. The list grows as real errors turn up rather than by
+anticipating them. There is a test asserting that no explanation itself contains
+a status code or a parser term.
+
 ### 5.9 The admin page was slow because authentication was, forty-eight times
 
 Reported as "admin.html loads very slow". The page is 24.6 KB gzipped and makes
