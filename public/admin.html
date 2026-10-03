@@ -578,6 +578,18 @@
 
   .pager-pos { font-size: 12px; color: var(--text-muted); }
 
+  .pager-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    /* Pushed away from the page controls: it is a setting, not a step. */
+    margin-left: 4px;
+  }
+
+  .pager-size select { font-size: 12px; padding: 4px 6px; }
+
   .last-seen { font-size: 12px; white-space: nowrap; }
   .last-seen-active  { color: var(--success); }
   .last-seen-quiet   { color: var(--text-muted); }
@@ -1124,7 +1136,19 @@ const loaded = new Set();
 
 async function openTab(id, { reload = false } = {}) {
   if (!TABS.some(t => t.id === id)) id = DEFAULT_TAB;
+
+  /**
+   * A NEW tab starts at the top. Switching from halfway down one panel used to
+   * leave you halfway down the next, which on Attention meant opening the tab
+   * that answers "is anything wrong" already scrolled past the first thing
+   * wrong.
+   *
+   * Only on a real change: loadAll() re-opens the CURRENT tab after an action,
+   * and scrolling then would yank somebody away from the row they just touched.
+   */
+  const changed = activeTab !== id;
   activeTab = id;
+  if (changed) window.scrollTo({ top: 0, behavior: 'auto' });
 
   for (const b of document.querySelectorAll('.tab')) {
     b.classList.toggle('active', b.dataset.tab === id);
@@ -1693,8 +1717,27 @@ function renderSystem(root, system) {
 
 }
 
-/** How many alerts are drawn at once. */
-const ALERTS_PER_PAGE = 5;
+/**
+ * How many alerts are drawn at once, and the sizes somebody can choose.
+ *
+ * REMEMBERED PER BROWSER, because it is a preference about how this person
+ * likes to read rather than anything about the data. localStorage is wrapped:
+ * it throws in a private window and comes back empty with cleared site data, so
+ * every read and write has to survive failing.
+ */
+const ALERT_PAGE_SIZES = [5, 10, 25, 50];
+const ALERT_SIZE_KEY = 'sauron.alertsPerPage';
+
+function savedAlertsPerPage() {
+  try {
+    const n = Number(localStorage.getItem(ALERT_SIZE_KEY));
+    return ALERT_PAGE_SIZES.includes(n) ? n : ALERT_PAGE_SIZES[0];
+  } catch (e) {
+    return ALERT_PAGE_SIZES[0];
+  }
+}
+
+let alertsPerPage = savedAlertsPerPage();
 
 function renderAlerts(root, alerts) {
   // Reconciliation alerts. These are data problems, not job failures -- the
@@ -1720,11 +1763,11 @@ function renderAlerts(root, alerts) {
  * this codebase keeps writing down; the count and the page position are both on
  * screen, and every alert is still reachable.
  */
-function drawAlerts(a, alerts, page) {
-  const pages = Math.max(1, Math.ceil(alerts.length / ALERTS_PER_PAGE));
+function drawAlerts(a, alerts, page, scroll) {
+  const pages = Math.max(1, Math.ceil(alerts.length / alertsPerPage));
   const current = Math.min(Math.max(0, page), pages - 1);
-  const from = current * ALERTS_PER_PAGE;
-  const slice = alerts.slice(from, from + ALERTS_PER_PAGE);
+  const from = current * alertsPerPage;
+  const slice = alerts.slice(from, from + alertsPerPage);
 
   a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
       '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. Resolving clears every duplicate of the same finding.</p>' +
@@ -1756,17 +1799,51 @@ function drawAlerts(a, alerts, page) {
             '</div>' +
           '</div></details>';
       }).join('') +
-      (pages > 1
-        ? '<div class="pager">' +
-            '<button class="btn btn-small btn-outline" data-page="' + (current - 1) + '"' + (current === 0 ? ' disabled' : '') + '>Previous</button>' +
+      '<div class="pager">' +
+        (pages > 1
+          ? '<button class="btn btn-small btn-outline" data-page="' + (current - 1) + '"' + (current === 0 ? ' disabled' : '') + '>Previous</button>' +
             '<span class="pager-pos">' + (from + 1) + '&ndash;' + (from + slice.length) + ' of ' + alerts.length + '</span>' +
-            '<button class="btn btn-small btn-outline" data-page="' + (current + 1) + '"' + (current === pages - 1 ? ' disabled' : '') + '>Next</button>' +
-          '</div>'
-        : '');
+            '<button class="btn btn-small btn-outline" data-page="' + (current + 1) + '"' + (current === pages - 1 ? ' disabled' : '') + '>Next</button>'
+          : '<span class="pager-pos">' + alerts.length + ' of ' + alerts.length + '</span>') +
+        '<label class="pager-size">Show' +
+          '<select id="alerts-per-page">' +
+            ALERT_PAGE_SIZES.map(function (n) {
+              return '<option value="' + n + '"' + (n === alertsPerPage ? ' selected' : '') + '>' + n + '</option>';
+            }).join('') +
+          '</select>' +
+        '</label>' +
+      '</div>';
 
   a.querySelectorAll('.pager button[data-page]').forEach(function (b) {
-    b.addEventListener('click', function () { drawAlerts(a, alerts, Number(b.dataset.page)); });
+    b.addEventListener('click', function () { drawAlerts(a, alerts, Number(b.dataset.page), true); });
   });
+
+  /**
+   * Changing the page size KEEPS THE ROW YOU WERE LOOKING AT on screen.
+   *
+   * Jumping back to page one would be simpler and is the wrong behaviour:
+   * somebody three pages in who widens the view to see more is asking for more
+   * of WHAT THEY ARE READING, not to start again.
+   */
+  const sizePicker = a.querySelector('#alerts-per-page');
+  if (sizePicker) {
+    sizePicker.addEventListener('change', function () {
+      const firstVisible = from;
+      alertsPerPage = Number(sizePicker.value);
+      try { localStorage.setItem(ALERT_SIZE_KEY, String(alertsPerPage)); } catch (e) { /* private window */ }
+      drawAlerts(a, alerts, Math.floor(firstVisible / alertsPerPage), true);
+    });
+  }
+
+  /**
+   * BACK TO THE TOP OF THE SECTION on a page change.
+   *
+   * Five alerts is about a screenful, so pressing Next from the bottom of one
+   * page left you looking at the bottom of the next — mid-list, with the first
+   * four already scrolled past. Not done on the first draw, which would yank
+   * the page down the moment the tab opened.
+   */
+  if (scroll) a.scrollIntoView({ block: 'start', behavior: 'smooth' });
 
   a.querySelectorAll('.alert-card').forEach(function (card) {
     card.querySelector('.al-resolve').addEventListener('click', async function () {
@@ -1791,7 +1868,7 @@ function drawAlerts(a, alerts, page) {
       if (remaining.length === 0) { a.remove(); loadBadges(); return; }
 
       // Stay on the page you were on, unless resolving emptied it.
-      drawAlerts(a, remaining, Math.min(current, Math.ceil(remaining.length / ALERTS_PER_PAGE) - 1));
+      drawAlerts(a, remaining, Math.min(current, Math.ceil(remaining.length / alertsPerPage) - 1));
       loadBadges();
     });
   });
