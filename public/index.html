@@ -390,6 +390,22 @@
   #convo-current .chev { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
   #convo-current[aria-expanded="true"] .chev { color: var(--accent); }
 
+  /**
+   * THE `hidden` ATTRIBUTE DOES NOT WIN AGAINST A `display` RULE.
+   *
+   * `hidden` works by the browser's own stylesheet setting `display: none`, and
+   * ANY author rule that sets display beats it — so `#history-panel { display:
+   * flex }` left the panel permanently on screen, covering the chat's own
+   * header. Worse, it looked broken rather than open: the list only loads when
+   * the panel is OPENED through historyPanel(), which had never run, so it sat
+   * on "Loading…" for ever, and the chevron that would have opened it properly
+   * was underneath the thing covering it.
+   *
+   * Stated as a rule rather than worked around by swapping to a class, because
+   * the next element with `hidden` and a display rule will hit the same thing.
+   */
+  [hidden] { display: none !important; }
+
   /* Catches the tap that closes the dropdown, and dims what is behind it. */
   #history-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.4); }
 
@@ -1563,6 +1579,16 @@ async function loadConversations() {
   let data;
   try {
     const res = await fetch('/api/conversations', { headers: { Authorization: 'Bearer ' + authToken } });
+    /**
+     * A non-OK response has to be caught EXPLICITLY. A 401 or a 500 still
+     * parses as JSON, `data.conversations` comes back undefined, and the panel
+     * would report "no saved chats yet" — which is a failure disguised as good
+     * news, and the reader has no way to tell the difference.
+     */
+    if (!res.ok) {
+      list.innerHTML = '<div class="hp-empty">Could not load your chats (' + res.status + ').</div>';
+      return;
+    }
     data = await res.json();
   } catch (e) {
     list.innerHTML = '<div class="hp-empty">Could not load your chats.</div>';

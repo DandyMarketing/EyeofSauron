@@ -626,6 +626,23 @@
   .venue-chip:has(input:disabled) { opacity: 0.45; cursor: default; }
 
   /**
+   * THE `hidden` ATTRIBUTE DOES NOT WIN AGAINST A `display` RULE.
+   *
+   * `hidden` works by the browser's own stylesheet setting `display: none`, and
+   * any author rule setting display beats it. This page hides its tab panels
+   * and its badge counts with the attribute and gets away with it only because
+   * neither carries a display rule yet — the day somebody gives `.tab-badge` a
+   * `display: inline-flex`, every tab sprouts a permanent "0".
+   *
+   * It is not hypothetical: exactly this shipped on the chat page, where
+   * `#history-panel { display: flex }` left the conversation dropdown
+   * permanently on screen covering the header, and was reported as "cannot
+   * load" because the control that would have opened it properly was
+   * underneath it.
+   */
+  [hidden] { display: none !important; }
+
+  /**
    * The tab bar.
    *
    * Scrolls sideways rather than wrapping: five tabs do not fit across a phone,

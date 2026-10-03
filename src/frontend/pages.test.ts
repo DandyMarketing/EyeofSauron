@@ -233,3 +233,32 @@ test('enforceTerms still reports which case it was', () => {
   assert.ok(gate.includes("resolve('accepted')"), "terms-gate must resolve 'accepted' after acceptance");
   assert.ok(gate.includes("return 'skipped'"), "terms-gate must return 'skipped' when the check itself failed");
 });
+
+test('a page using the hidden attribute also neutralises display rules', () => {
+  /**
+   * `hidden` works by the BROWSER's stylesheet setting `display: none`, and any
+   * author rule that sets display beats it. `#history-panel { display: flex }`
+   * left the chat's conversation dropdown permanently on screen, covering the
+   * header — and because the list only loads when the panel is opened through
+   * its own function, it sat on "Loading…" for ever while the control that
+   * would have opened it properly was underneath it.
+   *
+   * Shipped, and reported as "cannot load". The cause was invisible from the
+   * symptom, which is why the rule is asserted rather than remembered: any page
+   * relying on `hidden` needs the reset, and the next element with a display
+   * rule will hit exactly this.
+   */
+  for (const page of readdirSync('public').filter(f => f.endsWith('.html'))) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+
+    // Only pages that actually use the attribute on an element.
+    if (!/<[a-z-]+[^>]*\shidden(\s|>)/i.test(html)) continue;
+
+    assert.match(
+      html,
+      /\[hidden\]\s*\{[^}]*display:\s*none/,
+      `public/${page} uses the hidden attribute but has no "[hidden] { display: none }" reset — ` +
+        `any element it hides that also has a display rule will stay on screen`,
+    );
+  }
+});
