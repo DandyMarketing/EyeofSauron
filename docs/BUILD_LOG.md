@@ -600,6 +600,49 @@ with the whole suite green. `src/frontend/pages.test.ts` now compiles every
 page's inline script without running it, and carries a test proving it still
 rejects broken code.
 
+### 5.8 Four layout bugs that only existed on a phone
+
+Reported from a real phone on 3 Oct 2026, with screenshots, and every one
+reproduced at 390px before anything was changed. The desktop admin page was
+fine; none of this is visible there, which is why it had survived.
+
+| Symptom | Root cause | Recurs? |
+|---|---|---|
+| The five Meta probe buttons rendered on top of one another | Inline-block buttons separated by a space. They fit on one line on a desktop; wrapped, a box taller than the inherited line-height overlaps the line above it | Every customer |
+| The StaffAny date fields were white boxes on a dark page | `.invite-form input` and `.modal input` were styled, a bare `input` was not, and those two were the only inputs outside both. `color-scheme: dark` was also needed — the calendar icon is drawn by the browser, and CSS cannot reach it | Every customer |
+| An AI note rendered **one character per line**, hundreds of lines tall | `word-break: break-all` on `.fname`, correct for the filenames the class was written for and wrong for the sentences it was later reused for, once flex had squeezed the column to ~10px | One-off |
+| The page scrolled sideways, 557px of content in a 375px viewport, so every table's right-hand column was unreachable | No scroll container on any table. The role matrix carries a hard `min-width: 520px` | Every customer |
+
+**The fix that did not work, and why it is worth recording.** The obvious move
+for the tables is `display: block; overflow-x: auto` on the table itself —
+`display: block` is genuinely required, because a table box ignores `overflow-x`
+at all. It changed nothing: computed style came back `display=block
+overflowX=auto` **`width=520px`**, and the page was still 557px wide. The
+`min-width` had simply moved onto the scrolling box. **Where a table has a
+minimum, the scroll must go on a WRAPPER outside it.** Where it has none — the
+markdown tables in the chat — putting it on the table is correct, and
+index.html had been doing exactly that since it was written.
+
+**The wrapper is applied by a MutationObserver, not at each call site.** This
+page builds tables in about a dozen places and several inject their HTML long
+after load, when somebody clicks a probe. Wrapping at each site means finding
+all twelve today and remembering the thirteenth next year — and the forgotten
+one is always the newest. Same argument as the page tests discovering pages
+rather than listing them.
+
+**Looking for the bug found two more.** `plan.html` had the same table overflow
+(409px of content in 375px) and `briefing.html` had nothing stopping it; both
+were simply missed when `index.html` got it. The briefing is the page most
+likely to be read on a phone.
+
+**Two process notes.** A static test cannot prove a layout — the proof was a
+browser reporting `scrollWidth` against `clientWidth`, and those numbers are in
+`mobile-layout.test.ts` beside each assertion. And when a check first fired, it
+was on a **legitimate** 760px: the off-screen PNG staging element, held at
+`left: -10000px`, which contributes nothing to layout. The exemption was made
+specific rather than the check weakened, because the easy response to a false
+positive is to delete the test.
+
 ### 5.7 Three dots for ninety seconds, and two wrong assumptions on the way to fixing it
 
 A question that runs a twelve-round tool loop takes well over a minute, and the

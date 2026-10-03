@@ -130,6 +130,27 @@
   .btn:hover { background: var(--accent-dim); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /**
+   * A row of buttons that wraps WITHOUT the buttons landing on top of each
+   * other.
+   *
+   * They were written as inline-block elements separated by a space, which is
+   * fine on a desktop where they fit on one line. On a phone they wrap — and an
+   * inline-block box taller than the inherited line-height overlaps the line
+   * above it, so the five Meta probe buttons rendered as a stack of
+   * half-covered rectangles. Reported from a real phone; reproduced at 390px
+   * before this was written.
+   *
+   * Flex is the fix rather than a line-height patch: the gap is explicit, the
+   * wrap is explicit, and neither depends on a font metric.
+   */
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
   .btn-small {
     padding: 6px 12px;
     font-size: 12px;
@@ -161,6 +182,34 @@
     padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid var(--border);
+  }
+
+  /**
+   * A WIDE TABLE SCROLLS ITSELF, instead of making the whole page scroll.
+   *
+   * This page has tables nothing can make narrow: the role matrix carries a
+   * hard `min-width: 520px` and the account mappings need five columns of real
+   * text. With no scroll container they pushed the DOCUMENT wide — measured at
+   * 557px of content in a 375px viewport — so every heading and paragraph on
+   * the page sat off-centre and the right-hand column of every table was simply
+   * unreachable. Reported from a phone, reproduced at 390px.
+   *
+   * IT HAS TO BE A WRAPPER, and the first attempt proved why. Putting
+   * `display: block; overflow-x: auto` on the table itself looks equivalent and
+   * is not: `min-width: 520px` then applies to the scrolling box, so the box is
+   * 520px wide in a 375px viewport and overflows exactly as before. Measured —
+   * the computed style came back `display=block overflowX=auto width=520px`
+   * with the page still 557px wide. The minimum has to sit on the table and the
+   * scrolling on something outside it.
+   *
+   * Applied at every width rather than only on mobile: a table that fits
+   * produces no scrollbar, so there is nothing to gain from making the
+   * behaviour conditional and a whole failure mode to lose.
+   */
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   th {
@@ -245,6 +294,33 @@
     font-family: inherit;
     outline: none;
   }
+
+  /**
+   * Every input, not just the ones inside a known form.
+   *
+   * `.invite-form input` and `.modal input` were styled and a bare `input` was
+   * not, so the two StaffAny date fields rendered as white boxes in the middle
+   * of a dark page — the browser default, on the one control type nobody had
+   * put inside a styled container.
+   *
+   * `color-scheme: dark` is the half that CSS alone cannot do: the calendar
+   * icon inside a date field is drawn by the browser, not by us, and without
+   * this it stays black-on-black and effectively invisible.
+   */
+  input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    color-scheme: dark;
+    max-width: 100%;
+  }
+
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
   .toast {
     position: fixed;
@@ -382,7 +458,19 @@
     margin-bottom: 4px;
   }
 
-  .file-item .fname { flex: 1; word-break: break-all; }
+  /**
+   * `overflow-wrap: anywhere`, NOT `word-break: break-all`.
+   *
+   * This class began as an upload list, where break-all was right: a filename
+   * has no spaces and must be allowed to break mid-word. The AI notes list then
+   * reused it for sentences, and break-all breaks a sentence mid-word too —
+   * which, once the column was squeezed, produced a note rendered ONE CHARACTER
+   * PER LINE, several hundred lines tall. Reported from a phone.
+   *
+   * `anywhere` breaks mid-word only when there is no other way to fit, so a
+   * long filename still wraps and a sentence breaks at its spaces.
+   */
+  .file-item .fname { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .file-item .fsize { color: var(--text-muted); flex-shrink: 0; }
   .file-item .fstatus { flex-shrink: 0; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
   .fstatus-pending { color: var(--text-muted); }
@@ -424,6 +512,26 @@
     table { font-size: 13px; }
     th, td { padding: 8px 6px; }
     .drop-zone { padding: 24px 16px; }
+
+    /**
+     * Stack the note rows rather than squeezing them.
+     *
+     * Five items on one row — badge, venue, the note, a date, a remove button —
+     * cannot share 375px. The three short ones are `flex-shrink: 0`, so the
+     * note was the only thing that could give, and it gave all the way down to
+     * one character wide. Stacked, the note gets the full width and the
+     * metadata sits above it.
+     */
+    .file-item {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      position: relative;
+      padding-right: 34px;
+    }
+
+    /* The remove button goes to the corner, where it does not take a row. */
+    .file-item .fremove { position: absolute; top: 6px; right: 8px; }
   }
 </style>
 </head>
@@ -513,6 +621,9 @@ let currentUserId = null;
       '<div class="loading">Could not load the admin data: ' + escapeHtml(String(result.err.message || result.err)) + '</div>';
     return;
   }
+  // Started BEFORE the first render, so the tables that render() creates are
+  // caught by the observer rather than needing a second pass after it.
+  watchForTables();
   applyAll(result.d);
 })();
 
@@ -684,6 +795,41 @@ async function fetchAll() {
     api('GET', '/admin/api/alerts'),
   ]);
   return { usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData };
+}
+
+/**
+ * Give every table a scroll container, including the ones not written yet.
+ *
+ * WHY AN OBSERVER AND NOT TEN EDITS. This page builds tables in about a dozen
+ * places — render(), the Meta probes, the StaffAny probe, the Xero panel, the
+ * account mappings — and several of them inject their HTML long after load,
+ * when somebody clicks a probe button. Wrapping them at each call site means
+ * finding all twelve today and remembering the thirteenth next year, and the
+ * one that gets forgotten is the one added last. This is the same argument as
+ * the page tests discovering pages rather than listing them: cover the shape,
+ * not the instances.
+ *
+ * IT CANNOT LOOP. The observer's own insertion fires it again, that pass finds
+ * every table already wrapped, and it mutates nothing — so the next pass is
+ * never scheduled.
+ */
+function makeTablesScrollable(root) {
+  for (const table of root.querySelectorAll('table')) {
+    const parent = table.parentElement;
+    if (!parent || parent.classList.contains('table-scroll')) continue;
+    const wrap = document.createElement('div');
+    wrap.className = 'table-scroll';
+    parent.insertBefore(wrap, table);
+    wrap.appendChild(table);
+  }
+}
+
+function watchForTables() {
+  const root = document.getElementById('app');
+  if (!root) return;
+  makeTablesScrollable(root);
+  new MutationObserver(() => makeTablesScrollable(root))
+    .observe(root, { childList: true, subtree: true });
 }
 
 function applyAll(d) {
@@ -1196,11 +1342,13 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   const metaSection = el('div', 'section');
   metaSection.innerHTML = '<h2>Meta (Instagram &amp; Facebook)</h2>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
-    '<button id="meta-discover-btn" class="btn">Discover accounts</button> ' +
-    '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button> ' +
-    '<button id="meta-probe-btn" class="btn">Probe metric names</button> ' +
-    '<button id="meta-sample-btn" class="btn">Sample raw response</button> ' +
-    '<button id="meta-calibrate-btn" class="btn">Calibrate day alignment</button>' +
+    '<div class="btn-row">' +
+      '<button id="meta-discover-btn" class="btn">Discover accounts</button>' +
+      '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button>' +
+      '<button id="meta-probe-btn" class="btn">Probe metric names</button>' +
+      '<button id="meta-sample-btn" class="btn">Sample raw response</button>' +
+      '<button id="meta-calibrate-btn" class="btn">Calibrate day alignment</button>' +
+    '</div>' +
     '<div id="meta-result" style="margin-top:16px"></div>';
   app.appendChild(metaSection);
 
@@ -1215,9 +1363,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     // Dates, because a single empty week proves nothing on its own. The
     // endpoint has always accepted them; only the button did not pass them, so
     // testing another week meant shipping a commit.
-    '<input type="date" id="staffany-start" style="margin-right:6px"> ' +
-    '<input type="date" id="staffany-end" style="margin-right:10px"> ' +
-    '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
+    '<div class="btn-row">' +
+      '<input type="date" id="staffany-start">' +
+      '<input type="date" id="staffany-end">' +
+      '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
+    '</div>' +
     '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Leave the dates blank for the last complete week.</div>' +
     '<div id="staffany-result" style="margin-top:16px"></div>' +
     // The mapping, on the same panel as the probe, because the probe is what

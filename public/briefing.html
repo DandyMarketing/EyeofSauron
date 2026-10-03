@@ -102,7 +102,25 @@
   .rec-body p { margin: 8px 0; }
   .rec-body ul { margin: 8px 0 8px 18px; }
   .rec-body h2, .rec-body h3, .rec-body h4 { font-size: 14px; margin: 12px 0 4px; }
-  .rec-body table { border-collapse: collapse; margin: 10px 0; font-size: 13px; width: 100%; }
+
+  /**
+   * A wide table scrolls itself rather than widening the page.
+   *
+   * `display: block` is what makes overflow-x apply at all — a table box
+   * ignores it. The row groups keep their table display types, so the browser
+   * forms an anonymous table around them and the columns still line up.
+   *
+   * Safe here, unlike on the admin page, precisely because these tables carry
+   * no `min-width`: the box takes the container's width and only the content
+   * scrolls. Where a minimum exists the scroll has to go on a WRAPPER instead,
+   * or the minimum applies to the scrolling box and overflows exactly as
+   * before. Measured both ways before this was written.
+   *
+   * Measured: a six-column table of venue figures took plan.html to 409px of
+   * content in a 375px viewport. index.html already did this; these two were
+   * simply missed.
+   */
+  .rec-body table { border-collapse: collapse; margin: 10px 0; font-size: 13px; width: 100%; display: block; overflow-x: auto; }
   .rec-body th, .rec-body td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
   .rec-body th { background: var(--surface-hover); }
   .rec-body code { background: var(--surface-hover); padding: 1px 4px; border-radius: 3px; font-size: 12px; }

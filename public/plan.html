@@ -70,7 +70,25 @@
   .msg.agent .bubble ul, .msg.agent .bubble ol { margin: 8px 0 8px 22px; }
   .msg.agent .bubble li { margin: 4px 0; }
   .msg.agent .bubble code { background: var(--surface); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
-  .msg.agent .bubble table { border-collapse: collapse; margin: 12px 0; width: 100%; font-size: 14px; }
+
+  /**
+   * A wide table scrolls itself rather than widening the page.
+   *
+   * `display: block` is what makes overflow-x apply at all — a table box
+   * ignores it. The row groups keep their table display types, so the browser
+   * forms an anonymous table around them and the columns still line up.
+   *
+   * Safe here, unlike on the admin page, precisely because these tables carry
+   * no `min-width`: the box takes the container's width and only the content
+   * scrolls. Where a minimum exists the scroll has to go on a WRAPPER instead,
+   * or the minimum applies to the scrolling box and overflows exactly as
+   * before. Measured both ways before this was written.
+   *
+   * Measured: a six-column table of venue figures took plan.html to 409px of
+   * content in a 375px viewport. index.html already did this; these two were
+   * simply missed.
+   */
+  .msg.agent .bubble table { border-collapse: collapse; margin: 12px 0; width: 100%; font-size: 14px; display: block; overflow-x: auto; }
   .msg.agent .bubble th, .msg.agent .bubble td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
   .msg.agent .bubble th { background: var(--surface); font-weight: 600; }
   .msg .queries { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
@@ -116,7 +134,7 @@
   .draft .note { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
   .draft dl { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 16px; font-size: 14px; margin-bottom: 14px; }
   .draft dt { color: var(--text-muted); }
-  .draft table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0 14px; }
+  .draft table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0 14px; display: block; overflow-x: auto; }
   .draft th, .draft td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
   .draft th { background: var(--bg); }
   .draft .missing { color: var(--error); font-size: 13px; margin-bottom: 12px; }
