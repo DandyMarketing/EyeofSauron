@@ -361,6 +361,114 @@
   }
   .bubble h4 { font-size: 14px; }
 
+  /* --- chat history ------------------------------------------------------ */
+
+  /**
+   * The switcher bar: which chat you are in, always visible.
+   *
+   * Sticky, because on a long conversation the one thing you might want while
+   * scrolled to the bottom is to start a different one.
+   */
+  #convo-bar {
+    position: sticky; top: 0; z-index: 30;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 7px 14px;
+  }
+
+  #convo-current {
+    display: flex; align-items: center; gap: 8px;
+    max-width: 100%;
+    background: none; border: none; color: var(--text);
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    cursor: pointer; padding: 5px 2px;
+  }
+
+  /* min-width:0 so a long title truncates instead of pushing the chevron off. */
+  #convo-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #convo-current .chev { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
+  #convo-current[aria-expanded="true"] .chev { color: var(--accent); }
+
+  /* Catches the tap that closes the dropdown, and dims what is behind it. */
+  #history-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.4); }
+
+  #history-panel {
+    position: fixed; z-index: 41;
+    top: 0; left: 0; right: 0;
+    max-height: 70vh;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 0 12px 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    display: flex; flex-direction: column;
+    padding: 12px;
+  }
+
+  /* Anchored under the bar rather than full-width once there is room for it. */
+  @media (min-width: 700px) {
+    #history-panel { left: 14px; right: auto; width: 420px; }
+  }
+
+  .btn-newchat {
+    width: 100%;
+    background: var(--accent); color: #000; border: none; border-radius: 8px;
+    padding: 10px; font-size: 14px; font-weight: 600; font-family: inherit;
+    cursor: pointer; margin-bottom: 12px;
+  }
+
+  #history-list { flex: 1; overflow-y: auto; }
+
+  .hp-item {
+    display: flex; align-items: center; gap: 4px;
+    border-radius: 8px; margin-bottom: 2px;
+  }
+  .hp-item:hover { background: var(--bg); }
+  .hp-item.current { background: var(--bg); }
+
+  /**
+   * The title is a button so the whole row is a tap target, and min-width:0
+   * lets it shrink — without it a long title pushes the rename and delete
+   * controls off the edge of the panel.
+   */
+  .hp-open {
+    flex: 1; min-width: 0; text-align: left;
+    background: none; border: none; color: var(--text);
+    font-family: inherit; font-size: 13px; line-height: 1.35;
+    padding: 9px 8px; cursor: pointer;
+  }
+  .hp-open .hp-when { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .hp-open .hp-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .hp-act {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 13px; padding: 6px;
+    /* 30px square: a thumb target, not a mouse target. */
+    min-width: 30px; min-height: 30px;
+  }
+  .hp-act:hover { color: var(--accent); }
+  .hp-act.hp-del:hover { color: var(--error); }
+
+  .hp-empty { color: var(--text-muted); font-size: 13px; padding: 10px 2px; line-height: 1.5; }
+
+  .hp-note {
+    font-size: 11px; color: var(--text-muted);
+    border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; line-height: 1.5;
+  }
+
+  /**
+   * A message withheld because the reader's access changed.
+   *
+   * Said out loud rather than dropped: a gap in your own conversation with no
+   * explanation reads as data loss, and the thing that happened is not a loss.
+   */
+  .withheld {
+    font-style: italic;
+    color: var(--text-muted);
+    border-left: 2px solid var(--accent-dim);
+    padding-left: 10px;
+  }
+
   .typing {
     display: flex;
     gap: 4px;
@@ -668,6 +776,30 @@
       <a href="#" id="logout-link" style="color:var(--text-muted);text-decoration:none;display:none">Logout</a>
     </nav>
   </header>
+
+  <!--
+    THE CURRENT CHAT, WITH THE REST BEHIND A CHEVRON.
+
+    This started as a slide-over reached from a "History" link, which hid two
+    things that matter: WHICH conversation you are in, and that there are
+    others. Khai pointed at the pattern -- show the current one, let it drop
+    down -- and it is better for exactly that reason. The title is always on
+    screen, switching is one tap, and no layout is given up to a list nobody is
+    reading most of the time.
+  -->
+  <div id="convo-bar">
+    <button id="convo-current" aria-haspopup="listbox" aria-expanded="false">
+      <span id="convo-title">New chat</span>
+      <span class="chev" aria-hidden="true">&#9662;</span>
+    </button>
+  </div>
+
+  <div id="history-overlay" hidden></div>
+  <div id="history-panel" hidden role="listbox" aria-label="Your chats">
+    <button id="new-chat" class="btn-newchat">+ New chat</button>
+    <div id="history-list"><div class="hp-empty">Loading&hellip;</div></div>
+    <div class="hp-note">Kept for a year. Only you can read these.</div>
+  </div>
 
   <div id="chat">
     <div class="welcome" id="welcome">
@@ -1334,7 +1466,7 @@ async function askStreaming(question, progress) {
   const res = await fetch('/ask/stream', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value }),
+    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
   });
 
   // 401 and 403 are real answers about this person, not a broken route, so they
@@ -1381,7 +1513,7 @@ async function askPlain(question) {
   const res = await fetch('/ask', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value }),
+    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
   });
 
   if (!res.ok) {
@@ -1390,6 +1522,189 @@ async function askPlain(question) {
   }
   return { data: await res.json() };
 }
+
+
+/* --- chat history --------------------------------------------------------- */
+
+/**
+ * Which thread this conversation belongs to.
+ *
+ * Null until the first answer comes back: the server creates the thread when it
+ * saves the first exchange and returns the id, rather than the browser making
+ * one up. A client-chosen id would mean an empty thread for every question
+ * somebody started typing and abandoned.
+ */
+let conversationId = null;
+
+function historyPanel(open) {
+  document.getElementById('history-panel').hidden = !open;
+  document.getElementById('history-overlay').hidden = !open;
+  document.getElementById('convo-current').setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) loadConversations();
+}
+
+/** Keep the bar showing the thread you are actually in. */
+function setConvoTitle(title) {
+  document.getElementById('convo-title').textContent = title || 'New chat';
+}
+
+function whenText(iso) {
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
+  if (!Number.isFinite(days)) return '';
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 30) return days + ' days ago';
+  const months = Math.floor(days / 30);
+  return months + (months === 1 ? ' month ago' : ' months ago');
+}
+
+async function loadConversations() {
+  const list = document.getElementById('history-list');
+  let data;
+  try {
+    const res = await fetch('/api/conversations', { headers: { Authorization: 'Bearer ' + authToken } });
+    data = await res.json();
+  } catch (e) {
+    list.innerHTML = '<div class="hp-empty">Could not load your chats.</div>';
+    return;
+  }
+
+  const items = (data && data.conversations) || [];
+  if (items.length === 0) {
+    // Said plainly rather than left blank: nothing here yet and something went
+    // wrong look identical to somebody staring at an empty panel.
+    list.innerHTML = '<div class="hp-empty">No saved chats yet. Ask something and it will appear here.</div>';
+    return;
+  }
+
+  list.innerHTML = items.map(function (c) {
+    const title = escapeHtml(c.title || 'Untitled');
+    return '<div class="hp-item' + (c.id === conversationId ? ' current' : '') + '" data-id="' + escapeHtml(c.id) + '">' +
+      '<button class="hp-open"><span class="hp-title">' + title + '</span>' +
+        '<span class="hp-when">' + whenText(c.updated_at) + '</span></button>' +
+      '<button class="hp-act hp-rename" title="Rename">&#9998;</button>' +
+      '<button class="hp-act hp-del" title="Delete">&times;</button>' +
+    '</div>';
+  }).join('');
+
+  list.querySelectorAll('.hp-item').forEach(function (row) {
+    const id = row.dataset.id;
+    row.querySelector('.hp-open').addEventListener('click', function () { openConversation(id); });
+    row.querySelector('.hp-rename').addEventListener('click', async function () {
+      const current = row.querySelector('.hp-title').textContent;
+      const next = prompt('Rename this chat', current);
+      if (next === null || !next.trim()) return;
+      const res = await fetch('/api/conversations/' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({ title: next.trim() }),
+      });
+      if (!res.ok) { alert('Could not rename that chat.'); return; }
+      loadConversations();
+    });
+    row.querySelector('.hp-del').addEventListener('click', async function () {
+      const title = row.querySelector('.hp-title').textContent;
+      if (!confirm('Delete "' + title + '"? This cannot be undone.')) return;
+      const res = await fetch('/api/conversations/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + authToken },
+      });
+      if (!res.ok) { alert('Could not delete that chat.'); return; }
+      // Deleting the thread you are in leaves you on a blank one rather than
+      // looking at a conversation that no longer exists.
+      if (id === conversationId) startNewChat();
+      loadConversations();
+    });
+  });
+}
+
+function startNewChat() {
+  conversationId = null;
+  history = [];
+  chat.innerHTML = '';
+  welcome = null;
+  setConvoTitle('New chat');
+  addMessage('assistant', 'New chat. What would you like to know?');
+  historyPanel(false);
+}
+
+/**
+ * Replay a stored thread.
+ *
+ * The messages arrive ALREADY re-checked against who this person is right now —
+ * a turn that read a venue or a data domain they no longer have access to comes
+ * back with its text replaced by an explanation and its charts stripped. The
+ * browser is not deciding anything here; it is rendering what the server
+ * allowed.
+ */
+async function openConversation(id) {
+  historyPanel(false);
+  chat.innerHTML = '';
+  welcome = null;
+
+  let data;
+  try {
+    const res = await fetch('/api/conversations/' + id, { headers: { Authorization: 'Bearer ' + authToken } });
+    if (!res.ok) { addMessage('assistant', '<div class="error-msg">Could not open that chat.</div>', true); return; }
+    data = await res.json();
+  } catch (e) {
+    addMessage('assistant', '<div class="error-msg">Could not open that chat.</div>', true);
+    return;
+  }
+
+  conversationId = id;
+  setConvoTitle(data.title);
+  history = [];
+
+  for (const m of data.messages || []) {
+    if (m.role === 'user') {
+      addMessage('user', m.content);
+      history.push({ role: 'user', content: m.content });
+      continue;
+    }
+
+    if (m.withheld) {
+      addMessage('assistant', '<div class="withheld">' + escapeHtml(m.content) + '</div>', true);
+      // NOT pushed into history: re-sending a withheld placeholder as context
+      // would have the model answer about an explanation rather than the data.
+      continue;
+    }
+
+    for (const chart of m.charts || []) {
+      const wrap = document.createElement('div');
+      wrap.className = 'message assistant';
+      wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
+      const card = wrap.querySelector('.chart-card');
+      card.title = chart.title || 'Chart';
+      card.addEventListener('click', () => openChart(card.innerHTML));
+      chat.appendChild(wrap);
+    }
+
+    addMessage('assistant', m.content);
+    history.push({ role: 'assistant', content: m.content });
+  }
+
+  if (data.withheld > 0) {
+    const note = document.createElement('div');
+    note.className = 'message assistant';
+    note.innerHTML = '<div class="avatar"></div><div class="bubble"><div class="withheld">' +
+      data.withheld + (data.withheld === 1 ? ' answer in this chat is' : ' answers in this chat are') +
+      ' hidden because your access has changed since you asked.</div></div>';
+    chat.appendChild(note);
+  }
+
+  chat.scrollTop = chat.scrollHeight;
+}
+
+document.getElementById('convo-current').addEventListener('click', function () {
+  historyPanel(document.getElementById('history-panel').hidden);
+});
+// Escape closes it, like any other menu.
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') historyPanel(false);
+});
+document.getElementById('history-overlay').addEventListener('click', function () { historyPanel(false); });
+document.getElementById('new-chat').addEventListener('click', startNewChat);
 
 async function send() {
   const question = input.value.trim();
@@ -1431,6 +1746,18 @@ async function send() {
     }
 
     const data = outcome.data;
+
+    /**
+     * The thread this now belongs to. The server created it on the first save
+     * and tells us which it was, so the next question continues the same one.
+     */
+    if (data.conversation_id) {
+      const isNew = conversationId !== data.conversation_id;
+      conversationId = data.conversation_id;
+      // The server titles a new thread from the first question. Shown straight
+      // away rather than after a refresh, so the bar is never stale.
+      if (isNew) setConvoTitle(question.length > 60 ? question.slice(0, 57) + '…' : question);
+    }
 
     if (data.toolCalls && data.toolCalls.length > 0) {
       const toolNames = [...new Set(data.toolCalls.map(t => t.name.replace(/_/g, ' ')))];

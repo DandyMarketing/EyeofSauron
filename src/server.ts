@@ -22,6 +22,10 @@ import { askSauron } from './ai/engine.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
 import { queryTools } from './ai/tools.js';
+import {
+  createConversation, appendTurn, listConversations, readConversation,
+  renameConversation, deleteConversation,
+} from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -237,8 +241,24 @@ app.post('/ingest/revel', async (c) => {
   }> = [];
 
   for (const file of files) {
+    /**
+     * Declared OUTSIDE the try so the failure path can use it.
+     *
+     * A parse error used to be logged with no venue, no business date, and
+     * report_type hardcoded to 'product_mix' — so an Operations report that
+     * failed to parse was recorded as a product-mix failure for an unknown
+     * venue on an unknown day. Two things went wrong with that: the admin
+     * console could not tell anybody WHICH day needed re-sending, and the
+     * resolved-check could never match a later success against it, so the
+     * failure sat on the page as outstanding for ever even after the file was
+     * re-sent and loaded.
+     *
+     * The filename carries both, and parsing the filename is a different step
+     * from parsing the contents — it is the CONTENTS that failed.
+     */
+    let meta: ReturnType<typeof parseFilename> | null = null;
     try {
-      const meta = parseFilename(file.name);
+      meta = parseFilename(file.name);
 
       if (meta.reportType === 'product_mix') {
         const content = await file.text();
@@ -260,7 +280,24 @@ app.post('/ingest/revel', async (c) => {
     } catch (e: any) {
       const status = await ingestFailureStatus(file.name, e.message, 'parse_error');
       results.push({ filename: file.name, status, detail: e.message });
-      await logIngestion({ filename: file.name, report_type: 'product_mix', status, error_message: e.message });
+
+      /**
+       * Everything the filename told us, even though the contents failed.
+       *
+       * venue_key rather than venue_id: resolving the key needs a database
+       * lookup that can itself fail, and this is already the failure path. The
+       * date and the report type are what let somebody see which day to
+       * re-send, and what lets a later successful load of that same day mark
+       * this resolved instead of leaving it outstanding for ever.
+       */
+      await logIngestion({
+        filename: file.name,
+        venue_key: meta?.venueKey,
+        business_date: meta?.businessDate,
+        report_type: meta?.reportType ?? 'product_mix',
+        status,
+        error_message: e.message,
+      });
     }
   }
 
@@ -354,6 +391,90 @@ app.post('/ingest/revel', async (c) => {
   return c.json({ results }, hasErrors ? 207 : 200);
 });
 
+
+// --- Chat history (each person's own, and nobody else's) ---------------------
+
+/**
+ * The reader's CURRENT scope, for re-checking stored answers.
+ *
+ * Built fresh on every read, which is the whole point: a conversation saved
+ * when somebody was finance at Fat Prince is re-tested against who they are
+ * today. An owner passes null venues, meaning unrestricted — the same shape the
+ * tool layer uses.
+ */
+function readerScope(user: SessionUser) {
+  return {
+    role: effectiveRole(user),
+    venues: user.isOwner ? null : user.venues.map(v => v.slug),
+  };
+}
+
+app.get('/api/conversations', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  return c.json({ conversations: await listConversations(user.id) });
+});
+
+app.get('/api/conversations/:id', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const convo = await readConversation(user.id, c.req.param('id'), readerScope(user));
+  /**
+   * 404 for somebody else's thread, not 403.
+   *
+   * "Exists but is not yours" and "does not exist" must be indistinguishable
+   * from outside, or the id space becomes something a stranger can probe.
+   */
+  if (!convo) return c.json({ error: 'Conversation not found' }, 404);
+  return c.json(convo);
+});
+
+app.patch('/api/conversations/:id', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const body = await c.req.json<{ title?: string }>();
+  const ok = await renameConversation(user.id, c.req.param('id'), body.title ?? '');
+  if (!ok) return c.json({ error: 'Could not rename that conversation' }, 400);
+  return c.json({ ok: true });
+});
+
+app.delete('/api/conversations/:id', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const ok = await deleteConversation(user.id, c.req.param('id'));
+  if (!ok) return c.json({ error: 'Could not delete that conversation' }, 400);
+  return c.json({ ok: true });
+});
+
+/**
+ * Save one exchange, and never let saving break answering.
+ *
+ * Called after the reply has already been produced. Every failure inside is
+ * logged and swallowed: the person asked a question and got an answer, and
+ * losing the transcript is a far smaller harm than losing the reply. Before
+ * migration 050 is run these tables do not exist at all, so this must be
+ * survivable by construction.
+ */
+async function saveTurn(
+  user: SessionUser,
+  conversationId: string | null | undefined,
+  question: string,
+  result: { answer?: string; toolCalls?: any[]; charts?: any },
+): Promise<string | null> {
+  try {
+    const id = conversationId || await createConversation(user.id, question);
+    if (!id) return null;
+    await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null);
+    return id;
+  } catch (e: any) {
+    console.error(`[conversations] could not save a turn: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
 // --- AI query endpoint (auth required) ---
 
 /**
@@ -383,7 +504,7 @@ app.post('/ask/stream', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string }>();
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
@@ -446,7 +567,8 @@ app.post('/ask/stream', async (c) => {
         effectiveRole(user), undefined, body.model, undefined,
         push, venueNames,
       );
-      push({ kind: 'done', result });
+      const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
+      push({ kind: 'done', result: { ...result, conversation_id: conversationId } });
     } catch (e: any) {
       // Logged for the same reason /ask logs: this used to be invisible in
       // Railway, and a log export covering a real failure held one line.
@@ -469,7 +591,7 @@ app.post('/ask', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string }>();
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   try {
@@ -495,7 +617,9 @@ app.post('/ask', async (c) => {
       body.question, body.history ?? [], venueFilter, 'chat',
       effectiveRole(user), undefined, body.model,
     );
-    return c.json(result);
+    // After the answer exists, never before. See saveTurn.
+    const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
+    return c.json({ ...result, conversation_id: conversationId });
   } catch (e: any) {
     /**
      * LOGGED, not just returned. This handed the message to the browser and

@@ -28,7 +28,8 @@
     "probe:xero-pl": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-xero-pl-layout.ts",
     "probe:staffany": "NODE_USE_ENV_PROXY=1 tsx src/scripts/probe-staffany.ts",
     "audit:rls": "NODE_USE_ENV_PROXY=1 tsx src/scripts/audit-rls.ts",
-    "vendor": "tsx src/scripts/vendor-supabase.ts"
+    "vendor": "tsx src/scripts/vendor-supabase.ts",
+    "prune:chats": "NODE_USE_ENV_PROXY=1 tsx src/scripts/prune-conversations.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.118.0",
