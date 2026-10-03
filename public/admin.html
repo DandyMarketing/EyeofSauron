@@ -513,6 +513,65 @@
   .upload-summary .ustat { display: flex; justify-content: space-between; padding: 3px 0; }
   .upload-summary .ustat .ulabel { color: var(--text-muted); }
 
+  /**
+   * The tab bar.
+   *
+   * Scrolls sideways rather than wrapping: five tabs do not fit across a phone,
+   * and a wrapped bar changes height as you move between tabs, which shifts the
+   * whole page under your thumb. A scrolling strip stays one row at every width.
+   */
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    padding: 10px 14px;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /**
+   * The count that makes lazy tabs honest.
+   *
+   * Without it nothing on an unopened tab can tell you it needs attention, and
+   * a review queue nobody can see is one that grows.
+   */
+  .tab-badge {
+    min-width: 18px;
+    padding: 1px 6px;
+    border-radius: 9px;
+    background: var(--accent);
+    color: #000;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .tab:not(.active) .tab-badge { background: var(--accent-dim); color: #fff; }
+
   @media (max-width: 600px) {
     .invite-form { flex-direction: column; }
     .invite-form input { min-width: unset; }
@@ -592,30 +651,29 @@ let currentUserId = null;
   token = session.access_token;
 
   /**
-   * The seven admin queries start NOW, alongside /api/me.
+   * The default tab's data starts NOW, alongside /api/me.
    *
-   * They are the slow half of this page and they were waiting on a request that
-   * tells us nothing they need. This is not a loosening: every /admin/api route
-   * checks the owner role server-side, so a non-owner's seven requests are seven
-   * refusals rather than seven answers, and the isOwner check below still
-   * decides what this page draws. The only cost is seven wasted refusals for
-   * somebody who should not be on this page at all.
+   * Only the Attention tab's three reads, and only because that is the tab
+   * about to be shown. The other four fetch nothing until somebody clicks them,
+   * which is the whole point of the split.
+   *
+   * This is not a loosening of anything: every /admin/api route checks the
+   * owner role server-side, so a non-owner's requests are refusals rather than
+   * answers, and the isOwner check below still decides what this page draws.
    */
-  const dataPromise = fetchAll().then(
-    (d) => ({ d }),
-    (err) => ({ err }),
-  );
+  // The badge counts are wanted whichever tab is opened.
+  prefetch('/admin/api/summary');
 
   /**
-   * The second wave, started now rather than after render().
-   *
-   * None of these depends on the seven above or on /api/me — they are owner-
-   * gated server-side like everything else here. Started together, the whole
-   * page is one round of requests instead of two.
+   * ...but only the tab actually being opened. A link to #people should not
+   * fetch the Attention tab's three reads to throw them away, and the hash is
+   * known here, before /api/me has even been asked.
    */
-  prefetch('/admin/api/account-map');
-  prefetch('/admin/api/fee-acknowledgements');
-  prefetch('/admin/api/staffany/sections');
+  if (((location.hash || '').replace('#', '') || DEFAULT_TAB) === 'attention') {
+    prefetch('/admin/api/alerts');
+    prefetch('/admin/api/notes?status=pending');
+    prefetch('/admin/api/system?days=3');
+  }
 
   const meRes = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
   if (!meRes.ok) {
@@ -636,16 +694,19 @@ let currentUserId = null;
     window.location.href = '/login.html';
   });
 
-  const result = await dataPromise;
-  if (result.err) {
-    document.getElementById('app').innerHTML =
-      '<div class="loading">Could not load the admin data: ' + escapeHtml(String(result.err.message || result.err)) + '</div>';
-    return;
-  }
-  // Started BEFORE the first render, so the tables that render() creates are
-  // caught by the observer rather than needing a second pass after it.
+  // Started BEFORE the first render, so every table a tab creates is caught by
+  // the observer rather than needing a pass after each one.
   watchForTables();
-  applyAll(result.d);
+
+  buildTabs();
+  loadBadges();
+
+  // The tab from the URL, so a refresh keeps your place. An unknown one falls
+  // back to the default rather than showing nothing.
+  openTab((location.hash || '').replace('#', '') || DEFAULT_TAB);
+  window.addEventListener('hashchange', () => {
+    openTab((location.hash || '').replace('#', '') || DEFAULT_TAB);
+  });
 })();
 
 /**
@@ -830,24 +891,219 @@ async function loadFeeAcks() {
 }
 
 /**
- * Fetch only, and DELIBERATELY TOUCHES NOTHING.
+ * The tabs.
  *
- * Split out from loadAll because init() starts it before it knows whether the
- * reader is an owner. If it drew anything, a non-owner would see "Admin access
- * required" and then have seven refusals painted over the top of it a moment
- * later. Fetching is safe to do early; rendering is not.
+ * WHY. This page had thirteen sections and loaded all of them on every visit —
+ * eleven API calls before anything appeared, nine of which were for panels
+ * nobody was looking at. The usual reason to open it is to see what needs
+ * attention; adding a user or checking the account map is a deliberate trip.
+ *
+ * SO A TAB FETCHES NOTHING UNTIL IT IS OPENED, and the default tab is the one
+ * that answers "is anything wrong". Three requests instead of eleven.
+ *
+ * THE RISK THIS CREATES, and the reason `/admin/api/summary` exists. If nothing
+ * loads until you click, you cannot SEE that something needs attention — the
+ * review queue and the alert count become invisible until somebody goes
+ * looking, and an approval queue nobody sees is one that grows. The counts are
+ * fetched up front, as counts rather than rows, and shown on the tabs. Lazy
+ * tabs without that are faster and worse.
  */
-async function fetchAll() {
-  const [usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData] = await Promise.all([
-    api('GET', '/admin/api/users'),
-    api('GET', '/admin/api/venues'),
-    api('GET', '/admin/api/system?days=3'),
-    api('GET', '/admin/api/notes'),
-    api('GET', '/admin/api/xero/connections'),
-    api('GET', '/admin/api/notes?status=pending'),
-    api('GET', '/admin/api/alerts'),
+const TABS = [
+  { id: 'attention',   label: 'Attention',   load: loadAttention },
+  { id: 'people',      label: 'People',      load: loadPeople },
+  { id: 'connections', label: 'Connections', load: loadConnections },
+  { id: 'accounting',  label: 'Accounting',  load: loadAccounting },
+  { id: 'knowledge',   label: 'Knowledge',   load: loadKnowledge },
+];
+
+const DEFAULT_TAB = 'attention';
+let activeTab = null;
+
+/**
+ * Venues, fetched once and shared.
+ *
+ * Three tabs need them — the role picker, the note form, the Xero mapping — and
+ * it is a handful of rows. Held as the PROMISE rather than the result so two
+ * tabs opened quickly cannot both start a fetch.
+ */
+let venuesPromise = null;
+function loadVenues() {
+  if (!venuesPromise) {
+    venuesPromise = api('GET', '/admin/api/venues').then(r => {
+      venues = r.venues || [];
+      return venues;
+    });
+  }
+  return venuesPromise;
+}
+
+function panelFor(id) {
+  return document.getElementById('panel-' + id);
+}
+
+/** Build the tab bar and the empty panels. Called once. */
+function buildTabs() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+
+  const bar = el('div', 'tab-bar');
+  for (const tab of TABS) {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = tab.id;
+    b.innerHTML = '<span>' + tab.label + '</span><span class="tab-badge" data-badge="' + tab.id + '" hidden></span>';
+    b.addEventListener('click', () => openTab(tab.id));
+    bar.appendChild(b);
+  }
+  app.appendChild(bar);
+
+  for (const tab of TABS) {
+    const panel = el('div', 'tab-panel');
+    panel.id = 'panel-' + tab.id;
+    panel.hidden = true;
+    app.appendChild(panel);
+  }
+}
+
+/**
+ * Show a tab, loading it the first time.
+ *
+ * `loaded` is set BEFORE the load resolves, so a double click cannot start two.
+ * A failed load clears it, so the next click retries rather than leaving the
+ * panel empty for ever.
+ */
+const loaded = new Set();
+
+async function openTab(id, { reload = false } = {}) {
+  if (!TABS.some(t => t.id === id)) id = DEFAULT_TAB;
+  activeTab = id;
+
+  for (const b of document.querySelectorAll('.tab')) {
+    b.classList.toggle('active', b.dataset.tab === id);
+  }
+  for (const t of TABS) {
+    const panel = panelFor(t.id);
+    if (panel) panel.hidden = t.id !== id;
+  }
+
+  // The tab travels in the URL, so a refresh keeps your place and a link can
+  // point somebody straight at the thing you are talking about.
+  if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+
+  if (loaded.has(id) && !reload) return;
+  loaded.add(id);
+
+  const panel = panelFor(id);
+  panel.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    await TABS.find(t => t.id === id).load(panel);
+  } catch (e) {
+    loaded.delete(id);
+    panel.innerHTML = '<div class="loading">Could not load this tab: ' + escapeHtml(String((e && e.message) || e)) + '</div>';
+  }
+}
+
+/**
+ * ATTENTION — what needs addressing, and the default.
+ *
+ * PAINTS IN TWO STAGES, deliberately. The alerts and the review queue are quick
+ * reads; `/admin/api/system?days=3` checks every venue for gaps and then asks
+ * how fresh the social data is, and it is the slowest endpoint on this page. If
+ * the tab waited for all three it would feel exactly as slow as the old page
+ * did, which is the whole thing being fixed.
+ */
+async function loadAttention(panel) {
+  // take(), not api(): init prefetched these three before /api/me resolved, so
+  // they are already in flight. Calling api() here would fetch each one twice.
+  const quick = Promise.all([
+    take('/admin/api/alerts'),
+    take('/admin/api/notes?status=pending'),
   ]);
-  return { usersData, venuesData, systemData, notesData, xeroData, pendingData, alertsData };
+  const slow = take('/admin/api/system?days=3');
+
+  const [alertsData, pendingData] = await quick;
+  panel.innerHTML = '';
+
+  // Reserved now, filled when the slow read lands, so System Health keeps its
+  // place at the top rather than appearing under everything else.
+  const healthSlot = el('div', '');
+  panel.appendChild(healthSlot);
+
+  renderAlerts(panel, alertsData.alerts || []);
+  renderPending(panel, pendingData.notes || []);
+
+  if (!(alertsData.alerts || []).length && !(pendingData.notes || []).length) {
+    const ok = el('div', 'section');
+    ok.innerHTML = '<h2>Nothing to address</h2>' +
+      '<p style="color:var(--text-muted);font-size:13px">No open reconciliation alerts and nothing waiting for review. ' +
+      'System Health is below once it has finished checking.</p>';
+    panel.appendChild(ok);
+  }
+
+  renderSystem(healthSlot, await slow);
+}
+
+async function loadPeople(panel) {
+  const [usersData] = await Promise.all([api('GET', '/admin/api/users'), loadVenues()]);
+  panel.innerHTML = '';
+  renderInvite(panel);
+  renderRoleSlot(panel);
+  renderUsers(panel, usersData.users || []);
+}
+
+async function loadConnections(panel) {
+  const [xeroData] = await Promise.all([api('GET', '/admin/api/xero/connections'), loadVenues()]);
+  panel.innerHTML = '';
+  renderXero(panel, xeroData.connections || []);
+  // These two fetch their own data on render, and Meta fetches nothing at all
+  // until a button is pressed.
+  renderIntegrations(panel);
+  renderUpload(panel);
+}
+
+async function loadAccounting(panel) {
+  await loadVenues();
+  panel.innerHTML = '';
+  // Both load their own bodies into a placeholder.
+  renderAccountMap(panel);
+  renderFees(panel);
+}
+
+async function loadKnowledge(panel) {
+  const [notesData] = await Promise.all([api('GET', '/admin/api/notes'), loadVenues()]);
+  panel.innerHTML = '';
+  renderNotes(panel, notesData.notes || []);
+}
+
+/**
+ * The counts on the tabs.
+ *
+ * Counts, not rows — the whole point is that it stays cheap enough to run on
+ * every page load while the tabs themselves stay lazy. A failure is silent on
+ * purpose: a missing badge is a missing hint, and taking the page down over one
+ * would be the wrong trade.
+ */
+async function loadBadges() {
+  let summary;
+  try {
+    summary = await take('/admin/api/summary');
+    if (summary.error) return;
+  } catch (e) {
+    console.warn('[admin] could not load tab counts', e);
+    return;
+  }
+
+  const counts = {
+    attention: (summary.alerts || 0) + (summary.pending_notes || 0) + (summary.ingestion_errors || 0),
+    knowledge: summary.pending_notes || 0,
+  };
+
+  for (const [id, n] of Object.entries(counts)) {
+    const badge = document.querySelector('[data-badge="' + id + '"]');
+    if (!badge) continue;
+    badge.textContent = String(n);
+    badge.hidden = n === 0;
+  }
 }
 
 /**
@@ -885,20 +1141,21 @@ function watchForTables() {
     .observe(root, { childList: true, subtree: true });
 }
 
-function applyAll(d) {
-  venues = d.venuesData.venues || [];
-  render(d.usersData.users || [], d.systemData, d.notesData.notes || [], d.xeroData.connections || [], d.pendingData.notes || [], d.alertsData.alerts || []);
-}
-
-/** What every action on this page calls to refresh itself. Unchanged for them. */
+/**
+ * What every action on this page calls after it changes something.
+ *
+ * Reloads the TAB YOU ARE ON rather than the whole page. Every caller is a
+ * handler inside one tab — inviting a user, mapping an account, approving a
+ * note — so the tab it belongs to is the only one whose data moved. The badges
+ * are refreshed too, because approving a note is exactly the kind of action
+ * that should make a count go down in front of you.
+ */
 async function loadAll() {
-  applyAll(await fetchAll());
+  await openTab(activeTab || DEFAULT_TAB, { reload: true });
+  loadBadges();
 }
 
-function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
-  const app = document.getElementById('app');
-  app.innerHTML = '';
-
+function renderInvite(root) {
   // Add User section
   const inviteSection = el('div', 'section');
   // No password field, deliberately. Supabase emails a one-time link and the
@@ -918,7 +1175,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       Give them a role below once they appear in the list.
     </div>
   `;
-  app.appendChild(inviteSection);
+  root.appendChild(inviteSection);
 
   document.getElementById('invite-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -938,6 +1195,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   });
 
   /**
+}
+
+function renderRoleSlot(root) {
    * The reference, once, above the list.
    *
    * NOT awaited: render() is synchronous and making it async would change when
@@ -950,9 +1210,12 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
    * here fixes its position; only the contents arrive late.
    */
   const roleSlot = el('div', 'section');
-  app.appendChild(roleSlot);
+  root.appendChild(roleSlot);
   renderRoleMatrix(roleSlot);
 
+}
+
+function renderUsers(root, users) {
   // Users table
   const usersSection = el('div', 'section');
   let tableHtml = `<h2>Users (${users.length})</h2>
@@ -1020,12 +1283,15 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
 
   tableHtml += '</tbody></table>';
   usersSection.innerHTML = tableHtml;
-  app.appendChild(usersSection);
+  root.appendChild(usersSection);
 
   // Deliberately NOT pre-filled for every row any more. The grid above covers
   // what the roles mean; a line appears under a row only once somebody touches
   // its dropdown, so a page of a hundred users stays a page of a hundred users.
 
+}
+
+function renderSystem(root, system) {
   // System health
   const sysSection = el('div', 'section');
   sysSection.innerHTML = '<h2>System Health</h2>';
@@ -1167,8 +1433,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   }
   sysSection.appendChild(ingCard);
 
-  app.appendChild(sysSection);
+  root.appendChild(sysSection);
 
+}
+
+function renderAlerts(root, alerts) {
   // Reconciliation alerts. These are data problems, not job failures -- the
   // Monday cron kept working while reporting them, and showed as failed for
   // days because a non-zero exit was conflating the two.
@@ -1206,7 +1475,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
             '</div>' +
           '</div></details>';
       }).join('');
-    app.appendChild(a);
+    root.appendChild(a);
 
     a.querySelectorAll('.alert-card').forEach(function (card) {
       card.querySelector('.al-resolve').addEventListener('click', async function () {
@@ -1219,6 +1488,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     });
   }
 
+}
+
+function renderPending(root, pendingNotes) {
   // Review queue — notes captured from conversations, awaiting approval.
   // Nothing here has reached a prompt yet: the system must never write its own
   // lessons, because a confident wrong answer would become a stored fact.
@@ -1237,7 +1509,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
             '<button class="pn-reject">Reject</button>' +
           '</div></div>';
       }).join('');
-    app.appendChild(q);
+    root.appendChild(q);
 
     q.querySelectorAll('.pending-note').forEach(function (card) {
       const id = card.dataset.id;
@@ -1255,6 +1527,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     });
   }
 
+}
+
+function renderNotes(root, notes) {
   // Venue Notes section (AI context)
   const notesSection = el('div', 'section');
   const venueOpts2 = '<option value="">All venues</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
@@ -1303,8 +1578,11 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
   }
 
   notesSection.innerHTML = notesHtml;
-  app.appendChild(notesSection);
+  root.appendChild(notesSection);
 
+}
+
+function renderXero(root, xeroConnections) {
   // Xero section
   const xeroSection = el('div', 'section');
   const connRows = (xeroConnections || []).map(cn => {
@@ -1328,7 +1606,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     </p>
     <button id="xero-connect-btn" class="btn">Connect Xero</button>
     ${connRows ? `<table style="margin-top:16px"><thead><tr><th>Xero organisation</th><th>Venue</th><th>Status</th></tr></thead><tbody>${connRows}</tbody></table>` : '<p style="color:var(--text-muted);font-size:13px;margin-top:12px">No organisations connected yet.</p>'}`;
-  app.appendChild(xeroSection);
+  root.appendChild(xeroSection);
 
   document.getElementById('xero-connect-btn').addEventListener('click', async () => {
     // The session token cannot ride a browser navigation, so the URL is
@@ -1348,6 +1626,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     });
   }
 
+}
+
+function renderAccountMap(root) {
   /**
    * Account map. The three ledgers spell the same cost differently, so this is
    * what makes a cross-venue comparison mean anything.
@@ -1363,9 +1644,12 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     'Each venue\'s ledger name, and the shared name it rolls up to. Sauron compares venues on the shared name — Fat Prince writes "Public Relations / Marketing costs" where the others write "fees", and without this they never add up. ' +
     'Business line separates a sub-business that still belongs in the venue\'s P&amp;L: Neon Pigeon\'s sushi rolls into Potus Pte Ltd and can also be reported on its own.' +
     '</p><div id="map-body">Loading…</div>';
-  app.appendChild(mapSection);
+  root.appendChild(mapSection);
   loadAccountMap();
 
+}
+
+function renderFees(root) {
   /**
    * Fee months somebody has explained.
    *
@@ -1386,9 +1670,12 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     'The briefing still shows the month and states your reason; it just stops calling it a finding. ' +
     '<strong>One month at a time, never a whole venue</strong> — otherwise the same month next year goes unchecked too.' +
     '</p><div id="fee-body">Loading…</div>';
-  app.appendChild(feeSection);
+  root.appendChild(feeSection);
   loadFeeAcks();
 
+}
+
+function renderIntegrations(root) {
   // Meta. Not loaded with the page -- it is several Graph calls plus a probe
   // per Instagram account, and the answer only changes while someone is
   // actually setting this up.
@@ -1403,7 +1690,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
       '<button id="meta-calibrate-btn" class="btn">Calibrate day alignment</button>' +
     '</div>' +
     '<div id="meta-result" style="margin-top:16px"></div>';
-  app.appendChild(metaSection);
+  root.appendChild(metaSection);
 
   // StaffAny. Same shape as the Meta probes above and here for the same reason:
   // it is nine calls to a third party, so it runs on a click rather than on
@@ -1429,7 +1716,7 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     '<button id="staffany-refresh-btn" class="btn" style="margin-bottom:10px">Refresh sections from StaffAny</button>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
     '<div id="staffany-sections">Loading&hellip;</div>';
-  app.appendChild(staffSection);
+  root.appendChild(staffSection);
 
   async function loadStaffAnySections() {
     const out = document.getElementById('staffany-sections');
@@ -1830,6 +2117,9 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     }
   });
 
+}
+
+function renderUpload(root) {
   // Upload section
   const uploadSection = el('div', 'section');
   uploadSection.innerHTML = `
@@ -1848,9 +2138,10 @@ function render(users, system, notes, xeroConnections, pendingNotes, alerts) {
     <div class="upload-progress" id="upload-progress"><div class="fill" id="upload-progress-fill"></div></div>
     <div class="upload-summary" id="upload-summary"></div>
   `;
-  app.appendChild(uploadSection);
+  root.appendChild(uploadSection);
   initUpload();
 }
+
 
 function initUpload() {
   const dropZone = document.getElementById('drop-zone');

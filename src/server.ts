@@ -1942,6 +1942,83 @@ app.post('/admin/api/xero/ingest', async (c) => {
 });
 
 /** Unresolved reconciliation alerts, newest first. Owner only. */
+/**
+ * The counts behind the admin tabs' badges.
+ *
+ * WHY THIS EXISTS. The admin console now loads a tab's data only when that tab
+ * is opened, which makes the page fast and creates one problem: if nothing
+ * loads until you click, nothing can TELL you a tab needs attention. A review
+ * queue nobody can see is one that grows, and an alert that has to be hunted
+ * for is one nobody hunts for. Lazy tabs without this are faster and worse.
+ *
+ * COUNTS, NEVER ROWS. This runs on every page load, so it must stay cheap
+ * enough to be worth keeping — `head: true` sends no body at all and Postgres
+ * answers from a count rather than a scan. The tab the number belongs to
+ * fetches the actual rows when somebody opens it.
+ *
+ * A FAILING COUNT RETURNS ZERO RATHER THAN FAILING THE REQUEST. These are
+ * hints on a tab; one unavailable table should cost its own badge, not the
+ * page. Each is logged, because a badge silently stuck at zero is the same
+ * class of defect as the gaps this codebase keeps finding — it looks exactly
+ * like good news.
+ */
+app.get('/admin/api/summary', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const count = async (
+    label: string,
+    build: () => PromiseLike<{ count: number | null; error: { message: string } | null }>,
+  ): Promise<number> => {
+    try {
+      const { count: n, error } = await build();
+      if (error) {
+        console.warn(`[summary] could not count ${label}: ${error.message}`);
+        return 0;
+      }
+      return n ?? 0;
+    } catch (e: any) {
+      console.warn(`[summary] could not count ${label}: ${e?.message ?? e}`);
+      return 0;
+    }
+  };
+
+  // The window the System Health panel itself uses, so the badge and the panel
+  // cannot disagree about what counts as recent.
+  const since = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [alerts, pendingNotes, ingestionErrors] = await Promise.all([
+    // `.eq('resolved', false)` is what /admin/api/alerts uses. Matched exactly,
+    // because a badge that counts differently from the panel it points at is
+    // worse than no badge.
+    count('open alerts', () =>
+      supabaseAdmin
+        .from('reconciliation_alerts')
+        .select('id', { count: 'exact', head: true })
+        .eq('resolved', false)),
+    count('pending notes', () =>
+      supabaseAdmin
+        .from('venue_notes')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')),
+    /**
+     * NOT `status = 'error'`. checkDataGaps() counts anything that is not
+     * `success` or `closed`, because 'closed' is a normal outcome for a venue
+     * that does not trade that day and the other failure statuses are not all
+     * spelled 'error'. Copied rather than re-derived, so the badge and System
+     * Health cannot drift apart.
+     */
+    count('recent ingestion errors', () =>
+      supabaseAdmin
+        .from('ingestion_log')
+        .select('id', { count: 'exact', head: true })
+        .not('status', 'in', '(success,closed)')
+        .gte('created_at', since)),
+  ]);
+
+  return c.json({ alerts, pending_notes: pendingNotes, ingestion_errors: ingestionErrors });
+});
+
 app.get('/admin/api/alerts', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
