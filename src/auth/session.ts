@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
 import { SessionCache, SingleFlight } from './session-cache.js';
+import { describeLastSeen } from './last-seen.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -190,10 +191,39 @@ async function loadSession(accessToken: string): Promise<SessionUser | null> {
   return session;
 }
 
+/**
+ * Every account's last sign-in, from Supabase Auth.
+ *
+ * PAGED, because `listUsers` defaults to 50 per page and silently returns the
+ * first page only. Fifty is a long way off today and it is exactly the shape of
+ * cap that has cost this project data five times — see BUILD_LOG 1.x and the
+ * comment on fetchAccountMap().
+ *
+ * A FAILURE RETURNS AN EMPTY MAP rather than throwing. This is one column on
+ * the user list; losing it must not lose the list, which is also how terms
+ * acceptances are handled a few lines down.
+ */
+async function lastSignIns(): Promise<Map<string, string | null>> {
+  const seen = new Map<string, string | null>();
+  const PER_PAGE = 200;
+
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
+    if (error) {
+      console.error(`[users] could not read sign-in times: ${error.message}`);
+      return seen;
+    }
+    for (const u of data.users) seen.set(u.id, u.last_sign_in_at ?? null);
+    if (data.users.length < PER_PAGE) return seen;
+  }
+}
+
 export async function listUsers() {
   const { data: profiles } = await supabaseAdmin
     .from('profiles')
     .select('id, email, full_name, created_at');
+
+  const signedIn = await lastSignIns();
 
   const { data: allRoles } = await supabaseAdmin
     .from('user_venue_roles')
@@ -223,6 +253,14 @@ export async function listUsers() {
     email: p.email,
     full_name: p.full_name,
     created_at: p.created_at,
+    /**
+     * Both: the timestamp for sorting or hovering, and the sentence for
+     * reading. Computed here rather than in the browser because the admin page
+     * is plain JS and cannot import this module — the same reason the ingestion
+     * error explanations are built server-side.
+     */
+    last_sign_in_at: signedIn.get(p.id) ?? null,
+    last_seen: describeLastSeen(signedIn.get(p.id) ?? null),
     terms: termsAcceptanceSummary((acceptances ?? []).filter((a: any) => a.user_id === p.id), !!termsError),
     roles: (allRoles ?? [])
       .filter((r: any) => r.user_id === p.id)

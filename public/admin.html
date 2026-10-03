@@ -578,6 +578,13 @@
 
   .pager-pos { font-size: 12px; color: var(--text-muted); }
 
+  .last-seen { font-size: 12px; white-space: nowrap; }
+  .last-seen-active  { color: var(--success); }
+  .last-seen-quiet   { color: var(--text-muted); }
+  .last-seen-dormant { color: #e8c840; }
+  /* An invitation nobody opened reads as a job to finish, not as a long gap. */
+  .last-seen-never   { color: var(--accent); }
+
   /**
    * The venue picker: tick as many as you like, then press Add once.
    *
@@ -1383,7 +1390,7 @@ function fillUsers(usersSection, users) {
   // Users table
   let tableHtml = `<h2>Users (${users.length})</h2>
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Terms</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Last seen</th><th>Terms</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
       <tbody>`;
 
   for (const user of users) {
@@ -1424,6 +1431,18 @@ function fillUsers(usersSection, users) {
      * is called out separately from never, because the two need different
      * conversations.
      */
+    /**
+     * When they were last HERE, which is not the same as how much they use it.
+     *
+     * This is the last time they authenticated. A session lasts, so somebody
+     * who opens Sauron daily on a phone that stays signed in can show a
+     * sign-in from weeks ago. It answers "has this account ever been used"
+     * exactly and "how often" only roughly, and the column says "Never signed
+     * in" rather than a long interval, because an invitation nobody opened and
+     * a person who stopped need different conversations.
+     */
+    const seen = user.last_seen || { text: '—', tone: 'never' };
+
     const t = user.terms || { status: 'unknown' };
     const termsCell =
       t.status === 'accepted' ? `<span style="color:var(--success)" title="Expires ${esc((t.expires_at||'').slice(0,10))}">${esc((t.accepted_at||'').slice(0,10))}</span>`
@@ -1434,6 +1453,7 @@ function fillUsers(usersSection, users) {
     tableHtml += `<tr>
       <td data-label="Name">${esc(user.full_name || '-')}</td>
       <td data-label="Email">${esc(user.email)}</td>
+      <td data-label="Last seen" class="last-seen last-seen-${esc(seen.tone)}" title="${esc(user.last_sign_in_at || 'No sign-in recorded')}">${esc(seen.text)}</td>
       <td data-label="Terms" style="white-space:nowrap;font-size:12px">${termsCell}</td>
       <td data-label="Has access to"><div class="role-actions">${roles || '<span style="color:var(--text-muted)">No roles</span>'}</div></td>
       <td data-label="Grant access">
