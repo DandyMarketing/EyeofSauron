@@ -170,13 +170,16 @@
 
 <script>
 (async function init() {
-  const cfg = await fetch('/api/config').then(r => r.json());
+  // Both at once. Neither needs the other, and this is the page an
+  // unauthenticated person hits first — the one load nobody can skip.
+  const [cfg, { createClient }] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
     showMsg('error', 'Auth not configured. Contact your admin.');
     return;
   }
-
-  const { createClient } = await import('/vendor/supabase.js');
   const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
   // Check existing session

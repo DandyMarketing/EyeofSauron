@@ -117,21 +117,68 @@ test('a module script is actually being checked somewhere', () => {
   );
 });
 
-test('the boot sequence is parallel on the pages that were changed', () => {
-  // Not a style preference. These four pages each had config-then-import as two
-  // serial round trips, and the fix is one Promise.all. Reverting it costs a
-  // round trip on every load and leaves no trace anybody would notice, so it is
-  // asserted rather than remembered.
-  for (const page of ['index.html', 'briefing.html', 'plan.html', 'admin.html']) {
+/**
+ * EVERY page that signs a person in must load the fast way — including the one
+ * somebody adds next year.
+ *
+ * DISCOVERED, NOT LISTED, and that is the entire point. This began as four
+ * hardcoded filenames, which covers exactly the pages that already existed and
+ * silently exempts every future one — the same shape as the test that skipped
+ * plan.html for being a module and reported a pass. The rule is applied to any
+ * page that touches the auth client, so a new page is covered by existing, not
+ * by somebody remembering to add it here.
+ *
+ * None of these is a style preference. Each one was a measured cost:
+ *   - a serial /api/config is a whole round trip for two public strings, spent
+ *     before the 60 KB download that is the expensive half has even started;
+ *   - a missing modulepreload means that download cannot BEGIN until the entire
+ *     document has parsed, because a dynamic import() is invisible to the
+ *     browser's preload scanner (measured: it starts at 23ms with the link, and
+ *     the script that would ask for it does not run until 26ms);
+ *   - a third-party module host put 302ms of TLS on the critical path of every
+ *     page, for a 531-byte file that then fetched seven more.
+ */
+const authPages = pages.filter((p) =>
+  readFileSync(`public/${p}`, 'utf8').includes("import('/vendor/supabase.js')"),
+);
+
+test('every page that signs someone in was found', () => {
+  // A filter that matched nothing would make every check below pass by
+  // examining nothing at all.
+  assert.ok(authPages.length >= 5, `only found ${authPages.length} auth pages: ${authPages.join(', ')}`);
+  for (const expected of ['index.html', 'login.html', 'admin.html']) {
+    assert.ok(authPages.includes(expected), `${expected} no longer loads the auth client — check this test`);
+  }
+});
+
+for (const page of authPages) {
+  test(`${page}: loads the auth client without a serial round trip in front of it`, () => {
     const html = readFileSync(`public/${page}`, 'utf8');
+
     assert.match(
       html,
       /Promise\.all\(\[\s*\n\s*fetch\('\/api\/config'\)/,
-      `public/${page} fetches /api/config serially again — it should be in the Promise.all with the client import`,
+      `public/${page} fetches /api/config serially — put it in a Promise.all with the client import`,
     );
     assert.ok(
       html.includes('rel="modulepreload" href="/vendor/supabase.js"'),
-      `public/${page} lost the modulepreload — the bundle then waits for the whole document to parse`,
+      `public/${page} has no modulepreload for /vendor/supabase.js — the download then waits for the whole document to parse`,
+    );
+  });
+}
+
+test('no page re-introduces a third-party origin', () => {
+  // The front end is entirely self-hosted, which is a performance fact before
+  // it is a privacy one: a cold third-party origin costs DNS, TCP and TLS on
+  // the critical path, and none of that is under our control.
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    const externals = [...html.matchAll(/(?:src|href)\s*=\s*["']https?:\/\/([^/"']+)/gi)].map(m => m[1]);
+    const imports = [...html.matchAll(/import\(\s*["']https?:\/\/([^/"']+)/gi)].map(m => m[1]);
+    assert.deepEqual(
+      [...externals, ...imports],
+      [],
+      `public/${page} loads from ${[...externals, ...imports].join(', ')} — vendor it into public/vendor/ instead`,
     );
   }
 });

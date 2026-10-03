@@ -457,6 +457,46 @@ ever operates two outlets.
 - **Anti-hallucination is non-negotiable**: the LLM never states a number from memory. Every figure comes from a query tool; every suggestion and chart is built on real warehouse data. A reconciliation gate checks figures (line items sum to totals; Revel sales CSV reconciles with revenue CSV) before data is trusted.
 - Postgres is correct at this scale — do NOT over-engineer with a big analytics warehouse.
 
+### Every page is built for the load, not just for the features
+
+Settled 3 Oct 2026, after measuring why the app felt slow. **This applies to
+every new page, not only the ones that existed then**, and most of it is
+asserted in `src/frontend/pages.test.ts` — which DISCOVERS the pages rather than
+listing them, so a page added next year is covered by existing.
+
+The audience is an operator on a phone, on mobile data, between services. That
+is the case none of this was originally measured in, and it is the only one that
+matters.
+
+- **Nothing loads from a third party.** The auth client used to come from
+  esm.sh: **349 ms for a 531-byte shim**, 302 ms of it TLS to a host we had
+  never spoken to, which then pulled seven more requests. It is vendored into
+  `public/vendor/` and committed. A cold third-party origin costs DNS, TCP and
+  TLS on the critical path and none of it is under our control. If a new page
+  needs a library, bundle it in (`npm run vendor` is the pattern) — never link
+  to a CDN.
+- **Never serialise two requests that do not depend on each other.** The boot
+  sequence was six round trips deep, and on the briefing page the only slow
+  request — the briefing itself — was sixth of six. `Promise.all`, and start a
+  page's own data fetch the moment there is a token.
+- **A dynamic `import()` is invisible to the browser's preload scanner**, so it
+  cannot start until the whole document has parsed. Every page carries
+  `<link rel="modulepreload">` for what it will import. Measured: the bundle
+  starts at 23 ms with the link, and the script that would ask for it does not
+  run until 26 ms.
+- **Compression is on for everything** (`hono/compress`, registered first so it
+  wraps the static handler) — 65–73% off every page. It correctly skips
+  `text/event-stream`, so the progress stream is unaffected.
+- **Watch what a parallelised request RETURNS, not just when.** The briefing's
+  fetch now races the terms gate, and a request issued before an acceptance
+  exists is refused by the server — correctly. `enforceTerms()` reports which
+  case it was so the page can re-fetch. Speed must not change an answer.
+- **Render it and look at it, at a real phone width.** Tests pass on things that
+  are visibly wrong — a tick that drew as a chevron, a chart palette that
+  wrapped. And check what width the browser actually laid out at: a headless
+  screenshot cropped at 390 px while laid out at 500 px invented an overflow bug
+  that did not exist.
+
 ### Model tiering, thinking and caching: settled 23 Aug 2026
 
 Until now `claude-sonnet-5` was hardcoded in three places in `engine.ts`, there
