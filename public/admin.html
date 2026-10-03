@@ -568,6 +568,44 @@
     overflow-wrap: anywhere;
   }
 
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .pager-pos { font-size: 12px; color: var(--text-muted); }
+
+  /**
+   * The venue picker: tick as many as you like, then press Add once.
+   *
+   * It was a single-choice dropdown, which on a phone opens a full-screen
+   * modal — so granting the same role at three venues was fifteen taps and
+   * three page rebuilds. These wrap, they are thumb-sized, and the state is
+   * visible without opening anything.
+   */
+  .venue-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+  .venue-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    /* 32px tall at this padding — a tap target, not a mouse target. */
+    min-height: 32px;
+  }
+
+  .venue-chip input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; cursor: pointer; }
+  .venue-chip:has(input:checked) { border-color: var(--accent); background: rgba(232, 147, 58, 0.12); }
+  .venue-chip:has(input:disabled) { opacity: 0.45; cursor: default; }
+
   /**
    * The tab bar.
    *
@@ -633,6 +671,54 @@
     table { font-size: 13px; }
     th, td { padding: 8px 6px; }
     .drop-zone { padding: 24px 16px; }
+
+    /**
+     * THE USERS TABLE BECOMES CARDS.
+     *
+     * Six columns — name, email, terms, roles held, the grant controls and the
+     * row actions — cannot share 390px. With a scroll container they did not
+     * overflow the page, which fixed the layout and not the problem: the venue
+     * picker and the Add button sat off-screen to the right, so granting a role
+     * on a phone meant scrolling sideways inside a row to find the controls.
+     *
+     * Stacked, each user is a card and the grant controls get the full width.
+     * The header row goes, so each cell carries its own label via data-label —
+     * a date with no column heading above it is just a date.
+     */
+    #users-section table,
+    #users-section tbody,
+    #users-section tr,
+    #users-section td { display: block; width: 100%; }
+
+    #users-section thead { display: none; }
+
+    #users-section tr {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    #users-section td {
+      border: none;
+      padding: 5px 0;
+      /* The nowrap the Terms cell carries inline is wrong once stacked. */
+      white-space: normal !important;
+    }
+
+    #users-section td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+
+    /* Nothing to scroll once it is stacked, and the wrapper would otherwise
+       clip the chips' focus ring. */
+    #users-section .table-scroll { overflow-x: visible; }
 
     /**
      * Stack the note rows rather than squeezing them.
@@ -1270,8 +1356,31 @@ function renderRoleSlot(root) {
 }
 
 function renderUsers(root, users) {
-  // Users table
   const usersSection = el('div', 'section');
+  usersSection.id = 'users-section';
+  fillUsers(usersSection, users);
+  root.appendChild(usersSection);
+}
+
+/**
+ * Re-draw the users table ALONE, without reloading the tab.
+ *
+ * Adding a role used to call loadAll(), which re-fetched the users, the venues
+ * and the role-access grid and rebuilt the whole panel — a visible stall after
+ * every single click, for a change that affects one row. Nothing else on this
+ * tab moves when a role is granted.
+ */
+async function refreshUsers() {
+  const section = document.getElementById('users-section');
+  if (!section) return loadAll();   // not on the People tab; fall back
+  const data = await api('GET', '/admin/api/users');
+  if (data.error) { toast('error', data.error); return; }
+  fillUsers(section, data.users || []);
+  loadBadges();
+}
+
+function fillUsers(usersSection, users) {
+  // Users table
   let tableHtml = `<h2>Users (${users.length})</h2>
     <table>
       <thead><tr><th>Name</th><th>Email</th><th>Terms</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
@@ -1283,7 +1392,28 @@ function renderUsers(root, users) {
        <button class="btn btn-small btn-danger" onclick="removeRole('${r.id}')">x</button>`
     ).join(' ');
 
-    const venueOpts = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+    /**
+     * CHECKBOXES, NOT A DROPDOWN.
+     *
+     * Granting the same role at three venues meant three passes of: open a
+     * native picker, choose, close, press Add, wait for the page to rebuild.
+     * On a phone the picker is a full-screen modal, so it was fifteen taps and
+     * three reloads to do one obvious thing. These are toggles, and Add applies
+     * the role to everything ticked in one go.
+     *
+     * Nothing is pre-ticked or disabled by what the person already holds: the
+     * role is chosen AFTER the venues, so a chip cannot know yet whether it
+     * would be a change or a no-op. The grant upserts on (user, venue), so
+     * ticking a venue they already hold CHANGES the role there, which is a
+     * thing somebody legitimately wants to do. What they hold now is in the
+     * column immediately to the left.
+     */
+    const venueChips = venues.map(v =>
+      `<label class="venue-chip">
+         <input type="checkbox" class="venue-pick" data-user="${user.id}" value="${v.id}" data-name="${esc(v.name)}">
+         <span>${esc(v.name)}</span>
+       </label>`
+    ).join('');
     const isSelf = user.id === currentUserId;
 
     /**
@@ -1302,20 +1432,20 @@ function renderUsers(root, users) {
       : '<span style="color:var(--text-muted)" title="Run migration 042">—</span>';
 
     tableHtml += `<tr>
-      <td>${esc(user.full_name || '-')}</td>
-      <td>${esc(user.email)}</td>
-      <td style="white-space:nowrap;font-size:12px">${termsCell}</td>
-      <td><div class="role-actions">${roles || '<span style="color:var(--text-muted)">No roles</span>'}</div></td>
-      <td>
+      <td data-label="Name">${esc(user.full_name || '-')}</td>
+      <td data-label="Email">${esc(user.email)}</td>
+      <td data-label="Terms" style="white-space:nowrap;font-size:12px">${termsCell}</td>
+      <td data-label="Has access to"><div class="role-actions">${roles || '<span style="color:var(--text-muted)">No roles</span>'}</div></td>
+      <td data-label="Grant access">
+        <div class="venue-picker">${venueChips}</div>
         <div class="role-actions">
-          <select id="venue-${user.id}">${venueOpts}</select>
           <select id="role-${user.id}" onchange="showRoleAccess('${user.id}')">
             <option value="manager">Manager</option>
             <option value="staff">Staff</option>
             <option value="finance">Finance</option>
             <option value="owner">Owner</option>
           </select>
-          <button class="btn btn-small" onclick="assignRole('${user.id}')">Add</button>
+          <button class="btn btn-small" id="add-role-${user.id}" onclick="assignRole('${user.id}')">Add</button>
         </div>
         <!--
           What the selected role grants, shown before it is granted.
@@ -1337,7 +1467,6 @@ function renderUsers(root, users) {
 
   tableHtml += '</tbody></table>';
   usersSection.innerHTML = tableHtml;
-  root.appendChild(usersSection);
 
   // Deliberately NOT pre-filled for every row any more. The grid above covers
   // what the roles mean; a line appears under a row only once somebody touches
@@ -1544,17 +1673,42 @@ function renderSystem(root, system) {
 
 }
 
+/** How many alerts are drawn at once. */
+const ALERTS_PER_PAGE = 5;
+
 function renderAlerts(root, alerts) {
   // Reconciliation alerts. These are data problems, not job failures -- the
   // Monday cron kept working while reporting them, and showed as failed for
   // days because a non-zero exit was conflating the two.
-  if (alerts && alerts.length > 0) {
-    const a = el('div', 'section');
-    // Collapsed by default. Expanded, five alerts filled the screen and the one
-    // that mattered looked identical to four repeats of another.
-    a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
+  if (!alerts || alerts.length === 0) return;
+
+  const a = el('div', 'section');
+  a.id = 'alerts-section';
+  root.appendChild(a);
+  drawAlerts(a, alerts, 0);
+}
+
+/**
+ * One page of alerts.
+ *
+ * WHY PAGED. There are 272 open at the time of writing, and all 272 were drawn
+ * on the default tab of the page people open first. That is a slow render of a
+ * list nobody reads to the end, on the tab whose whole job is to be quick. Five
+ * is about what fits on a phone without scrolling past the section.
+ *
+ * NOT TRUNCATED — PAGED. A silent cap would hide work, which is the failure
+ * this codebase keeps writing down; the count and the page position are both on
+ * screen, and every alert is still reachable.
+ */
+function drawAlerts(a, alerts, page) {
+  const pages = Math.max(1, Math.ceil(alerts.length / ALERTS_PER_PAGE));
+  const current = Math.min(Math.max(0, page), pages - 1);
+  const from = current * ALERTS_PER_PAGE;
+  const slice = alerts.slice(from, from + ALERTS_PER_PAGE);
+
+  a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
       '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. Resolving clears every duplicate of the same finding.</p>' +
-      alerts.map(function (al) {
+      slice.map(function (al) {
         const changeRows = (al.changes || []).map(function (c) {
           return '<div style="font-size:12px;color:var(--text-muted)">' +
             escapeHtml(c.period) + ' &middot; ' + escapeHtml(c.field) + ': ' +
@@ -1581,20 +1735,46 @@ function renderAlerts(root, alerts) {
               '<button class="al-resolve btn btn-small">Resolve</button>' +
             '</div>' +
           '</div></details>';
-      }).join('');
-    root.appendChild(a);
+      }).join('') +
+      (pages > 1
+        ? '<div class="pager">' +
+            '<button class="btn btn-small btn-outline" data-page="' + (current - 1) + '"' + (current === 0 ? ' disabled' : '') + '>Previous</button>' +
+            '<span class="pager-pos">' + (from + 1) + '&ndash;' + (from + slice.length) + ' of ' + alerts.length + '</span>' +
+            '<button class="btn btn-small btn-outline" data-page="' + (current + 1) + '"' + (current === pages - 1 ? ' disabled' : '') + '>Next</button>' +
+          '</div>'
+        : '');
 
-    a.querySelectorAll('.alert-card').forEach(function (card) {
-      card.querySelector('.al-resolve').addEventListener('click', async function () {
-        const res = await api('POST', '/admin/api/alerts/' + card.dataset.id + '/resolve', {
-          notes: card.querySelector('.al-note').value || null,
-        });
-        if (res.error) { alert(res.error); return; }
-        await loadAll();
+  a.querySelectorAll('.pager button[data-page]').forEach(function (b) {
+    b.addEventListener('click', function () { drawAlerts(a, alerts, Number(b.dataset.page)); });
+  });
+
+  a.querySelectorAll('.alert-card').forEach(function (card) {
+    card.querySelector('.al-resolve').addEventListener('click', async function () {
+      const res = await api('POST', '/admin/api/alerts/' + card.dataset.id + '/resolve', {
+        notes: card.querySelector('.al-note').value || null,
       });
-    });
-  }
+      if (res.error) { toast('error', res.error); return; }
 
+      /**
+       * Refetch the ALERTS, not the tab.
+       *
+       * Resolving used to rebuild the whole Attention panel, which meant
+       * waiting for the system-health check — the slowest read on the page —
+       * after every click, and losing your place in the list. Resolving clears
+       * every duplicate of the same finding, so the list genuinely has to come
+       * back from the server rather than just dropping the one card.
+       */
+      const fresh = await api('GET', '/admin/api/alerts');
+      if (fresh.error) { toast('error', fresh.error); return; }
+
+      const remaining = fresh.alerts || [];
+      if (remaining.length === 0) { a.remove(); loadBadges(); return; }
+
+      // Stay on the page you were on, unless resolving emptied it.
+      drawAlerts(a, remaining, Math.min(current, Math.ceil(remaining.length / ALERTS_PER_PAGE) - 1));
+      loadBadges();
+    });
+  });
 }
 
 function renderPending(root, pendingNotes) {
@@ -2460,16 +2640,47 @@ async function renderRoleMatrix(container) {
   container.innerHTML = html;
 }
 
+/**
+ * Grant one role at every venue that is ticked.
+ *
+ * The requests go out TOGETHER rather than one after another: three venues
+ * used to be three round trips in series with a full page rebuild between
+ * each. They are independent grants and the server treats them as such.
+ *
+ * A PARTIAL FAILURE IS REPORTED AS ONE, naming the venues that did not take.
+ * "Role assigned" after two of three succeeded is the kind of message that gets
+ * believed and then quietly contradicted by the table underneath it.
+ */
 async function assignRole(userId) {
-  const venueId = document.getElementById('venue-' + userId).value;
-  const role = document.getElementById('role-' + userId).value;
-  const res = await api('POST', `/admin/api/users/${userId}/roles`, { venue_id: venueId, role });
-  if (res.error) {
-    toast('error', res.error);
-  } else {
-    toast('success', 'Role assigned');
-    await loadAll();
+  const picks = [...document.querySelectorAll('.venue-pick[data-user="' + userId + '"]:checked')];
+  if (picks.length === 0) {
+    toast('error', 'Pick at least one venue first.');
+    return;
   }
+
+  const role = document.getElementById('role-' + userId).value;
+  const btn = document.getElementById('add-role-' + userId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+
+  const results = await Promise.all(picks.map(async (box) => {
+    const res = await api('POST', `/admin/api/users/${userId}/roles`, { venue_id: box.value, role });
+    return { name: box.dataset.name, error: res.error };
+  }));
+
+  const failed = results.filter(r => r.error);
+  if (failed.length === 0) {
+    toast('success', results.length === 1
+      ? 'Added ' + role + ' at ' + results[0].name
+      : 'Added ' + role + ' at ' + results.length + ' venues');
+  } else if (failed.length === results.length) {
+    toast('error', failed[0].error);
+  } else {
+    toast('error', 'Added ' + (results.length - failed.length) + ', failed at ' +
+      failed.map(f => f.name).join(', '));
+  }
+
+  // Just this table, not the whole tab.
+  await refreshUsers();
 }
 
 async function removeRole(roleId) {
@@ -2478,7 +2689,7 @@ async function removeRole(roleId) {
     toast('error', res.error);
   } else {
     toast('success', 'Role removed');
-    await loadAll();
+    await refreshUsers();
   }
 }
 
@@ -2493,7 +2704,7 @@ async function doDeleteUser(userId) {
     toast('error', res.error);
   } else {
     toast('success', 'User deleted');
-    await loadAll();
+    await refreshUsers();
   }
 }
 
