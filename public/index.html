@@ -125,6 +125,15 @@
   .book .day.shut { opacity: 0.55; }
   .book .day .shut-label { font-size: 11px; font-weight: 500; color: var(--text-muted); }
   .figure-note a { color: var(--accent); }
+  /* One heading over the monthly panels. The page carries three periods and a
+     reader on a phone will not track three — introducing the two monthly ones
+     together means the context switch happens once. */
+  .section-head {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-muted); margin: 22px 0 8px 2px;
+  }
+  .section-head strong { color: var(--text); font-weight: 600; text-transform: none; letter-spacing: 0; }
+
 
   /* --- advice ------------------------------------------------------------ */
   .rec { border-bottom: 1px solid var(--border); padding: 12px 14px; }
@@ -395,7 +404,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
-    retentionPanel(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
+    monthlySection(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -563,6 +572,72 @@ function advicePanel(recData, v, today) {
  * anybody new posts a rising retention rate all the way down. "Retention 25%"
  * alone is a figure a manager reads backwards.
  */
+/**
+ * Cost of sales, beside retention and for the same reason: it is MONTHLY.
+ *
+ * The P&L's finest grain is a month, so there is no week-to-date food cost.
+ * Putting it under the week's figures without the period on it would invite
+ * exactly the arithmetic that does not work -- September's cost against this
+ * week's sales.
+ *
+ * THE UNCLASSIFIED LINE IS NOT A FOOTNOTE. Cost-of-sales accounts that are
+ * neither food nor beverage by name are excluded from both percentages, and an
+ * account nobody has mapped looks identical to packaging from the ratio. A food
+ * cost quoted while several thousand dollars of cost of sales sits unexplained
+ * is the most misleading figure on this page, so it is a row rather than a note.
+ */
+function costPanel(payload, v) {
+  const c = payload.costs && payload.costs[v.slug];
+  if (!c) return '';
+
+  if (!c.available) {
+    // Never inferred from revenue. "No P&L ingested" and "this venue had no
+    // costs" are wildly different answers and only one of them is ever true.
+    return '<div class="panel"><h2>Cost of sales</h2>' +
+      '<div class="empty">No P&amp;L has been ingested for ' + esc(c.month.label) +
+      ', so cost of sales is unknown for that month. It is missing, not zero.</div></div>';
+  }
+
+  const r = c.ratios;
+  const row = (label, x) =>
+    '<tr><td>' + label + '</td><td>' +
+    (x.pct === null ? money(x.cogs) + ' — no sales' : money(x.cogs) + ' — ' + pct(x.pct)) +
+    '</td></tr>';
+
+  const unmapped = r.unclassified.length
+    ? '<tr><td>Not food or beverage</td><td>' + money(r.unclassified_total) + ' — excluded</td></tr>'
+    : '';
+
+  return '<div class="panel"><h2>Cost of sales</h2>' +
+    '<table><tbody>' +
+      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + unmapped +
+    '</tbody></table>' +
+    (r.unclassified.length
+      ? '<p class="figure-note">Excluded from both percentages: ' +
+        r.unclassified.map(u => esc(u.account) + ' ' + money(u.amount)).join(' · ') +
+        '. Packaging and delivery commission belong here; an unmapped account does not. Check them before quoting these as the full cost of sales.</p>'
+      : '') +
+    '<p class="figure-note">Cost from the Xero P&amp;L, sales from Revel, measured against food &amp; beverage sales before discounts. ' +
+    'A cost-of-sales line is PURCHASES in the month, not consumption, unless a stock movement is posted \u2014 so a late delivery lands against sales it has not produced yet. Read the trend over a quarter before acting on one month.</p>' +
+    '</div>';
+}
+
+/**
+ * One period heading over both monthly panels.
+ *
+ * The page carries three periods -- this week to date, the last complete month,
+ * and the week the advice reviewed. Three is more than a reader on a phone will
+ * track, so the two monthly ones are introduced once rather than each carrying
+ * its own month in its title.
+ */
+function monthlySection(payload, v) {
+  const month = (payload.retention && payload.retention[v.slug] && payload.retention[v.slug].month)
+    || (payload.costs && payload.costs[v.slug] && payload.costs[v.slug].month);
+  if (!month) return '';
+  return '<div class="section-head">Last complete month · <strong>' + esc(month.label) + '</strong></div>' +
+         costPanel(payload, v) + retentionPanel(payload, v);
+}
+
 function retentionPanel(payload, v) {
   const r = payload.retention && payload.retention[v.slug];
   if (!r) {
@@ -578,7 +653,7 @@ function retentionPanel(payload, v) {
      * and the understatement shrinks every month as history accumulates --
      * which draws a rising line that is the database filling up.
      */
-    return '<div class="panel"><h2>Guests · ' + esc(r.month.label) + '</h2>' +
+    return '<div class="panel"><h2>Guests</h2>' +
       '<div class="empty">Withheld for this month: its 365-day lookback reaches back past the start of the booking records, so the rate would be understated and would appear to improve every month as history fills.</div></div>';
   }
 
@@ -590,7 +665,7 @@ function retentionPanel(payload, v) {
     ['Walk-ins', num(r.counts.walk_in_guests)],
   ];
 
-  return '<div class="panel"><h2>Guests · ' + esc(r.month.label) + '</h2>' +
+  return '<div class="panel"><h2>Guests</h2>' +
     '<p class="figure-note" style="padding-bottom:4px">Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything. ' +
     'Walk-ins are counted separately because they carry no booking and so cannot be matched to a guest.</p>' +
     '<table><tbody>' + rows.map(x => '<tr><td>' + x[0] + '</td><td>' + x[1] + '</td></tr>').join('') + '</tbody></table>' +

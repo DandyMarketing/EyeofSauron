@@ -29,6 +29,8 @@ import {
   lastCompleteMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
   type RetentionCounts, type RetentionShares,
 } from './retention-month.js';
+import { costRatios, costCaveats, type CostRatios, type PLRow } from './cost-ratios.js';
+import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
 import { getClosedWeekdays } from '../ingest/revel.js';
@@ -97,8 +99,23 @@ export interface RetentionBlock {
   withheld: boolean;
 }
 
+export interface CostBlock {
+  month: { start: string; end: string; label: string };
+  ratios: CostRatios;
+  caveats: string[];
+  /** False when no P&L has been ingested for that month. Never inferred. */
+  available: boolean;
+}
+
 export interface DashboardPayload {
   window: DashboardWindow;
+  /**
+   * Cost of sales for the last COMPLETE month, beside the retention block and
+   * for the same reason: the P&L's finest grain is a month, so there is no
+   * week-to-date version of a food cost percentage. Null when nothing could be
+   * computed at all.
+   */
+  costs: Record<string, CostBlock> | null;
   /**
    * MONTHLY, and labelled as such. Null when SevenRooms has nothing to measure.
    * It sits on a week-to-date page because a week holds too few returning
@@ -244,8 +261,12 @@ export async function buildDashboard(
     };
   });
 
-  const retention = await buildRetention(venues, window.today);
-  return { window, retention, venues: out, group: out.length > 1 ? rollUp(out) : null };
+  // Independent of each other and of everything above; neither blocks the page.
+  const [retention, costs] = await Promise.all([
+    buildRetention(venues, window.today),
+    buildCosts(venues, window.today),
+  ]);
+  return { window, retention, costs, venues: out, group: out.length > 1 ? rollUp(out) : null };
 }
 
 
@@ -322,6 +343,90 @@ async function buildRetention(
     return out;
   } catch (e: any) {
     console.warn(`[dashboard] retention failed: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
+
+/**
+ * Food and beverage cost for the last complete month, keyed by venue slug.
+ *
+ * SAME MONTH AS RETENTION, deliberately. Two monthly panels under one period
+ * heading means the reader changes context once; two panels on different months
+ * beside a week-to-date table is three periods on one screen and nobody holds
+ * that.
+ *
+ * SALES ARE SUMMED OVER THE LEDGER'S MONTH, not the dashboard's week. That is
+ * the whole alignment risk and it is the same one query_food_beverage_cost
+ * handles: cost for September over sales for a week in October is not a
+ * percentage of anything.
+ *
+ * A failure costs the panel, never the page.
+ */
+async function buildCosts(
+  venues: Array<{ id: string; name: string; slug: string }>,
+  today: string,
+): Promise<Record<string, CostBlock> | null> {
+  const month = lastCompleteMonth(today);
+
+  try {
+    const out: Record<string, CostBlock> = {};
+    let anyAvailable = false;
+
+    const perVenue = await Promise.all(venues.map(async v => {
+      const [{ data: pl }, { data: ops }, accountMap] = await Promise.all([
+        supabaseAdmin.from('profit_and_loss')
+          .select('section, account_name, amount, is_summary')
+          .eq('venue_id', v.id)
+          .gte('period_start', month.start)
+          .lte('period_end', month.end),
+        supabaseAdmin.from('daily_operations')
+          .select('gross_sales, sales_by_class')
+          .eq('venue_id', v.id)
+          .gte('business_date', month.start)
+          .lte('business_date', month.end),
+        fetchAccountMap(v.id),
+      ]);
+
+      const rows: PLRow[] = (pl ?? []).map((r: any) => {
+        const { canonical_account, business_line } = resolveAccount(r.account_name, accountMap);
+        return { ...r, amount: Number(r.amount), canonical_account, business_line };
+      });
+
+      let food = 0, bev = 0;
+      for (const o of ops ?? []) {
+        const split = classSplitOf(o as any);
+        food += split.food_sales;
+        bev += split.beverage_sales;
+      }
+
+      return { slug: v.slug, rows, sales: { food_sales: food, beverage_sales: bev } };
+    }));
+
+    for (const v of perVenue) {
+      const available = v.rows.length > 0;
+      if (available) anyAvailable = true;
+      const ratios = costRatios(v.rows, v.sales);
+      out[v.slug] = { month, ratios, caveats: costCaveats(ratios, 1), available };
+    }
+
+    if (venues.length > 1) {
+      /**
+       * The group ratio is recomputed from the summed parts, never averaged
+       * across venues -- a 40% venue and a 25% venue are not a group at 32.5%
+       * unless they are the same size, and they never are.
+       */
+      const allRows = perVenue.flatMap(v => v.rows);
+      const allSales = perVenue.reduce(
+        (t, v) => ({ food_sales: t.food_sales + v.sales.food_sales, beverage_sales: t.beverage_sales + v.sales.beverage_sales }),
+        { food_sales: 0, beverage_sales: 0 });
+      const ratios = costRatios(allRows, allSales);
+      out.group = { month, ratios, caveats: costCaveats(ratios, 1), available: allRows.length > 0 };
+    }
+
+    return anyAvailable ? out : null;
+  } catch (e: any) {
+    console.warn(`[dashboard] cost of sales failed: ${e?.message ?? e}`);
     return null;
   }
 }

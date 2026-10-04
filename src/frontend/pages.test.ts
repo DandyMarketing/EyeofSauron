@@ -522,11 +522,43 @@ test('spend per head appears wherever average check does, and above it', () => {
  * compute a week — that is the trap. It returns a number, the number is
  * arithmetically right, and it is not a measurement.
  */
-test('the retention panel names its month rather than implying the week', () => {
+test('the monthly panels are introduced by their month, not by the week above', () => {
+  /**
+   * The month used to sit in the retention panel's own heading. It moved to a
+   * shared section heading when cost of sales joined it, because the page now
+   * carries THREE periods -- this week to date, the last complete month, and
+   * the week the advice reviewed -- and a reader on a phone will not track
+   * three. The property is unchanged: the period is on the page rather than
+   * implied by the figures above it.
+   */
   const home = readFileSync('public/index.html', 'utf8');
   assert.ok(home.includes('function retentionPanel('), 'the dashboard has no retention panel');
-  assert.match(home, /Guests · ' \+ esc\(r\.month\.label\)/, 'the panel does not name the month it covers');
-  assert.match(home, /Monthly, not weekly/, 'nothing tells the reader this is not the week above it');
+  assert.ok(home.includes('function costPanel('), 'the dashboard has no cost of sales panel');
+  assert.ok(home.includes('function monthlySection('), 'the monthly panels are no longer introduced together');
+  assert.match(home, /Last complete month · <strong>' \+ esc\(month\.label\)/, 'the month is not named above the monthly panels');
+  assert.match(home, /Monthly, not weekly/, 'nothing tells the reader retention is not the week above it');
+});
+
+test('cost of sales shows what it could not classify, as a row', () => {
+  /**
+   * Cost-of-sales accounts that are neither food nor beverage by name are
+   * EXCLUDED from both percentages, and an unmapped account looks identical to
+   * packaging from the ratio. A food cost quoted while several thousand dollars
+   * sits unexplained is the most misleading figure on the page, so it is a row
+   * rather than a footnote.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /Not food or beverage/);
+  assert.match(home, /Excluded from both percentages/);
+  // And purchases-not-consumption, which is the first thing an operator asks.
+  assert.match(home, /PURCHASES in the month, not consumption/);
+});
+
+test('a missing P&L says missing, never zero', () => {
+  // "No P&L ingested" and "this venue had no costs" are wildly different
+  // answers and only one of them is ever true.
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /It is missing, not zero/);
 });
 
 test('every retention rate is shown beside the count that produced it', () => {
