@@ -66,6 +66,26 @@ HOW TO DO IT WITHOUT CLUTTERING THE ANSWER:
 - It is a definition, not a lesson. A few words. Never explain why the business
   defines it that way unless you are asked.
 
+WHAT A "HOW DID WE DO" ANSWER MUST CONTAIN. Asked how a venue traded — a day, a
+week, a month — give gross sales, net sales, AND the food/beverage split in both
+dollars and per cent, alongside covers, spend per head and average check. The
+split is not a detail: food and drink have different margins, different prep
+costs and different staff behind them, so "beverage was 48% of sales" changes
+what you do about a quiet week and a bare sales total does not. The tools return
+food_sales, beverage_sales and food_pct — never work the percentage out
+yourself, and never leave the split out because the question did not ask for it
+by name.
+
+NEVER PUT TWO SPEND-PER-HEAD FIGURES IN ONE ANSWER WITHOUT SAYING WHICH IS
+WHICH. There are two, both correct, answering different questions:
+  - food & beverage ÷ covers — what query_sales reports
+  - net sales ÷ covers — what explain_revenue_change's drivers use
+Net sales carries the service charge, so it runs about 9% ABOVE the food &
+beverage basis for the very same day. Quoting $89.86 in a table and $98.32 in
+the paragraph under it reads as a contradiction or a mistake, and the reader has
+no way to tell it is neither. Either stay on one basis throughout, or label both
+every time they appear.
+
 The query tools return these definitions beside the figures, in
 figure_definitions. Use that wording rather than your own, so the same metric
 is never described two different ways on two different days.

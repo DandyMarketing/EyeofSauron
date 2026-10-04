@@ -143,6 +143,77 @@ export interface SalesFigures {
 }
 
 /**
+ * The food and beverage split, in dollars and as a share.
+ *
+ * WHY IT IS A FIGURE AND NOT A CALCULATION THE MODEL DOES. The classes sit in
+ * `sales_by_class` as raw JSON on the row, so a model handed the row could add
+ * them up itself — and the standing rule is that every number comes from a
+ * query tool, because a figure the model computed is a figure nobody can check.
+ * `compare_venues` already did this correctly in a loop of its own; `query_sales`
+ * did not do it at all, so the single most ordinary question about a service —
+ * how did drinks do against food — could not be answered from the tool that
+ * answers how the day went.
+ *
+ * THE SHARE IS OF FOOD + BEVERAGE, never of gross or net. Service charge is not
+ * food and it is not drink; measuring a split against a figure carrying it makes
+ * both halves read about 9% low and they stop summing to 100.
+ *
+ * A CLASS THAT IS NEITHER IS REPORTED, NOT DROPPED. Revel allows classes beyond
+ * Food and Beverage — retail, merchandise, a venue that sells cookbooks — and a
+ * split that quietly ignores one is two numbers that do not add up with nothing
+ * saying why. Same rule as the payment methods one file over: the sum is the
+ * check on the list.
+ */
+export interface ClassSplit {
+  food_sales: number;
+  beverage_sales: number;
+  /** Share of food + beverage. Null when there were no sales to take a share of. */
+  food_pct: number | null;
+  beverage_pct: number | null;
+  /** Present only when a class other than Food or Beverage carried sales. */
+  other_sales?: number;
+  other_classes?: string[];
+}
+
+interface ClassRow { class?: string; grossSales?: number | string | null }
+
+export function classSplitOf(row: { sales_by_class?: unknown }): ClassSplit {
+  const rows: ClassRow[] = Array.isArray(row.sales_by_class) ? row.sales_by_class : [];
+
+  let food = 0, bev = 0, other = 0;
+  const otherClasses: string[] = [];
+
+  for (const r of rows) {
+    const name = (r.class ?? '').trim();
+    // The ingest already drops Revel's "Total" row, but a tool that trusts that
+    // and is wrong once double-counts the whole day.
+    if (name.toLowerCase() === 'total') continue;
+    const amount = n(r.grossSales);
+
+    if (name.toLowerCase() === 'food') food += amount;
+    else if (name.toLowerCase() === 'beverage') bev += amount;
+    else if (amount !== 0 || name) {
+      other += amount;
+      if (name && !otherClasses.includes(name)) otherClasses.push(name);
+    }
+  }
+
+  const base = round2(food + bev + other);
+  const split: ClassSplit = {
+    food_sales: round2(food),
+    beverage_sales: round2(bev),
+    food_pct: base > 0 ? round2(food / base * 100) : null,
+    beverage_pct: base > 0 ? round2(bev / base * 100) : null,
+  };
+
+  if (other !== 0 || otherClasses.length > 0) {
+    split.other_sales = round2(other);
+    split.other_classes = otherClasses;
+  }
+  return split;
+}
+
+/**
  * What each figure MEANS, travelling with the figure itself.
  *
  * WHY IN THE TOOL RESPONSE AND NOT ONLY THE PROMPT. The definitions were in the
@@ -165,6 +236,9 @@ export const FIGURE_DEFINITIONS = {
   net_sales: 'Gross sales less discounts. What "sales" means when nobody says which',
   service_charge: 'The 10% charged on the discounted amount. Already inside gross and net sales — never add it on top',
   total_discounts: 'Item discounts + order discounts. Coupons are reported separately by Revel and are not included',
+  food_sales: 'Food alone, before discounts and service charge',
+  beverage_sales: 'Beverage alone, before discounts and service charge',
+  food_pct: 'Food as a share of food & beverage sales. Beverage is the rest, so the two sum to 100',
   avg_spend_per_head: 'Food & beverage ÷ SevenRooms covers. Revenue per PERSON. Deliberately not Revel\'s "Average Sale Per Guest", which uses a different numerator and denominator',
   avg_check: 'Revenue per BILL, not per person. It rises when parties are larger, so it describes table mix as much as selling',
   net_to_account_for: 'Total cash + card collected, including GST. The only figure here that carries tax',

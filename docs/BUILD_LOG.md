@@ -302,6 +302,58 @@ definition written far from the number can disagree with the number, which is
 what just happened. The prompt requires one line of definitions under a table or
 a short parenthesis in prose, once per answer, in the tools' wording.
 
+### 1.11 Two spend-per-head figures in one answer, neither labelled
+**Symptom.** "How did Neon Pigeon do yesterday", 4 Oct 2026. The table said
+**spend per head $89.86**. The paragraph directly beneath it said spend per head
+"fell from $129.28 to **$98.32**". One metric, one day, two numbers, nothing
+saying why.
+**Root cause.** There genuinely are two, and both are right. `query_sales`
+reports **food & beverage ÷ covers**; `explain_revenue_change`'s drivers use
+**net sales ÷ covers**. Net sales carries the 10% service charge, so it runs
+about **9% above** the other for the same day. The answer used one tool for the
+table and the other for the context and never said so.
+**It was already known and written down wrong.** The `explain_revenue_change`
+description warned about exactly this — and claimed the food & beverage basis
+"reads a few percent **higher**". It reads about nine percent **lower**. A
+caveat with the direction reversed is worse than none: a reader checking the
+gap against it concludes the figures are fine when they are the other way round.
+**Fix.** Direction corrected in the tool description with the real measured gap,
+and a prompt rule: stay on one basis throughout, or label both every time they
+appear. Tests assert the rule and that the backwards wording cannot return.
+**Recurs?** **Every customer.** Two defensible definitions of one metric is a
+permanent condition, not a bug to be removed — the only durable fix is that
+nothing may print both without naming them.
+
+### 1.12 The food and beverage split existed in one tool and not the other
+**Symptom.** None, until Khai asked for it: *"you should include the F&B split
+in these sort of queries, $value and %, it gives lots of insight. You should
+include gross too."*
+**Root cause.** `compare_venues` computed the split in a loop of its own,
+reading `sales_by_class` by hand with `find(c => c.class === 'Food')`.
+`query_sales` — the tool that answers how a day or a week went — returned the
+raw JSON and no split at all. So the most ordinary question about a service,
+how drinks did against food, could not be answered by the tool for that
+question, while a cross-venue comparison answered it fine.
+
+Gross sales was returned (since 1.9) and simply not reported, because nothing
+said a trading summary must contain it.
+**Fix.** `classSplitOf()` in `src/lib/sales.ts` returns food, beverage, their
+shares, and **any class that is neither** — Revel permits others, and a split
+that silently drops one is two numbers that do not add up with nothing saying
+why. Both `query_sales` paths, its totals block, and `compare_venues` now use
+it; the hand-written `find()` is gone and a test fails if it returns. The prompt
+requires gross, net and the split in dollars and per cent on any "how did we do"
+answer.
+**Recurs?** **Every customer.** Two tools reading one JSON shape, only one of
+them maintained, is the same defect as the single-date and date-range sales
+paths in 1.9 — and it was in the same file.
+
+**The percentage is computed in code, not by the model.** The rule is that every
+number comes from a query tool, and a percentage is a number. A share the model
+worked out itself is one nobody can check, and it is the easiest kind to get
+subtly wrong — a split measured against gross rather than food & beverage reads
+about 9% low and still looks plausible.
+
 ### 1.10 A table drawn with spaces, in a code block
 **Symptom.** The same answer's table arrived as fixed-width ASCII with a row of
 dashes under the header, inside a code block.

@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  netSalesOf, serviceChargeOf, totalDiscountsOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf,
+  netSalesOf, serviceChargeOf, totalDiscountsOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf,
 } from './sales.js';
 
 /**
@@ -207,5 +207,107 @@ test('every tool returning day figures builds them from salesFiguresOf', () => {
   assert.ok(
     src.includes('...salesFiguresOf(data)') && src.includes('...salesFiguresOf(d)'),
     'query_sales no longer builds both of its paths from salesFiguresOf',
+  );
+});
+
+/**
+ * The food and beverage split.
+ *
+ * `compare_venues` computed it; `query_sales` did not return it at all, so the
+ * most ordinary question about a service — how did drinks do against food —
+ * could not be answered from the tool that answers how the day went. Khai, 4 Oct
+ * 2026: "you should include the F&B split in these sort of queries, $value and
+ * %, it gives lots of insight."
+ */
+describe('classSplitOf', () => {
+  // Neon Pigeon, 29 Sep 2026, exactly as the ingest stores it.
+  const day = {
+    sales_by_class: [
+      { class: 'Beverage', grossSales: 1753 },
+      { class: 'Food', grossSales: 1886 },
+    ],
+  };
+
+  test('splits food and beverage in dollars', () => {
+    const s = classSplitOf(day);
+    assert.equal(s.food_sales, 1886);
+    assert.equal(s.beverage_sales, 1753);
+  });
+
+  test('the shares are of food + beverage and sum to 100', () => {
+    const s = classSplitOf(day);
+    assert.equal(s.food_pct, 51.83);
+    assert.equal(s.beverage_pct, 48.17);
+    assert.equal(Number((s.food_pct! + s.beverage_pct!).toFixed(2)), 100);
+  });
+
+  test('the split adds back to the food & beverage figure', () => {
+    // 1,886 + 1,753 = 3,639, which is what foodAndBevSalesOf reads off the row.
+    // If these two ever stop agreeing, one of them is reading the wrong column.
+    const s = classSplitOf(day);
+    assert.equal(
+      s.food_sales + s.beverage_sales,
+      foodAndBevSalesOf({ gross_sales: 3639, item_discounts: 0, order_discounts: 0 }),
+    );
+  });
+
+  test('a class that is neither food nor beverage is reported, never dropped', () => {
+    // Revel allows other classes. A split that silently ignores one is two
+    // numbers that do not add up, with nothing saying why.
+    const s = classSplitOf({
+      sales_by_class: [
+        { class: 'Food', grossSales: 100 },
+        { class: 'Beverage', grossSales: 100 },
+        { class: 'Retail', grossSales: 50 },
+      ],
+    });
+    assert.equal(s.other_sales, 50);
+    assert.deepEqual(s.other_classes, ['Retail']);
+    // And the shares are of everything, so they still describe the whole.
+    assert.equal(s.food_pct, 40);
+    assert.equal(s.beverage_pct, 40);
+  });
+
+  test("Revel's Total row is never counted as a class", () => {
+    // The ingest drops it. A tool that trusts that and is wrong once doubles
+    // the whole day.
+    const s = classSplitOf({
+      sales_by_class: [
+        { class: 'Food', grossSales: 1886 },
+        { class: 'Beverage', grossSales: 1753 },
+        { class: 'Total', grossSales: 3639 },
+      ],
+    });
+    assert.equal(s.food_sales + s.beverage_sales, 3639);
+    assert.equal(s.other_sales, undefined);
+  });
+
+  test('a day with no class rows reports null shares, not zero', () => {
+    // 0% food is a statement about a venue that sold no food. Null says the
+    // split is not known, which is a different thing.
+    const s = classSplitOf({});
+    assert.equal(s.food_pct, null);
+    assert.equal(s.beverage_pct, null);
+    assert.equal(s.food_sales, 0);
+  });
+
+  test('numeric-as-string values from Postgres are added, not concatenated', () => {
+    const s = classSplitOf({ sales_by_class: [{ class: 'Food', grossSales: '1886.00' }] });
+    assert.equal(s.food_sales, 1886);
+  });
+});
+
+test('both sales tools return the split from the shared splitter', () => {
+  // compare_venues read the JSON by hand with find('Food'), which is how one
+  // tool came to have a split and the other none -- two readings of one shape,
+  // only one of them maintained.
+  const src = readFileSync('src/ai/tool-handlers.ts', 'utf8');
+  assert.ok(
+    !/find\(c => c\.class === 'Food'\)/.test(src),
+    'a handler is reading sales_by_class by hand again — use classSplitOf',
+  );
+  assert.equal(
+    (src.match(/classSplitOf\(/g) ?? []).length, 4,
+    'expected classSplitOf in query_sales (both paths), its totals, and compare_venues',
   );
 });

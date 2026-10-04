@@ -8,7 +8,7 @@ import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
 import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
-import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, FIGURE_DEFINITIONS } from '../lib/sales.js';
+import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf, FIGURE_DEFINITIONS } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
@@ -1246,6 +1246,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
        * that looks like the thing it is not.
        */
       ...salesFiguresOf(data),
+      ...classSplitOf(data),
 
       closed: closedToday,
       closed_note: closedToday
@@ -1292,6 +1293,8 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     total_transactions: 0,
     total_guests: 0,
     covers: 0,
+    food_sales: 0,
+    beverage_sales: 0,
   };
   const coversByShift: Record<string, number> = {};
   const closedDays: string[] = [];
@@ -1301,6 +1304,9 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const daily = data.map(d => {
     totals.gross_sales += grossSalesOf(d) ?? foodAndBevSalesOf(d);
     totals.food_bev_sales += foodAndBevSalesOf(d);
+    const daySplit = classSplitOf(d);
+    totals.food_sales += daySplit.food_sales;
+    totals.beverage_sales += daySplit.beverage_sales;
     totals.net_sales += netSalesOf(d);
     totals.service_charge += serviceChargeOf(d) ?? 0;
     totals.item_discounts += Number(d.item_discounts);
@@ -1347,6 +1353,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       date: d.business_date,
       closed: dayClosed || undefined,
       ...salesFiguresOf(d),
+      ...classSplitOf(d),
       covers: dayCovers,
       covers_by_meal_period: c?.by_shift ?? null,
       walk_in_covers: c?.walk_in_covers ?? null,
@@ -1382,6 +1389,14 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       : undefined,
     totals: {
       ...totals,
+      // The split as a share, computed here rather than left to the model:
+      // every number comes from a query tool, and a percentage is a number.
+      food_pct: totals.food_bev_sales > 0
+        ? Number((totals.food_sales / totals.food_bev_sales * 100).toFixed(2))
+        : null,
+      beverage_pct: totals.food_bev_sales > 0
+        ? Number((totals.beverage_sales / totals.food_bev_sales * 100).toFixed(2))
+        : null,
       covers_by_meal_period: coversByShift,
       avg_check_overall: avgCheck,
       avg_spend_per_head: avgSpendPerHead,
@@ -1441,9 +1456,13 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       transactions += Number(ops.total_transactions ?? 0);
       guests += Number(ops.total_guests ?? 0);
 
-      const salesByClass = (ops.sales_by_class as any[]) ?? [];
-      foodSales += salesByClass.find(c => c.class === 'Food')?.grossSales ?? 0;
-      bevSales += salesByClass.find(c => c.class === 'Beverage')?.grossSales ?? 0;
+      // Through the shared splitter, not a second reading of the same JSON.
+      // This loop used to find('Food') and find('Beverage') by hand, which is
+      // how query_sales came to have no split at all and compare_venues to have
+      // one -- two readings of one shape, and only one of them maintained.
+      const daySplit = classSplitOf(ops);
+      foodSales += daySplit.food_sales;
+      bevSales += daySplit.beverage_sales;
     }
 
     const totalDisc = itemDisc + orderDisc;
@@ -1479,9 +1498,10 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       service_charge: serviceCharge,
       total_discounts: totalDisc,
       discount_rate_pct: Number(discRate.toFixed(1)),
-      food_sales: foodSales,
-      beverage_sales: bevSales,
-      food_pct: grossSales > 0 ? Number((foodSales / grossSales * 100).toFixed(1)) : 0,
+      food_sales: Number(foodSales.toFixed(2)),
+      beverage_sales: Number(bevSales.toFixed(2)),
+      food_pct: grossSales > 0 ? Number((foodSales / grossSales * 100).toFixed(1)) : null,
+      beverage_pct: grossSales > 0 ? Number((bevSales / grossSales * 100).toFixed(1)) : null,
       tax_total: taxTotal,
       tips,
       net_to_account_for: netToAccount,

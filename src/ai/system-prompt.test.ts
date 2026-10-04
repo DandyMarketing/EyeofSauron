@@ -124,3 +124,42 @@ test('the definitions are returned beside the figures, not only in the prompt', 
     `expected query_sales (both paths) and compare_venues to return the definitions, found ${occurrences}`,
   );
 });
+
+test('a trading summary must carry gross and the food/beverage split', () => {
+  /**
+   * Asked "how did Neon Pigeon do yesterday" on 4 Oct 2026, the answer gave net
+   * sales, food & beverage sales, covers, transactions, average check, spend per
+   * head and net to account for — and neither GROSS SALES nor the split between
+   * food and drink. Both were available.
+   *
+   * The split is not a detail. Food and drink have different margins, different
+   * prep and different staff behind them, so "beverage was 48%" changes what you
+   * do about a quiet week where a bare sales total does not.
+   */
+  assert.match(SYSTEM_PROMPT_BASE, /WHAT A "HOW DID WE DO" ANSWER MUST CONTAIN/);
+  assert.match(SYSTEM_PROMPT_BASE, /food\/beverage split in both\s+dollars and per cent/);
+  // And it must come from the tool, because a percentage is a number too.
+  assert.match(SYSTEM_PROMPT_BASE, /never work the percentage out\s+yourself/);
+});
+
+test('the prompt forbids two unlabelled spend-per-head figures in one answer', () => {
+  /**
+   * The same answer put $89.86 in its table (food & beverage ÷ covers, from
+   * query_sales) and $98.32 in the paragraph beneath it (net sales ÷ covers,
+   * from explain_revenue_change). Both correct, both unlabelled, one metric.
+   * To a reader that is a contradiction, and nothing in the reply says it is not.
+   */
+  assert.match(SYSTEM_PROMPT_BASE, /NEVER PUT TWO SPEND-PER-HEAD FIGURES IN ONE ANSWER/);
+  // The direction matters: the tool description had it backwards, claiming the
+  // food & beverage basis read HIGHER. It is about 9% lower.
+  assert.match(SYSTEM_PROMPT_BASE, /about 9% ABOVE the food &\s+beverage basis/);
+});
+
+test('the explain_revenue_change description has the direction right', () => {
+  const tools = readFileSync('src/ai/tools.ts', 'utf8');
+  assert.ok(
+    !/food \+ beverage ÷ covers, which is what query_sales reports and reads a few percent higher/.test(tools),
+    'the backwards claim is back: net ÷ covers is the LARGER of the two, by about 9%',
+  );
+  assert.match(tools, /THE DRIVER ONE IS THE LARGER/);
+});
