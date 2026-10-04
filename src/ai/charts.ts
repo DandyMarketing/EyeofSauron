@@ -286,7 +286,7 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         // Revel figure to imply the service charge from, which would make the
         // bucket a gap and read as a closure; the cost basis is the closest
         // honest stand-in, and it understates rather than inventing.
-        a.revenue += grossSalesOf(o) ?? foodAndBevSalesOf(o);
+        a.revenue += grossSalesOf(o);
       } else {
         // food_bev_sales, and the spend-per-head denominator.
         a.revenue += foodAndBevSalesOf(o);

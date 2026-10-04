@@ -234,125 +234,68 @@ pointing at the wrong thing — "line 4" that was line four of a section, and a
 failure attributed to the file above it. A wrong pointer is worse than no
 pointer, because it is acted on.
 
-### 1.9 Net sales larger than gross sales, on every day and every venue
-**Symptom.** Asked "what were Neon Pigeon's sales on 29 September and covers",
-Sauron answered, in a table, in front of Khai:
+### 1.9 A correct figure "fixed" into a wrong one, for the second time
+**What I claimed.** Asked for Neon Pigeon's 29 Sep 2026 sales, Sauron answered
+net $3,759.26 against gross $3,639.00. I wrote in this log: *"Net larger than
+gross is not a thing that happens in a restaurant."* It is, here. I redefined
+gross sales as net plus discounts, shipped it, and reported gross as $3,980.76
+— **9% too high** — in three commits with tests pinning the wrong number.
 
-```
-Net sales      $3,759.26
-Gross sales    $3,639.00
-```
+**The business's definitions, settled.** Khai, 4 Oct 2026: *"Gross is supposed
+to be just food + bev without svc charge"*, and then the thing that actually
+closed it — *"we deduced it before to match the monday.com one right"*:
 
-Net larger than gross is not a thing that happens in a restaurant.
-**Root cause.** `daily_operations.gross_sales` does not hold what its name says.
-The ingest writes Revel's SALES BY CLASS total into it — food plus beverage,
-**no service charge** — while `net_sales` holds Revel's "Total Sales", which is
-food plus beverage **plus service charge, less discounts**. Two different bases
-in two adjacent columns. `src/lib/sales.ts` has documented this trap since
-BUILD_LOG 2.4 and exists precisely to resolve it.
+    Gross Sales = food + beverage, service charge EXCLUDED
+    Net Sales   = (gross - discounts) + the 10% service charge
+    Cost basis  = food + beverage, i.e. gross sales
 
-`query_sales` has two paths. The **date-range** path used those functions
-correctly. The **single-date** path spread the warehouse row straight out with
-`...data`, so the model received the raw column — while the tool's own
-description told it `gross_sales` includes the service charge. The real gross,
-$3,980.76, was never returned at all.
-**Fix.** `salesFiguresOf(row)` in `src/lib/sales.ts` builds the whole block —
-gross, food & bev, net, service charge, discounts — and **both paths now spread
-it**. Every derived figure is pinned in a test against a total stated separately
-in that day's own report: gross $3,980.76 against GROSS PRODUCT SALES > Total,
-service charge $341.76 against Taxed Service Fee, discounts $221.50 against
-DISCOUNTS > Total. A second test fails if any handler assembles the block by
-hand again.
-**Recurs?** **Every customer.** The column name will mislead the next person to
-read it, and the next tool that returns day figures.
+The 10% is levied **after** the discounts come off, so it enters net and was
+never in gross. **Net exceeds gross on every trading day and that is correct.**
 
-**Nothing was wrong with the formulas.** They were right, documented, and tested
-— in a file written specifically to stop this. The defect was one call site that
-did not use them, which no amount of care in `sales.ts` could prevent. That is
-why the fix is a single shared block rather than a corrected call: **a rule
-enforced by remembering is a rule that holds until the second code path.**
+**The proof was running in production the whole time.** `reconcileMondayVsRevel`
+compares the Monday board's food + beverage against Revel's `gross_sales` column
+with a tolerance of **exactly zero**, and it passes. Had that column carried
+service charge, every day at every venue would have failed by about 10%.
+`deriveTotals()` in the Monday ingest computes it the same way: `gross = food +
+bev`, `net = gross - discounts + service charge`. Two independent sources,
+agreeing to the cent, in code, for months.
 
-**And the two paths disagreed with each other**, which is worse than both being
-wrong. Asking about one day and asking about a one-day range returned different
-figures for the same question, so whichever a reader happened to use decided
-whether they got a sensible answer.
+**What I actually got wrong, and it was not the arithmetic.** The identity
+`net = (gross - discounts) x 1.10` is in `sales.ts`, verified against five real
+days across three venues and three years. It is true under BOTH readings,
+because the `gross` in it means the COLUMN — food and beverage. The prose beside
+it said "Gross Sales = food + beverage + service charge". **The file contained
+the evidence and a conclusion the evidence does not support**, and I took the
+conclusion.
 
-**The prompt held the wrong definition too, and that is probably what chose
-it.** The system prompt carried an old "Key context" line — `"Gross Sales" =
-product sales before discounts/tax`, which is the food & beverage figure — and,
-further down, the correct one: gross sales is food + beverage + the 10% service
-charge. **Both were in front of the model at once**, and the warehouse column of
-the same name holds the first meaning, so the wrong definition was corroborated
-by the data and looked right. Removed, with a test asserting it stays removed.
+**This is BUILD_LOG 2.4 again, in the opposite direction, by someone who had
+read 2.4.** That entry records the same term being mis-read toward the textbook
+convention, the same confident "fix", and the same test suite re-pinned to the
+wrong answer. Its closing line is *"An accounting term is a house convention,
+not a standard... Ask."* I did not ask. I inferred from a plausibility argument
+— net cannot exceed gross — which is exactly the kind of reasoning 2.4 warns
+is worthless here, because both readings fit the arithmetic.
 
-A contradiction in a prompt is not a 50/50 risk. It is an answer nobody can
-predict, reproduce, or debug from the output.
+**Fix.** `grossSalesOf()` returns food + beverage and no longer derives anything
+from net sales. The prompt, both tool descriptions and `FIGURE_DEFINITIONS` say
+so, and all of them now state the consequence out loud — *net is larger than
+gross, that is correct, never reconcile it* — because an unexplained oddity is
+what invites the next fix. The five real days assert `net > gross` directly, so
+the next person has to break them.
+**Recurs?** **Every customer**, and this is now the second instance. A house
+convention cannot be derived from the data, because the data fits both readings.
 
-**Every definition was addressed to the MODEL and none to the reader**, which
-Khai raised directly: *"you would want to describe what gross sales is whenever
-Sauron spits it out."* Right, and the reason is specific — these definitions are
-not the textbook ones. Service charge sitting inside gross sales is the opposite
-of the usual F&B convention, so an operator who assumes the standard meaning is
-about 10% out with nothing in the answer to tell them. They will not ask.
+**The rule, sharper than 2.4 could make it.** *When a figure looks impossible,
+the first move is to find the code that already reconciles it against another
+source.* `reconcileMondayVsRevel` would have settled this in two minutes, before
+any of it shipped. A plausibility argument is not evidence; a zero-tolerance
+reconciliation that has been passing in production is.
 
-The definitions now live in `FIGURE_DEFINITIONS` beside the functions that
-compute them and are **returned in every sales tool response**
-(`figure_definitions`, ~230 tokens a call), rather than only in the prompt. A
-definition written far from the number can disagree with the number, which is
-what just happened. The prompt requires one line of definitions under a table or
-a short parenthesis in prose, once per answer, in the tools' wording.
-
-### 1.11 Two spend-per-head figures in one answer, neither labelled
-**Symptom.** "How did Neon Pigeon do yesterday", 4 Oct 2026. The table said
-**spend per head $89.86**. The paragraph directly beneath it said spend per head
-"fell from $129.28 to **$98.32**". One metric, one day, two numbers, nothing
-saying why.
-**Root cause.** There genuinely are two, and both are right. `query_sales`
-reports **food & beverage ÷ covers**; `explain_revenue_change`'s drivers use
-**net sales ÷ covers**. Net sales carries the 10% service charge, so it runs
-about **9% above** the other for the same day. The answer used one tool for the
-table and the other for the context and never said so.
-**It was already known and written down wrong.** The `explain_revenue_change`
-description warned about exactly this — and claimed the food & beverage basis
-"reads a few percent **higher**". It reads about nine percent **lower**. A
-caveat with the direction reversed is worse than none: a reader checking the
-gap against it concludes the figures are fine when they are the other way round.
-**Fix.** Direction corrected in the tool description with the real measured gap,
-and a prompt rule: stay on one basis throughout, or label both every time they
-appear. Tests assert the rule and that the backwards wording cannot return.
-**Recurs?** **Every customer.** Two defensible definitions of one metric is a
-permanent condition, not a bug to be removed — the only durable fix is that
-nothing may print both without naming them.
-
-### 1.12 The food and beverage split existed in one tool and not the other
-**Symptom.** None, until Khai asked for it: *"you should include the F&B split
-in these sort of queries, $value and %, it gives lots of insight. You should
-include gross too."*
-**Root cause.** `compare_venues` computed the split in a loop of its own,
-reading `sales_by_class` by hand with `find(c => c.class === 'Food')`.
-`query_sales` — the tool that answers how a day or a week went — returned the
-raw JSON and no split at all. So the most ordinary question about a service,
-how drinks did against food, could not be answered by the tool for that
-question, while a cross-venue comparison answered it fine.
-
-Gross sales was returned (since 1.9) and simply not reported, because nothing
-said a trading summary must contain it.
-**Fix.** `classSplitOf()` in `src/lib/sales.ts` returns food, beverage, their
-shares, and **any class that is neither** — Revel permits others, and a split
-that silently drops one is two numbers that do not add up with nothing saying
-why. Both `query_sales` paths, its totals block, and `compare_venues` now use
-it; the hand-written `find()` is gone and a test fails if it returns. The prompt
-requires gross, net and the split in dollars and per cent on any "how did we do"
-answer.
-**Recurs?** **Every customer.** Two tools reading one JSON shape, only one of
-them maintained, is the same defect as the single-date and date-range sales
-paths in 1.9 — and it was in the same file.
-
-**The percentage is computed in code, not by the model.** The rule is that every
-number comes from a query tool, and a percentage is a number. A share the model
-worked out itself is one nobody can check, and it is the easiest kind to get
-subtly wrong — a split measured against gross rather than food & beverage reads
-about 9% low and still looks plausible.
+**What was genuinely a defect, and stays fixed.** `query_sales` had two paths
+that disagreed — the date-range path used `src/lib/sales.ts` and the single-date
+path spread the raw row — so asking about a day and asking about a one-day range
+returned different figures for the same question. `salesFiguresOf()` builds the
+block once and both paths spread it. That part was real and is unaffected.
 
 ### 1.10 A table drawn with spaces, in a code block
 **Symptom.** The same answer's table arrived as fixed-width ASCII with a row of

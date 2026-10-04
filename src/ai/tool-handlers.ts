@@ -1224,26 +1224,20 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       ...data,
 
       /**
-       * THE DERIVED SALES FIGURES, OVERRIDING THE RAW COLUMNS ABOVE.
+       * THE SALES FIGURES, BUILT ONCE AND SPREAD OVER THE RAW COLUMNS.
        *
-       * `...data` spreads the warehouse row, and the COLUMN called
-       * `gross_sales` does not hold what that name means to this business: the
-       * ingest writes Revel's SALES BY CLASS total into it, which is food plus
-       * beverage with NO service charge. Gross as the business defines it —
-       * and as this tool's own description defines it — is that plus service
-       * charge, which `grossSalesOf()` derives as net sales plus discounts.
+       * `...data` spreads the warehouse row, which carries `gross_sales` and
+       * `net_sales` but no service charge, no discount total and no split. The
+       * block below adds them, and it is the SAME block the date-range path
+       * uses — those two paths answer one question and used to disagree, so
+       * asking about a day and asking about a one-day range gave different
+       * figures.
        *
-       * Unfixed, a single-day question reported `gross_sales: 3639` beside
-       * `net_sales: 3759.26`: NET LARGER THAN GROSS, on every day, for every
-       * venue. It is not a data error — they are two different bases — but it
-       * reads as one, and the real gross never appeared at all. Neon Pigeon,
-       * 29 Sep 2026, in front of Khai.
-       *
-       * The DATE-RANGE path below has always done this correctly. The two
-       * paths answer the same question and disagreed, which is the worst of
-       * both: asking for one day and asking for a one-day range gave different
-       * figures. Same shape as the single/plural metric names in Meta — a name
-       * that looks like the thing it is not.
+       * NET SALES IS LARGER THAN GROSS SALES HERE AND THAT IS CORRECT. Gross is
+       * food + beverage; net is gross less discounts PLUS the 10% service
+       * charge, which is levied after the discounts come off. See the header of
+       * src/lib/sales.ts — this has been "fixed" in both directions already and
+       * both fixes were wrong.
        */
       ...salesFiguresOf(data),
       ...classSplitOf(data),
@@ -1302,7 +1296,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const sopBreaches: Array<{ date: string; sevenrooms_covers: number | null; revel_guests: number | null; variance: number | null }> = [];
 
   const daily = data.map(d => {
-    totals.gross_sales += grossSalesOf(d) ?? foodAndBevSalesOf(d);
+    totals.gross_sales += grossSalesOf(d);
     totals.food_bev_sales += foodAndBevSalesOf(d);
     const daySplit = classSplitOf(d);
     totals.food_sales += daySplit.food_sales;
@@ -1445,7 +1439,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
 
     for (const ops of rows) {
       grossSales += foodAndBevSalesOf(ops);
-      businessGross += grossSalesOf(ops) ?? foodAndBevSalesOf(ops);
+      businessGross += grossSalesOf(ops);
       netSales += netSalesOf(ops);
       serviceCharge += serviceChargeOf(ops) ?? 0;
       itemDisc += Number(ops.item_discounts);

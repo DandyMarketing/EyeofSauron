@@ -5,13 +5,24 @@
  * ones. Getting this wrong is easy and expensive, so it is written down rather
  * than inferred:
  *
- *     Gross Sales = food + beverage + service charge
- *     Net Sales   = gross sales - discounts
- *     Cost basis  = food + beverage only, service charge excluded
+ *     Gross Sales = food + beverage, service charge EXCLUDED
+ *     Net Sales   = (gross sales - discounts) + the 10% service charge
+ *     Cost basis  = food + beverage, i.e. gross sales
  *
- * Note that service charge sits INSIDE gross sales here. The common F&B
- * convention is the opposite, and assuming it produced a wrong "fix" that had
- * to be reverted -- see BUILD_LOG 2.4.
+ * So NET SALES IS LARGER THAN GROSS SALES, on every trading day. That is not a
+ * defect and must never be "corrected": the service charge is added after the
+ * discounts come off, so it enters net and was never in gross. It has now been
+ * mis-read in both directions -- BUILD_LOG 2.4 assumed the common convention
+ * and made net 10% too low; BUILD_LOG 1.9 assumed gross must exceed net and
+ * reported gross 9% too high. Both looked like obvious fixes.
+ *
+ * THE PROOF IS IN PRODUCTION, not in anybody's memory. `reconcileMondayVsRevel`
+ * compares the Monday board's food + beverage against Revel's `gross_sales`
+ * column with a tolerance of EXACTLY ZERO, and it has been passing. If that
+ * column carried service charge, every day at every venue would fail it by
+ * about 10%. Monday derives its own figures the same way, in
+ * `deriveTotals()`: gross = food + bev, net = gross - discounts + service
+ * charge.
  *
  * The warehouse columns do not line up with those names, which is the trap:
  *
@@ -96,13 +107,29 @@ export function serviceChargeOf(row: SalesRow): number | null {
 }
 
 /**
- * Gross sales as the business defines it: food + beverage + service charge.
- * Equivalently net sales plus the discounts that were taken off it. Null when
- * there is no Revel figure to imply the service charge from.
+ * Gross sales as the business defines it: food + beverage, service charge
+ * EXCLUDED. The same quantity as `foodAndBevSalesOf` -- two names because the
+ * business uses both, and because every cost ratio in this codebase divides by
+ * the second one and must keep doing so if this ever changes.
+ *
+ * It returns a number and never null, unlike the version that derived it from
+ * net sales: the food and beverage figure is stored directly, so a Monday-board
+ * row has it too.
  */
-export function grossSalesOf(row: SalesRow): number | null {
-  if (row.net_sales === null || row.net_sales === undefined) return null;
-  return round2(n(row.net_sales) + totalDiscountsOf(row));
+export function grossSalesOf(row: SalesRow): number {
+  return foodAndBevSalesOf(row);
+}
+
+/**
+ * Gross less discounts, BEFORE service charge. Revel prints it as "Net Totals"
+ * on the sales-by-class table, and it is the base the 10% is actually levied on
+ * -- which is the step that makes net sales exceed gross sales.
+ *
+ * Not called "net sales": that name is taken, by the figure that includes the
+ * service charge, and overloading it is how this got mis-read twice.
+ */
+export function discountedSalesOf(row: SalesRow): number {
+  return round2(foodAndBevSalesOf(row) - totalDiscountsOf(row));
 }
 
 /**
@@ -231,10 +258,10 @@ export function classSplitOf(row: { sales_by_class?: unknown }): ClassSplit {
  * Phrased for an operator to read verbatim, not for a model to paraphrase.
  */
 export const FIGURE_DEFINITIONS = {
-  gross_sales: 'Food + beverage + the 10% service charge, before discounts',
-  food_bev_sales: 'Food + beverage alone, no service charge. The basis for cost percentages and spend per head',
-  net_sales: 'Gross sales less discounts. What "sales" means when nobody says which',
-  service_charge: 'The 10% charged on the discounted amount. Already inside gross and net sales — never add it on top',
+  gross_sales: 'Food + beverage, before discounts. The service charge is NOT in here',
+  food_bev_sales: 'The same figure as gross sales. Named separately because every cost percentage and spend per head divides by it',
+  net_sales: 'Gross less discounts, plus the 10% service charge — so it is larger than gross. What "sales" means when nobody says which',
+  service_charge: 'The 10% charged on the discounted amount. Inside net sales, NOT inside gross — never add it to net',
   total_discounts: 'Item discounts + order discounts. Coupons are reported separately by Revel and are not included',
   food_sales: 'Food alone, before discounts and service charge',
   beverage_sales: 'Beverage alone, before discounts and service charge',
@@ -246,10 +273,7 @@ export const FIGURE_DEFINITIONS = {
 
 export function salesFiguresOf(row: SalesRow): SalesFigures {
   return {
-    // Falls back to food+bev when there is no net sales to derive gross from,
-    // which is a Monday-board row. Reporting food+bev as gross understates it
-    // by the service charge; reporting null would lose the day entirely.
-    gross_sales: grossSalesOf(row) ?? foodAndBevSalesOf(row),
+    gross_sales: grossSalesOf(row),
     food_bev_sales: foodAndBevSalesOf(row),
     net_sales: netSalesOf(row),
     service_charge: serviceChargeOf(row),

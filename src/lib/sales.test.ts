@@ -9,14 +9,24 @@ import {
  * BUILD_LOG 2.4. These pin the business's definitions, which are not the
  * textbook ones:
  *
- *     Gross Sales = food + beverage + service charge
- *     Net Sales   = gross sales - discounts
- *     Cost basis  = food + beverage
+ *     Gross Sales = food + beverage, service charge EXCLUDED
+ *     Net Sales   = (gross sales - discounts) + the 10% service charge
+ *     Cost basis  = food + beverage, i.e. gross sales
  *
- * Service charge sits INSIDE gross sales. Assuming the usual F&B convention --
- * that net sales excludes it -- produced a "fix" that broke a figure which was
- * already right. The five real days below are what proved it, and they are here
- * so the next person changing this has to disprove them first.
+ * NET SALES IS THEREFORE LARGER THAN GROSS SALES, every day. The service charge
+ * is levied after the discounts come off, so it enters net and was never in
+ * gross. It looks like an error and it is not.
+ *
+ * This has now been mis-read in BOTH directions. BUILD_LOG 2.4 assumed the
+ * usual convention and made net 10% too low. BUILD_LOG 1.9 assumed gross must
+ * exceed net, redefined gross as net plus discounts, and reported it 9% too
+ * high. Each looked like an obvious correction of an obvious error.
+ *
+ * The five real days below are the arbiter, and they fit only one reading:
+ * net = (food + bev - discounts) x 1.10. Anyone changing this has to break them
+ * first. The independent check is `reconcileMondayVsRevel`, which compares the
+ * Monday board's food + beverage against Revel's gross_sales column with a
+ * tolerance of ZERO and has been passing in production.
  */
 
 /** Five days from the warehouse: [label, food+bev, discounts, net_sales]. */
@@ -37,12 +47,17 @@ describe('the definitions hold on real days', () => {
       const row = rowFor(fb, disc, net);
       // Net sales comes from Revel and is already the business's figure.
       assert.equal(netSalesOf(row), net);
-      // Gross = food + bev + service charge = net + discounts.
-      assert.equal(grossSalesOf(row), Math.round((net + disc) * 100) / 100);
-      // Gross - discounts must return to net. The definition, closed.
-      assert.equal(Math.round((grossSalesOf(row)! - disc) * 100) / 100, net);
-      // The cost basis is food + bev alone, never carrying service charge.
+      // Gross is food + beverage. Nothing is added to it.
+      assert.equal(grossSalesOf(row), fb);
+      // And it is the cost basis, under its other name.
       assert.equal(foodAndBevSalesOf(row), fb);
+      // The identity that fits all five days and only one reading of "gross".
+      assert.ok(
+        Math.abs((fb - disc) * 1.1 - net) <= 0.05,
+        `${label}: (${fb} - ${disc}) x 1.1 = ${((fb - disc) * 1.1).toFixed(2)}, stored ${net}`,
+      );
+      // The consequence, stated so nobody "fixes" it again.
+      assert.ok(netSalesOf(row) > grossSalesOf(row), `${label}: net must exceed gross`);
     });
   }
 
@@ -89,12 +104,17 @@ describe('totalDiscountsOf — the figure the Monday board combines', () => {
 describe('rows with no Revel figure', () => {
   const mondayOnly = { gross_sales: 5000, item_discounts: 0, order_discounts: 0 };
 
-  test('service charge and gross sales are null, not zero', () => {
+  test('service charge is null, not zero', () => {
     // Monday-sourced rows carry no net_sales. Zero would claim the venue took
     // no service charge; null says we do not know.
     assert.equal(serviceChargeOf(mondayOnly), null);
-    assert.equal(grossSalesOf(mondayOnly), null);
     assert.equal(serviceChargeOf({ ...mondayOnly, net_sales: null }), null);
+  });
+
+  test('gross sales is still known, because it is just food and beverage', () => {
+    // It used to be derived from net_sales and returned null here. It is stored
+    // directly, so a Monday-board row has it like any other.
+    assert.equal(grossSalesOf(mondayOnly), 5000);
   });
 
   test('the cost basis still works, because food and bev are present', () => {
@@ -113,17 +133,20 @@ describe('numeric-as-string values from Postgres', () => {
 });
 
 /**
- * The one block every tool returns, and the bug that made it necessary.
+ * The one block every tool returns.
  *
- * `query_sales` had two paths. The date-range path used the functions above;
- * the single-date path spread the warehouse row straight out, so the model got
- * the COLUMN named `gross_sales` — food plus beverage, no service charge —
- * while the tool description told it that field INCLUDED service charge.
+ * It exists because `query_sales` had two paths that disagreed: the date-range
+ * path used the functions above and the single-date path spread the warehouse
+ * row straight out, so asking about a day and asking about a one-day range gave
+ * different figures for one question. That part was a real defect and the
+ * shared block fixed it.
  *
- * Asked about Neon Pigeon on 29 Sep 2026 it answered "Net sales $3,759.26,
- * Gross sales $3,639.00": net larger than gross, on every day and every venue,
- * with the real gross never shown. The same question asked as a one-day RANGE
- * came back right — two paths, one question, different answers.
+ * WHAT WAS NOT A DEFECT was the thing that drew attention to it. The answer
+ * read "Net sales $3,759.26, Gross sales $3,639.00" and net above gross looked
+ * impossible, so gross was redefined as net plus discounts. It was already
+ * right: gross is food + beverage, the 10% is levied after discounts come off,
+ * and net exceeds gross every day. Reverted — see the five real days above and
+ * BUILD_LOG 1.9.
  */
 describe('salesFiguresOf — Neon Pigeon, 29 September 2026', () => {
   /**
@@ -138,18 +161,27 @@ describe('salesFiguresOf — Neon Pigeon, 29 September 2026', () => {
     net_sales: '3759.26',        // NET SALES > Total Sales
   };
 
-  test('gross is food + beverage + service charge, and beats net', () => {
+  test('gross is food + beverage, and net is ABOVE it', () => {
     const f = salesFiguresOf(row);
-    // The file's own GROSS PRODUCT SALES > Total line reads 3980.76.
-    assert.equal(f.gross_sales, 3980.76);
-    assert.ok(f.gross_sales > f.net_sales, 'net came out larger than gross again');
+    // The file's SALES BY CLASS > Total > Gross Sales column reads 3639.00.
+    assert.equal(f.gross_sales, 3639);
+    assert.ok(
+      f.net_sales > f.gross_sales,
+      'net must exceed gross — the 10% is added after discounts come off',
+    );
+    // $3,980.76 is the file's GROSS PRODUCT SALES total, which is food + bev
+    // PLUS the service fee. Revel prints it; the business does not call it
+    // gross sales, and reporting it as such overstates gross by 9%.
+    assert.notEqual(f.gross_sales, 3980.76);
   });
 
-  test('the cost basis stays food and beverage alone', () => {
-    // 3,639 is what spend per head and every cost percentage divide by. If this
-    // ever picks up the service charge, every cost ratio reads ~9% low — which
-    // looks like an improvement, not like a bug.
-    assert.equal(salesFiguresOf(row).food_bev_sales, 3639);
+  test('the cost basis is the same figure as gross', () => {
+    // Two names, one number. Every cost percentage and spend per head divides
+    // by this; picking up the service charge would read ~9% low and look like
+    // an improvement.
+    const f = salesFiguresOf(row);
+    assert.equal(f.food_bev_sales, 3639);
+    assert.equal(f.food_bev_sales, f.gross_sales);
   });
 
   test('service charge is implied correctly', () => {
@@ -170,10 +202,9 @@ describe('salesFiguresOf — Neon Pigeon, 29 September 2026', () => {
     assert.equal(salesFiguresOf(row).total_discounts, 221.5);
   });
 
-  test('a Monday-board row reports food and bev rather than losing the day', () => {
-    // No net sales to derive gross from. Gross falls back to food+bev — which
-    // understates it by the service charge — and service_charge is null, which
-    // says "not known" rather than "none was taken".
+  test('a Monday-board row still has a gross figure', () => {
+    // Gross is stored directly, so no net sales is needed to know it.
+    // service_charge stays null, which says "not known" rather than "none".
     const f = salesFiguresOf({ gross_sales: 5000, item_discounts: 0, order_discounts: 0 });
     assert.equal(f.gross_sales, 5000);
     assert.equal(f.service_charge, null);

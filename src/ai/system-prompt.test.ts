@@ -46,28 +46,29 @@ test('both chart tools are offered, not just the time-series one', () => {
 test('the prompt carries exactly ONE definition of gross sales', () => {
   /**
    * It carried two, and they contradicted each other. An old "Key context" line
-   * said gross sales was "product sales before discounts/tax" — which is the
-   * food & beverage figure — while the sales-definitions block said gross sales
-   * is food + beverage + the 10% service charge. Both were in front of the
-   * model at once.
+   * said gross sales was "product sales before discounts/tax" while the
+   * sales-definitions block said food + beverage + the 10% service charge.
    *
-   * Asked for Neon Pigeon's 29 Sep 2026 sales it used the first and reported
-   * NET LARGER THAN GROSS, in a table, to Khai. The warehouse column of the
-   * same name holds the first meaning too (BUILD_LOG 1.9), so the wrong
-   * definition was corroborated by the data and looked right.
-   *
-   * A contradiction in a prompt is not a 50/50 risk, it is an answer nobody can
-   * predict or reproduce.
+   * The first turned out to be the RIGHT one and the second was wrong — gross
+   * is food + beverage and the 10% is levied afterwards — but that is not the
+   * point. Two definitions of one term in one prompt is an answer nobody can
+   * predict or reproduce, whichever happens to be correct.
    */
   assert.ok(
     !/product sales before discounts/i.test(SYSTEM_PROMPT_BASE),
-    'the old contradictory definition of gross sales is back in the prompt',
+    'a second definition of gross sales is back in the prompt',
   );
   assert.match(
     SYSTEM_PROMPT_BASE,
-    /GROSS SALES = food \+ beverage \+ the 10% service charge/,
+    /GROSS SALES = food \+ beverage, service charge\s+EXCLUDED/,
     'the business definition of gross sales is missing',
   );
+  assert.ok(
+    !/GROSS SALES = food \+ beverage \+ the 10% service charge/.test(SYSTEM_PROMPT_BASE),
+    'the service-charge-inclusive definition of gross is back — it overstates gross by 9%',
+  );
+  // And the consequence must be stated, or it reads as an error and gets fixed.
+  assert.match(SYSTEM_PROMPT_BASE, /NET SALES IS LARGER THAN GROSS SALES/);
 
   // "gross - discounts + service fee + tax" described Net To Account For using
   // "gross" in the OTHER sense, which is how the contradiction read as coherent.
