@@ -23,7 +23,12 @@
 import { supabaseAdmin } from '../auth/session.js';
 import { salesFiguresOf, classSplitOf, foodAndBevSalesOf } from './sales.js';
 import { getCovers, getDayMoments } from './covers.js';
-import { serviceDays, serviceNote, syncAge } from './service-day.js';
+import { serviceDays, serviceNote, syncAge, sgtClock } from './service-day.js';
+import {
+  parsePickup, backtest, venueForecast, groupForecast, combineBacktests, scoreBacktest, seasonalLift,
+  BACKTEST_DAYS, TRAINING_WEEKS,
+  type PickupData, type BacktestRecord, type CoverForecast,
+} from './forecast.js';
 import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
@@ -166,6 +171,13 @@ export interface DashboardPayload {
    * both retention measures to monthly whatever it is asked for.
    */
   retention: Record<string, RetentionBlock> | null;
+  /**
+   * Forecast covers for the nights on the service strip after today, with the
+   * backtest that says how far to trust it. Null when it could not be computed
+   * -- most likely migration 051 not yet applied -- and the page then simply
+   * has no forecast panel, rather than no page.
+   */
+  forecast: Record<string, CoverForecast> | null;
   venues: VenueWeek[];
   /** Present only when more than one venue is in scope. */
   group: VenueWeek | null;
@@ -390,10 +402,11 @@ export async function buildDashboard(
   });
 
   // Independent of each other and of everything above; neither blocks the page.
-  const [retention, costs, periodCosts] = await Promise.all([
+  const [retention, costs, periodCosts, forecast] = await Promise.all([
     buildRetention(venues, window.today),
     buildCosts(venues, window.today),
     buildPeriodCosts(venues, window.current.start, window.current.end, window.today),
+    buildForecast(venues, out, window.today, now),
   ]);
   /**
    * THE SIX-MONTH COST LINE IS OFF, and `buildCostTrend` is kept rather than
@@ -408,12 +421,128 @@ export async function buildDashboard(
    */
   const costTrendByVenue = null;
   return {
-    window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue,
+    window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue, forecast,
     venues: out, group: out.length > 1 ? rollUp(out, now) : null,
   };
 }
 
 
+
+/**
+ * The history behind the forecast, per hour.
+ *
+ * CACHED BECAUSE IT ONLY CHANGES WHEN THE INGEST DOES. Reconstructing the book
+ * for every night of the last nine months at five leads, plus two years of
+ * served covers, is the heaviest read this page makes -- and SevenRooms lands
+ * hourly, so a second dashboard load in the same hour would recompute an
+ * identical answer. The key carries the Singapore hour because the cutoff is
+ * taken at that clock time; at 17:00 the history is re-read as it stood at 17:00.
+ *
+ * In-process, so a restart or a second instance simply recomputes. Nothing
+ * here needs to survive one.
+ */
+const pickupCache = new Map<string, { data: PickupData; records: Map<string, BacktestRecord[]> }>();
+
+async function loadPickup(
+  venues: Array<{ id: string }>, today: string, clockHour: string, leads: number[],
+): Promise<{ data: PickupData; records: Map<string, BacktestRecord[]> }> {
+  const ids = venues.map(v => v.id).sort();
+  const key = `${today}|${clockHour}|${ids.join(',')}`;
+  const hit = pickupCache.get(key);
+  if (hit) return hit;
+
+  const longestLead = Math.max(...leads);
+  const { data: raw, error } = await supabaseAdmin.rpc('cover_pickup', {
+    p_venue_ids: ids,
+    // Books: the backtest window, the twelve weeks each backtest night learns
+    // from, and the lead -- nothing older is ever read.
+    p_pickup_from: addDays(today, -(BACKTEST_DAYS + TRAINING_WEEKS * 7 + longestLead + 7)),
+    // Served covers reach a year further, for last year's method and its level.
+    p_final_from: addDays(today, -(BACKTEST_DAYS + 364 + TRAINING_WEEKS * 7 + longestLead + 14)),
+    p_to: addDays(today, -1),
+    p_leads: leads,
+    p_clock: `${clockHour}:00`,
+  });
+  if (error) throw new Error(error.message);
+
+  const data = parsePickup(raw);
+  const records = new Map(ids.map(id => [id, backtest(data, id, today, leads)] as const));
+  const entry = { data, records };
+
+  // Keep it small: a day has 24 hours and there are a handful of venue scopes.
+  if (pickupCache.size > 32) pickupCache.delete(pickupCache.keys().next().value!);
+  pickupCache.set(key, entry);
+  return entry;
+}
+
+/**
+ * Forecast covers for the nights after today on the service strip.
+ *
+ * A FAILURE COSTS THE PANEL, NEVER THE PAGE -- same rule as retention. The
+ * likeliest failure is migration 051 not being applied yet, and it is named.
+ */
+async function buildForecast(
+  venues: Array<{ id: string; name: string; slug: string }>,
+  out: VenueWeek[],
+  today: string,
+  now: Date,
+): Promise<Record<string, CoverForecast> | null> {
+  try {
+    const leads = Array.from({ length: SERVICE_FORWARD }, (_, i) => i + 1);
+    const hour = sgtClock(now).slice(0, 2);
+
+    const [{ data, records }, { data: hols }] = await Promise.all([
+      loadPickup(venues, today, hour, leads),
+      supabaseAdmin.from('public_holidays').select('holiday_date, name')
+        .gt('holiday_date', today).lte('holiday_date', addDays(today, SERVICE_FORWARD)),
+    ]);
+    const holidays = new Map<string, string>(
+      (hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]),
+    );
+
+    const result: Record<string, CoverForecast> = {};
+    const perVenue: CoverForecast[] = [];
+
+    for (const [i, v] of venues.entries()) {
+      /**
+       * THE BOOK IS THE SERVICE STRIP'S, not a second read. The forecast must
+       * start from exactly the "booked" number printed one panel up -- two
+       * reads a few hundred milliseconds apart could disagree by a booking,
+       * and a forecast built on 61 under a cell saying 62 is a discrepancy
+       * somebody will spend ten minutes on.
+       */
+      const days = out[i].service
+        .filter(d => d.basis === 'book')
+        .map(d => ({ date: d.date, booked: d.covers, closed: d.closed }));
+      const f = venueForecast(data, v.id, today, days, leads, holidays, records.get(v.id) ?? []);
+      result[v.slug] = f;
+      perVenue.push(f);
+    }
+
+    if (venues.length > 1) {
+      const groupRecords = combineBacktests(venues.map(v => records.get(v.id) ?? []));
+      // The group's own served series, for its seasonal lift.
+      const summed = new Map<string, number>();
+      for (const v of venues) {
+        for (const [d, n] of data.served.get(v.id) ?? []) summed.set(d, (summed.get(d) ?? 0) + n);
+      }
+      result.group = groupForecast(
+        perVenue,
+        scoreBacktest(groupRecords, leads),
+        seasonalLift(summed, today, SERVICE_FORWARD),
+      );
+    }
+
+    return result;
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    console.warn(
+      `[dashboard] forecast unavailable: ${msg}` +
+      (/cover_pickup/.test(msg) ? ' -- has migration 051_cover_pickup.sql been applied?' : ''),
+    );
+    return null;
+  }
+}
 
 /**
  * Retention for the last COMPLETE month, keyed by venue slug plus "group".

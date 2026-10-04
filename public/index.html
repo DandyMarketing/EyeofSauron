@@ -111,6 +111,16 @@
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   /* The period share, next to the colour it belongs to. */
   .legend b { color: var(--text); font-weight: 600; }
+  /* The forecast: a chart inside a panel, so it carries its own sizing. */
+  svg.fc { width: 100%; height: auto; display: block; padding: 4px 6px 0; }
+  /* The track record. Small, because it is the footnote to the bars -- but a
+     table, because four numbers per row is past what a sentence can carry. */
+  table.acc { font-size: 12px; }
+  table.acc th { font-size: 10px; padding: 6px 8px; }
+  table.acc td { padding: 6px 8px; }
+  table.acc td:nth-child(2), table.acc td:nth-child(3), table.acc th:nth-child(2), table.acc th:nth-child(3) {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
 
 
   /* --- detail table ----------------------------------------------------- */
@@ -561,7 +571,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
-    table + servicePanel(v, w) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
+    table + servicePanel(v, w) + forecastPanel(payload, v) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -905,6 +915,147 @@ function servicePanel(v, w) {
  * or coded to inventory and journalled out later, so it never touches a bill.
  * Printed anyway, a beverage cost of 2% looks like the best bar in Singapore.
  */
+/**
+ * Forecast covers for the nights after today, and how far to trust them.
+ *
+ * Khai, 4 Oct 2026: "Next to make would be just under upcoming reservations,
+ * forecasted reservations." Then: "Build it but explain it."
+ *
+ * ONE BAR PER NIGHT, BUILT FROM WHAT WE KNOW TO WHAT WE EXPECT. The solid part
+ * is what is booked -- a fact. The lighter part stacked on it is what usually
+ * arrives between now and service on that weekday -- walk-ins and late
+ * bookings, net of cancellations and no-shows. The whisker is the likely range.
+ * Reading up the bar is reading from certain to estimated, which is the order
+ * a manager should weigh them in.
+ *
+ * LAST YEAR'S METHOD IS THE HOLLOW DOT, so the two can be compared night by
+ * night and not only in the accuracy table. Where they disagree is where to
+ * look twice: either the book knows something last year could not, or a
+ * seasonal turn is coming that twelve recent weeks have not seen.
+ *
+ * COVERS, NOT RESERVATIONS. Walk-ins are a third of Neon Pigeon's room and
+ * never appear in a book; a forecast of bookings would read low against the
+ * actual night every time and be dismissed inside a week.
+ *
+ * THE ACCURACY IS ON THE PANEL, NOT IN A REPORT. A forecast nobody scores is
+ * indistinguishable from a guess, and the number that decides whether to call
+ * in another pair of hands is the one that most needs its track record beside
+ * it.
+ */
+function forecastPanel(payload, v) {
+  const f = payload.forecast && payload.forecast[v.slug];
+  if (!f || !f.days || !f.days.length) return '';
+
+  const days = f.days;
+  const W = 320, H = 158, padX = 14, padTop = 24, padBottom = 40;
+  const plot = H - padTop - padBottom;
+  const top = Math.max(1, ...days.map(d => Math.max(d.hi ?? 0, d.mid ?? 0, d.booked ?? 0, d.last_year ?? 0)));
+  const y = n => padTop + plot - (n / top) * plot;
+  const bw = (W - padX * 2) / days.length;
+
+  let svg = '';
+  days.forEach((d, i) => {
+    const x = padX + i * bw + bw * 0.2;
+    const w = bw * 0.48;
+    const cx = x + w / 2;
+    const dow = new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'short', timeZone: 'UTC' });
+
+    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 25) + '" text-anchor="middle" font-size="10" fill="#8888a0">' + esc(dow) + '</text>';
+
+    if (d.closed) {
+      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" fill="#8888a0">closed</text>';
+      return;
+    }
+
+    // What is booked: the fact, drawn solid.
+    const bTop = y(d.booked);
+    svg += '<rect x="' + x + '" y="' + bTop + '" width="' + w + '" height="' + (padTop + plot - bTop) + '" fill="#3fa9a0"></rect>';
+    /**
+     * THE BOOKED NUMBER, ALWAYS. Inside the solid bar where it fits; where the
+     * book is too small for that, just above it in light text -- a short bar is
+     * exactly the night somebody wants the number for, and "a chart with no
+     * numbers on it" is the complaint this page was rebuilt around.
+     */
+    if (padTop + plot - bTop >= 12) {
+      svg += '<text x="' + cx + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#06302e">' + num(d.booked) + '</text>';
+    } else {
+      svg += '<text x="' + cx + '" y="' + (bTop - 3) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#9fd8d2">' + num(d.booked) + '</text>';
+    }
+
+    if (d.mid === null) {
+      // No forecast: the book stands alone, and says why in the note.
+      svg += '<text x="' + cx + '" y="' + (bTop - 5) + '" text-anchor="middle" font-size="10" fill="#8888a0">—</text>';
+      return;
+    }
+
+    // What usually arrives on top of it, lighter, because it is an estimate.
+    if (d.mid > d.booked) {
+      svg += '<rect x="' + x + '" y="' + y(d.mid) + '" width="' + w + '" height="' + (bTop - y(d.mid)) +
+             '" fill="#3fa9a0" opacity="0.32"></rect>';
+    } else if (d.mid < d.booked) {
+      /**
+       * BELOW THE BOOK, which is real: on some nights more people cancel or do
+       * not show than walk in. Drawn as a line across the solid bar rather than
+       * by shortening it, because the book is a fact and must not be drawn as
+       * smaller than it is.
+       */
+      svg += '<line x1="' + (x - 2) + '" y1="' + y(d.mid) + '" x2="' + (x + w + 2) + '" y2="' + y(d.mid) +
+             '" stroke="#e8933a" stroke-width="1.5"></line>';
+    }
+
+    // The likely range, as a whisker.
+    svg += '<line x1="' + cx + '" y1="' + y(d.hi) + '" x2="' + cx + '" y2="' + y(d.lo) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>' +
+           '<line x1="' + (cx - 4) + '" y1="' + y(d.hi) + '" x2="' + (cx + 4) + '" y2="' + y(d.hi) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>' +
+           '<line x1="' + (cx - 4) + '" y1="' + y(d.lo) + '" x2="' + (cx + 4) + '" y2="' + y(d.lo) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>';
+
+    // Last year's method, beside the bar.
+    if (d.last_year !== null) {
+      svg += '<circle cx="' + (x + w + 7) + '" cy="' + y(d.last_year) + '" r="3" fill="none" stroke="#a0a0b8" stroke-width="1.2"></circle>';
+    }
+
+    // The forecast itself, above everything, as the number to read.
+    const labelY = Math.min(y(d.hi), bTop) - 6;
+    svg += '<text x="' + cx + '" y="' + labelY + '" text-anchor="middle" font-size="10.5" font-weight="700" fill="#e8933a">' +
+           num(d.mid) + (d.beyond_history ? ' ⚑' : '') + '</text>';
+
+    // The range in words under the day, because a whisker has no numbers on it.
+    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 13) + '" text-anchor="middle" font-size="8" fill="#8888a0">' +
+           num(d.lo) + '–' + num(d.hi) + '</text>';
+    if (d.holiday) {
+      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 3) + '" text-anchor="middle" font-size="7.5" font-weight="600" fill="#e8933a">holiday</text>';
+    }
+  });
+
+  const legend =
+    '<div class="legend" style="padding:2px 14px 8px;flex-wrap:wrap;row-gap:4px;margin:0">' +
+      '<span><i style="background:#3fa9a0"></i>booked</span>' +
+      '<span><i style="background:#3fa9a0;opacity:0.32"></i>expected to arrive</span>' +
+      '<span><i style="background:none;border-left:1px solid #e4e4ef;border-radius:0;width:1px"></i>likely range</span>' +
+      '<span><i style="background:none;border:1.2px solid #a0a0b8;border-radius:50%"></i>last year’s pattern</span>' +
+    '</div>';
+
+  /**
+   * THE TRACK RECORD, per number of days out. Both methods on the SAME nights,
+   * so a lower number is a better method and not a luckier sample.
+   */
+  let table = '';
+  if (f.accuracy && f.accuracy.length) {
+    table = '<table class="acc"><thead><tr><th>Days out</th><th>Typical miss</th><th>Last year’s way</th><th>In range</th></tr></thead><tbody>' +
+      f.accuracy.map(a =>
+        '<tr><td>' + a.lead + '</td>' +
+        // Whole numbers: the method does not know a night to a tenth of a cover.
+        '<td>' + num(Math.round(a.pickup.mae)) + ' covers <span class="cov">' + Math.round(a.pickup.wape_pct) + '%</span></td>' +
+        '<td>' + (a.last_year ? num(Math.round(a.last_year.mae)) + ' covers' : '—') + '</td>' +
+        '<td>' + Math.round(a.pickup.in_range_pct) + '%</td></tr>').join('') +
+      '</tbody></table>';
+  }
+
+  return '<div class="panel"><h2>Forecast covers</h2>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="fc" role="img" aria-label="Forecast covers by night">' + svg + '</svg>' +
+    legend + table +
+    '<p class="figure-note">' + esc(f.note) + '</p></div>';
+}
+
 function periodCostPanel(payload, v, w) {
   const c = payload.period_costs && payload.period_costs[v.slug];
   if (!c) return '';

@@ -591,6 +591,36 @@ tool description for `query_reservations` now states outright that lead time is
 held and names the tool that returns it, because the correction has to live
 where the model is looking.
 
+### 3.5 A window's weekday mix read as a season
+**Symptom.** Caught before shipping, on the first render of the cover forecast
+(4 Oct 2026). The seasonal note said the coming days "ran 22% quieter" last
+year, on a synthetic venue deliberately built to be 12% BUSIER in October.
+**Root cause.** The next five nights were Monday to Thursday — Sunday was shut —
+and they were averaged and compared with a twelve-week baseline that included
+every Friday and Saturday. The measure was reading *which weekdays were in the
+window*, not the season. On real data it would have announced a quiet spell
+every time the next five days missed a weekend, and a seasonal turn every time
+they caught one.
+**Fix.** `seasonalLift()` divides each night by the average of ITS OWN weekday
+and averages those ratios. A test now asserts a lift of exactly zero on a venue
+with no seasonal change, for a window with no weekend and one with.
+
+A second fault surfaced in the same measure once the first was fixed: five
+nights at ordinary ±20% variation read a true 12% lift as 5%. Widening to three
+weeks of last year fixed the noise — but only using the weeks AFTER the
+equivalent date, because the week before sits inside the baseline and including
+it compares the baseline with itself, pulling every lift toward zero. Measured
+after: 11.7% against a true 12%.
+**Recurs?** **Every customer, and in any comparison over a window shorter than
+a week.** This is 3.1 in a different shape: 3.1 was a partial *month* compared
+with whole ones; this is a partial *week* compared with whole ones. Weekday is
+the largest single driver of covers in F&B, larger than month or season, so any
+window that is not a whole number of weeks carries a weekday mix — and a mix
+difference looks exactly like a trend. The dashboard's like-for-like
+week-to-date (same weekday span, never against a whole week) exists for the
+same reason. **Compare a night with nights of its own weekday, or compare whole
+weeks. Nothing in between is safe.**
+
 ---
 
 ## 4. Security

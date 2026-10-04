@@ -731,7 +731,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 50 migrations, 25 query tools, 11 ingest sources, 1,128 tests.
+started.** 51 migrations, 25 query tools, 11 ingest sources, 1,351 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -749,7 +749,34 @@ about building a backbone that already exists. Update it when a phase moves.
   holds that and `dashboard-rollup.ts` the group line, split out so the pure
   logic is testable without credentials. Everything the page draws arrives in
   ONE request.
+  The service strip under it labels every day by BASIS — a past night is
+  completed covers, today is a live snapshot (eaten / in the room / still to
+  come, from `seated_at` and `left_at`, falling back to the diary in grey where
+  the floor has marked nothing), a future night is the book. Three measurements
+  in one row is only safe because each cell says which it is.
 - **Phase 3**: chatbot + Insight & Recommendation Engine + chart generation + Telegram.
+
+### Cover forecast: pickup, scored, built 4 Oct 2026
+
+Khai asked whether to forecast from last year's daily seasonality. The answer
+built is **pickup**: what is booked now, plus what the same weekday at the same
+venue usually picks up from that many days out at that time of day (walk-ins and
+late bookings, net of cancellations and no-shows), over the last 12 weeks.
+Additive, not a ratio — a ratio turns three early bookings into ninety covers.
+Range is the 20th–80th percentile. Migration 051 `cover_pickup()` reconstructs
+the historical book from `source_created_at`; the model is `src/lib/forecast.ts`.
+
+**Last year's method is built fairly and shown beside it, not discarded**: the
+same weekday 364 days back (365 compares a Saturday with a Sunday), averaged
+across three weeks, scaled to this year's level. Both are **backtested on the
+last 26 weeks with no look-ahead**, scored on the SAME nights, and the accuracy
+is printed on the panel. Do not ship a forecast without its track record beside
+it — the failure mode is not being wrong, it is being untrusted.
+
+**Forecast COVERS, never reservations.** Walk-ins are 17.5% of the group and 31%
+of Neon Pigeon and never appear in a book. Holidays are flagged, not modelled.
+Seasonal lift is reported, not applied, until a backtest shows applying it helps
+— and it compares each night with ITS OWN weekday (BUILD_LOG 3.5).
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 
 ### Deferred: read-only SQL query tool

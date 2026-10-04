@@ -1045,3 +1045,70 @@ test('the cost trend is not computed while nothing draws it', () => {
   // Kept, not deleted — re-enabling must stay a one-line change.
   assert.match(lib, /async function buildCostTrend/, 'the builder was deleted rather than switched off');
 });
+
+/**
+ * Forecast covers, under the service strip.
+ *
+ * Khai, 4 Oct 2026: "Next to make would be just under upcoming reservations,
+ * forecasted reservations ... based on daily seasonality from previous year."
+ * Then: "Build it but explain it." The method lives in src/lib/forecast.ts and
+ * is tested there; these hold the panel and the wiring to what was decided.
+ */
+test('the forecast panel sits directly under the service strip', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.ok(home.includes('servicePanel(v, w) + forecastPanel(payload, v)'),
+    'the forecast is defined but not rendered under the service strip');
+});
+
+test('the forecast carries its track record on the panel', () => {
+  /**
+   * A forecast nobody scores is indistinguishable from a guess, and the number
+   * that decides whether to call in another pair of hands is the one that most
+   * needs its accuracy beside it — not in a report somebody might open.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function forecastPanel('), home.indexOf('function periodCostPanel('));
+  assert.match(fn, /f\.accuracy/, 'the backtest is computed but not shown');
+  assert.match(fn, /Typical miss/);
+  assert.match(fn, /Last year(’|\\u2019)s way/, "Khai's method is not shown beside the one in use");
+  assert.match(fn, /In range/, 'nothing says whether the range means what it says');
+});
+
+test('the forecast draws the book as a fact and the rest as an estimate', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function forecastPanel('), home.indexOf('function periodCostPanel('));
+  // The booked number is ALWAYS on the bar — inside when it fits, above when not.
+  const booked = fn.match(/num\(d\.booked\)/g) ?? [];
+  assert.ok(booked.length >= 2, 'a short bar loses its booked number');
+  // A forecast below the book is a line across it, never a shorter bar: the
+  // book is a fact and must not be drawn smaller than it is.
+  assert.match(fn, /d\.mid < d\.booked/);
+  // Last year's method, night by night, not only in the table.
+  assert.match(fn, /d\.last_year !== null/);
+  // A closed night says so in words.
+  assert.match(fn, /closed<\/text>/);
+});
+
+test('the forecast starts from the same book the strip above prints', () => {
+  /**
+   * Two reads a few hundred milliseconds apart could disagree by a booking, and
+   * a forecast built on 61 under a cell saying 62 is a discrepancy somebody
+   * will spend ten minutes on.
+   */
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /out\[i\]\.service\s*\n?\s*\.filter\(d => d\.basis === 'book'\)/, 'the forecast reads its own book');
+});
+
+test('a failed forecast costs the panel, never the page, and names the likely cause', () => {
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  const fn = lib.slice(lib.indexOf('async function buildForecast('), lib.indexOf('async function buildRetention('));
+  assert.match(fn, /return null;/);
+  assert.match(fn, /051_cover_pickup\.sql/, 'an unapplied migration would look like a venue with no history');
+});
+
+test('the forecast history is cached per Singapore hour, not recomputed per load', () => {
+  // The heaviest read the page makes, and it only changes when the hourly
+  // SevenRooms ingest does.
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /const key = `\$\{today\}\|\$\{clockHour\}\|\$\{ids\.join\(','\)\}`/);
+});
