@@ -381,7 +381,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
-    advicePanel(recData, v) + askBox(v);
+    advicePanel(recData, v, w.today) + askBox(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -465,36 +465,71 @@ function bookPanel(v, w) {
 }
 
 /**
- * The week's advice, on the same screen as the numbers it is about.
+ * The advice, and the period it is actually about.
  *
- * This is the whole reason the dashboard is the home page rather than a fourth
- * tab: the brief says the analytics are table stakes and the recommendations
- * are the product, and that they must live in one integrated surface. Two
- * screens is the split it says not to make.
+ * IT IS NOT ABOUT THIS WEEK, AND SAYING SO IS THE WHOLE POINT. The engine runs
+ * on `lastCompleteWeek()` -- a Monday-to-Sunday that has already closed --
+ * because a Tuesday dip is a Tuesday and only a quiet WEEK is news. The figures
+ * above are week to date. Putting the two under a heading reading "this week's
+ * advice" states something false and invites a reader to check the advice
+ * against the numbers beside it, which will not reconcile because they are
+ * different weeks.
+ *
+ * They are not in conflict once labelled. You review the week that closed and
+ * act during the week in progress -- that IS the operating rhythm, and it only
+ * reads as a contradiction when the period is left off.
+ *
+ * ONE PERIOD ONLY. /api/recommendations returns up to 60 rows ordered by
+ * generated_at across EVERY period, so taking the top three could quietly mix
+ * last week's advice with the week before's -- two periods under one heading,
+ * which is the same defect one layer up. The latest period wins and the rest
+ * are left for the briefing.
+ *
+ * AND A STALE ENGINE IS REPORTED RATHER THAN DRESSED UP. A complete week ends
+ * between one and seven days before any given day, so a period older than ten
+ * means the weekly run has not fired. Showing fortnight-old advice under a
+ * fresh-looking heading is the failure this codebase keeps finding: it worked,
+ * it looked fine, it was doing nothing.
  */
-function advicePanel(recData, v) {
+function advicePanel(recData, v, today) {
   const recs = (recData && recData.recommendations) || [];
-  const mine = v.slug === 'group' ? recs : recs.filter(r => r.venue_id === v.venue_id);
-  const shown = mine.slice(0, 3);
+  const mine = (v.slug === 'group' ? recs : recs.filter(r => r.venue_id === v.venue_id))
+    .filter(r => r.status !== 'dismissed');
 
   const withheld = recData && recData.withheld_for_role
     ? '<p class="figure-note">' + recData.withheld_for_role + ' recommendation(s) are not shown for your role.</p>'
     : '';
 
-  if (!shown.length) {
-    return '<div class="panel"><h2>This week’s advice</h2>' +
-           '<div class="empty">Nothing this week. An engine that always has something to say is one nobody believes — a quiet week is a valid result.</div>' +
+  if (!mine.length) {
+    return '<div class="panel"><h2>Advice</h2>' +
+           '<div class="empty">Nothing outstanding. An engine that always has something to say is one nobody believes \u2014 a quiet week is a valid result.</div>' +
            withheld + '</div>';
   }
 
-  return '<div class="panel"><h2>This week’s advice</h2>' +
+  // The most recently REVIEWED period, not the most recently generated row.
+  const latest = mine.reduce((a, r) => (r.period_end > a ? r.period_end : a), '');
+  const shown = mine.filter(r => r.period_end === latest).slice(0, 3);
+  const start = shown.reduce((a, r) => (!a || r.period_start < a ? r.period_start : a), '');
+
+  const ageDays = Math.round(
+    (Date.parse(today + 'T00:00:00Z') - Date.parse(latest + 'T00:00:00Z')) / 86400000);
+
+  const stale = ageDays > 10
+    ? '<p class="figure-note" style="color:var(--accent)">The weekly run has not produced anything newer than this in ' +
+      ageDays + ' days. Treat it as out of date and check the engine.</p>'
+    : '';
+
+  return '<div class="panel"><h2>Advice from the week just reviewed</h2>' +
+    '<p class="figure-note" style="padding-bottom:4px">Covering <strong>' + fmtRange(start, latest) +
+    '</strong> \u2014 a completed week, which is the only unit worth advising on. ' +
+    'The figures above are this week so far, so the two will not tie: you review the closed week and act during this one.</p>' +
     shown.map(r =>
       '<div class="rec">' +
-        '<div class="rec-venue">' + esc(r.venue) + '</div>' +
+        '<div class="rec-venue">' + esc(r.venue) + (r.status === 'acted_on' ? ' \u00b7 acted on' : '') + '</div>' +
         '<div class="rec-headline">' + esc(r.headline) + '</div>' +
         '<div class="rec-body">' + renderMarkdown(r.body || '') + '</div>' +
       '</div>').join('') +
-    withheld +
+    stale + withheld +
     '<p class="figure-note"><a href="/briefing.html">Open the full briefing</a> to rate these or read the evidence behind them.</p>' +
     '</div>';
 }

@@ -199,9 +199,11 @@ export function analysisBrief(
     ? `\n\n${(options.warnings ?? []).join('\n\n')}`
     : '';
 
-  return `You are preparing this week's briefing for the person who runs ${venueName}. Nobody asked you a question. You are deciding what they most need to know.
+  return `You are preparing a briefing for the person who runs ${venueName}. Nobody asked you a question. You are deciding what they most need to know.
 
 The period under review is ${periodStart} to ${periodEnd}. Compare it against the weeks before it, and against the rest of the group.
+
+NEVER CALL IT "THIS WEEK". The period above is a week that has already CLOSED, and by the time anybody reads this they are working in the week after it. Your briefing is now shown on the dashboard directly beneath that live week's figures, so "this week" there names the wrong week and the two sets of numbers will not tie. Say "the week of ${periodStart}", "the week reviewed", or name the dates. Same for "today" and "yesterday", which mean nothing to a reader a week later.
 
 Find at most ${MAX_PER_RUN} things worth their attention, ranked by how much money or risk is attached. Fewer is better than padding.
 

@@ -419,3 +419,70 @@ test('every page offers the dashboard, and none still calls / the chat', () => {
     );
   }
 });
+
+/**
+ * The advice on the dashboard is about a DIFFERENT WEEK from the figures above
+ * it, and the page has to say so.
+ *
+ * Khai, 4 Oct 2026: "the briefing is already 1 week old. It's for the previous
+ * week so if the dashboard is for this week then that briefing is irrelevant.
+ * It might confuse people."
+ *
+ * Right about the confusion, and the first version made it worse by heading the
+ * panel "This week's advice" — which is false. The engine runs on
+ * `lastCompleteWeek()` because only a quiet WEEK is news; the figures above are
+ * week to date. They are not in conflict once labelled: you review the week
+ * that closed and act during the week in progress.
+ */
+test('the dashboard names the period its advice covers', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+
+  assert.ok(
+    !/This week.s advice/.test(home),
+    'the advice panel claims to be about this week — the engine reviews the week that CLOSED',
+  );
+  assert.match(home, /Advice from the week just reviewed/);
+  // The actual dates, not just a word: "a completed week" with no period is
+  // still something a reader has to take on trust.
+  assert.ok(home.includes('fmtRange(start, latest)'), 'the panel no longer prints the period it covers');
+});
+
+test('the dashboard never mixes two periods of advice under one heading', () => {
+  /**
+   * /api/recommendations returns up to 60 rows ordered by generated_at across
+   * EVERY period, so taking the top three could silently put last week's advice
+   * beside the week before's. Invisible, because each item is individually
+   * correct.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.ok(
+    home.includes('r.period_end === latest'),
+    'the advice panel no longer filters to a single period',
+  );
+  assert.ok(
+    home.includes("r.status !== 'dismissed'"),
+    'dismissed advice is shown again — somebody already decided against it',
+  );
+});
+
+test('stale advice is reported rather than dressed up as current', () => {
+  // A complete week ends between one and seven days before any given day, so a
+  // period older than ten means the weekly run has not fired. Showing
+  // fortnight-old advice under a fresh heading is "it worked, it looked fine,
+  // it was doing nothing".
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /ageDays > 10/);
+  assert.match(home, /The weekly run has not produced anything newer/);
+});
+
+test('the engine is told not to call the reviewed week "this week"', () => {
+  // The panel's label cannot fix prose inside the recommendation body. A
+  // recommendation saying "discounts hit 6.1% this week" sitting under live
+  // week-to-date figures names the wrong week.
+  const prompt = readFileSync('src/ai/recommendation.ts', 'utf8');
+  assert.match(prompt, /NEVER CALL IT "THIS WEEK"/);
+  assert.ok(
+    !/preparing this week's briefing/.test(prompt),
+    'the prompt still frames the briefing as being about "this week"',
+  );
+});
