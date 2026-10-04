@@ -262,3 +262,79 @@ test('a page using the hidden attribute also neutralises display rules', () => {
     );
   }
 });
+
+/**
+ * The definition line must be subordinate on EVERY page that renders an answer.
+ *
+ * Khai, 4 Oct 2026: "the description of stuff in italics should be made into a
+ * smaller font different color. Basically different formatting then the main
+ * analysis so it doesn't get too wordy. Should apply across all functions."
+ *
+ * DISCOVERED, NOT LISTED, for the same reason as the auth rule above: a page
+ * that renders markdown next year must carry this or Sauron's definitions
+ * arrive there at full weight, competing with the analysis they annotate.
+ */
+const markdownPages = pages.filter((p) =>
+  readFileSync(`public/${p}`, 'utf8').includes('function renderMarkdown('),
+);
+
+test('every page that renders an answer was found', () => {
+  assert.ok(markdownPages.length >= 3, `only found ${markdownPages.length}: ${markdownPages.join(', ')}`);
+  for (const expected of ['index.html', 'briefing.html', 'plan.html']) {
+    assert.ok(markdownPages.includes(expected), `${expected} no longer renders markdown — check this test`);
+  }
+});
+
+for (const page of markdownPages) {
+  test(`${page}: a whole-italic paragraph renders as a subordinate note`, () => {
+    const html = readFileSync(`public/${page}`, 'utf8');
+
+    assert.ok(
+      html.includes('function wholeItalicBlock('),
+      `public/${page} cannot recognise a definition line, so it renders at full weight`,
+    );
+    assert.ok(
+      html.includes('class="figure-note"'),
+      `public/${page} never emits the figure-note class`,
+    );
+    assert.match(
+      html,
+      /\.figure-note\s*\{[^}]*font-size:\s*0?\.8em[^}]*\}/s,
+      `public/${page} has no smaller font for .figure-note — the whole point of the rule`,
+    );
+    assert.match(
+      html,
+      /\.figure-note\s*\{[^}]*color:\s*var\(--text-muted\)[^}]*\}/s,
+      `public/${page} does not mute the definition line`,
+    );
+
+    /**
+     * Italics must exist at all. plan.html had NO single-asterisk rule, so a
+     * definition line arrived there as literal asterisks while the other two
+     * pages rendered it correctly — the drift this test is really guarding.
+     */
+    assert.ok(
+      /replace\(\/\\\*\(\.\+\?\)\\\*\/g, '<em>\$1<\/em>'\)/.test(html),
+      `public/${page} does not render single-asterisk italics, so a definition line shows its asterisks`,
+    );
+  });
+
+  test(`${page}: a table does not swallow the paragraph after it`, () => {
+    /**
+     * The table regex consumes the newline that ENDED the last row, so the
+     * following paragraph had only one newline in front of it, never split off
+     * as its own block, and was returned verbatim inside the table's block —
+     * losing its <p> entirely.
+     *
+     * It cost every paragraph directly after a table its spacing, silently, and
+     * it is why the definition line was never recognised as a paragraph at all.
+     * Found by rendering the page rather than by reading it.
+     */
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(
+      html,
+      /return (table|t) \+ '[^']*<\/tbody><\/table>\\n\\n'|return table \+ '\\n\\n'/,
+      `public/${page}'s table rule does not end the block, so the next paragraph is glued to the table`,
+    );
+  });
+}
