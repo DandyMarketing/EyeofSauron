@@ -3,26 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sauron - The Dandy Collection</title>
+<title>Dashboard - Sauron</title>
 <!--
-  Start the auth client downloading while the HTML is still being parsed.
-
-  Without this the browser cannot know it needs the file until the script at the
-  bottom of the page runs and reaches its dynamic import() -- so a 60 KB
-  download that could have been in flight from the first byte waits for the
-  whole document to parse first. A modulepreload is the only way to tell it
-  earlier, because a dynamic import is invisible to the preload scanner.
+  Start the auth client downloading while the HTML is still being parsed. A
+  dynamic import() is invisible to the preload scanner, so without this the 60 KB
+  download cannot begin until the whole document has parsed. See
+  src/frontend/pages.test.ts, which asserts this on every page that signs
+  somebody in.
 -->
 <link rel="modulepreload" href="/vendor/supabase.js">
-<!--
-  The Supabase config, substituted by the server (see injectConfig in
-  src/server.ts). It used to be a fetch, which was a whole round trip at the
-  front of the chain for two public values, and nothing could start until it
-  came back.
--->
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
-<link rel="modulepreload" href="/sse-parse.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -35,1888 +26,490 @@
     --text-muted: #8888a0;
     --accent: #e8933a;
     --accent-dim: #c47520;
-    --user-bg: #1e1e30;
-    --assistant-bg: #12121c;
     --error: #e84040;
+    --success: #40c060;
   }
 
+  /* `hidden` works through the BROWSER's stylesheet, so any author rule that
+     sets display beats it. That cost a shipped bug once -- a panel with
+     `display: flex` sat permanently over the chat header. Asserted in
+     pages.test.ts for any page using the attribute. */
+  [hidden] { display: none !important; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
-    margin: 0;
-    padding: 0;
-  }
-
-  #app-shell {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
   }
 
   header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-
-  .logo {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8b3500 70%, #2a0e00 100%);
-    box-shadow: 0 0 20px rgba(232, 147, 58, 0.3);
-    flex-shrink: 0;
-  }
-
-  header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-  }
-
-  header .subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-
-  #chat {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .message {
-    max-width: 780px;
-    width: 100%;
-    margin: 0 auto;
-    display: flex;
-    gap: 12px;
-  }
-
-  .message.user { justify-content: flex-end; }
-
-  .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .message.user .avatar {
-    background: var(--accent-dim);
-    color: #fff;
-    order: 2;
-  }
-
-  .message.assistant .avatar {
-    background: radial-gradient(circle, var(--accent) 0%, #6b2800 100%);
-    box-shadow: 0 0 8px rgba(232, 147, 58, 0.2);
-  }
-
-  .bubble {
+    display: flex; align-items: center; gap: 12px;
     padding: 12px 16px;
-    border-radius: 12px;
-    line-height: 1.6;
-    font-size: 14px;
-    max-width: 85%;
-  }
-
-  .message.user .bubble {
-    background: var(--user-bg);
-    border: 1px solid var(--border);
-    border-top-right-radius: 4px;
-  }
-
-  /**
-   * A DEFINITION LINE, set apart from the analysis.
-   *
-   * Sauron has to say what each figure means -- these are the business's
-   * definitions and not the textbook ones, so a reader who assumes the standard
-   * meaning is about 9% out with nothing telling them. The first version put
-   * that explanation inside the table cells: "Net sales (gross less discounts)"
-   * wrapped onto two lines on a phone and the table became mostly prose.
-   *
-   * So the definitions move to ONE line under the table, in italics, and this
-   * rule makes that line visibly subordinate -- smaller, muted, tighter. It is
-   * reference material you read once and then stop seeing, which is the whole
-   * difference between a definition and the analysis above it.
-   *
-   * Any whole-italic paragraph gets this, so it works the same in the chat, the
-   * briefing and the plan without the model needing a special syntax.
-   */
-  .figure-note {
-    font-size: 0.8em;
-    line-height: 1.5;
-    color: var(--text-muted);
-    font-style: normal;
-    margin-top: -2px;
-    opacity: 0.95;
-  }
-
-  /* Taking an answer away with you. Sits in the same bar as "Teach Sauron
-     this", because both are things you do to a reply you have just read. */
-  .export-btn {
-    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
-    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
-    font-family: inherit; margin-left: 6px;
-  }
-  .export-btn:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
-  .export-btn.working { color: var(--accent); border-color: var(--accent); }
-
-  .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
-  .teach-btn, .teach-save, .teach-cancel {
-    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
-    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
-  }
-  .teach-btn:hover, .teach-save:hover, .teach-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
-  .teach-save { border-color: rgba(120,180,255,0.5); color: #9cc6ff; }
-  .teach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
-  .teach-text {
-    width: 100%; background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 13px;
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;
-  }
-  .teach-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
-  .teach-row select {
-    background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 12px;
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 6px;
-  }
-  .message.assistant .bubble {
-    background: var(--assistant-bg);
-    border: 1px solid var(--border);
-    border-top-left-radius: 4px;
-  }
-
-  /* Post thumbnails. Small enough to sit inline in a sentence or a table cell
-     without turning the conversation into a gallery, and clickable through the
-     permalink the model puts beside them. */
-  .post-thumb {
-    max-width: 160px;
-    max-height: 160px;
-    border-radius: 8px;
-    object-fit: cover;
-    vertical-align: middle;
-    margin: 4px 6px 4px 0;
-    background: rgba(255,255,255,0.04);
-  }
-  /* A URL that has expired. Collapsed rather than left as a broken-image icon,
-     because a broken icon reads as data we lost. */
-  .post-thumb.expired {
-    max-width: 0;
-    max-height: 0;
-    margin: 0;
-    opacity: 0;
-  }
-  .bubble a { color: var(--accent, #e8a33d); text-decoration: underline; }
-
-  .bubble p { margin-bottom: 8px; }
-  .bubble p:last-child { margin-bottom: 0; }
-
-  .bubble ul, .bubble ol {
-    margin: 8px 0;
-    padding-left: 20px;
-  }
-
-  .bubble li { margin-bottom: 4px; }
-
-  .bubble strong { color: var(--accent); font-weight: 600; }
-
-  /* flex:1 + min-width:0 is what makes this fill the message row. Without it
-     the card is a shrink-to-fit flex item, so the SVG's width:100% resolves
-     against a collapsed box and the chart renders at a fraction of its size. */
-  .chart-card {
-    flex: 1;
-    min-width: 0;
-    background: var(--assistant-bg);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 12px 14px;
-    cursor: zoom-in;
-    position: relative;
-    transition: border-color 0.15s;
-  }
-  .chart-card:hover { border-color: var(--accent-dim); }
-  .chart-card svg { display: block; width: 100%; height: auto; }
-  .chart-card::after {
-    content: 'Click to enlarge';
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    font-size: 10px;
-    color: var(--text-muted);
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .chart-card:hover::after { opacity: 1; }
-
-  /* Full-screen chart view */
-  #chart-modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(5,5,10,0.92);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
-    z-index: 1000;
-    cursor: zoom-out;
-  }
-  #chart-modal.open { display: flex; }
-  #chart-modal-inner {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 20px 24px;
-    width: 100%;
-    max-width: 1200px;
-    max-height: 90vh;
-    overflow: auto;
-    cursor: default;
-  }
-  #chart-modal-inner svg { display: block; width: 100%; height: auto; }
-  #chart-modal-close {
-    position: absolute;
-    top: 20px;
-    right: 26px;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 26px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 4px 10px;
-  }
-  #chart-modal-close:hover { color: var(--text); }
-
-  .bubble code {
-    background: rgba(255,255,255,0.06);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 13px;
-  }
-
-  .bubble table {
-    border-collapse: collapse;
-    margin: 8px 0;
-    font-size: 13px;
-    width: 100%;
-    overflow-x: auto;
-    display: block;
-  }
-
-  .bubble th, .bubble td {
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    text-align: left;
-  }
-
-  .bubble th {
-    background: rgba(255,255,255,0.04);
-    font-weight: 600;
-  }
-
-  .bubble h1, .bubble h2, .bubble h3, .bubble h4 {
-    margin: 12px 0 6px;
-    color: var(--accent);
-  }
-
-  .bubble h3 { font-size: 15px; }
-
-  /**
-   * PRINT: one reply, as a light document with dark chart panels.
-   *
-   * Same reasoning as the briefing's. chart-svg.ts paints its text at #e4e4ef
-   * on a background it does not draw, so on white paper it is invisible ink;
-   * giving the chart the dark panel it was drawn for is one rule that cannot
-   * rot, where recolouring it by selector would guess which <text> is a title.
-   *
-   * Only the marked reply prints. A chat is a transcript, and nobody wants to
-   * send somebody forty turns to deliver one table.
-   */
-  @media print {
-    @page { size: A4; margin: 14mm; }
-
-    html, body { background: #fff !important; color: #14181f !important; height: auto; }
-    #app-shell { position: static; overflow: visible; display: block; }
-    header, #composer, .input-row, #model-row, .teach-bar, .export-btn,
-    .tool-indicator, #chart-modal, .welcome { display: none !important; }
-
-    #chat { overflow: visible; padding: 0; display: block; }
-    .message { display: block; max-width: none; }
-    .message .avatar { display: none; }
-    .message .bubble {
-      background: #fff !important; border: none !important; max-width: none;
-      padding: 0; color: #14181f;
-    }
-    .bubble strong, .bubble h1, .bubble h2, .bubble h3, .bubble h4 { color: #14181f !important; }
-    .bubble a { color: #14181f; }
-    .bubble th { background: #f2f3f5 !important; }
-    .bubble th, .bubble td { border: 1px solid #c9ccd2 !important; }
-    .bubble table { display: table; }
-    .bubble code { background: #f2f3f5 !important; }
-
-    .chart-card {
-      background: #14141c !important; border: none !important;
-      break-inside: avoid; page-break-inside: avoid;
-    }
-    .chart-card::after { display: none !important; }
-
-    /* Only the reply that was asked for. */
-    body.print-one .message:not(.print-target) { display: none !important; }
-
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  }
-  .bubble h4 { font-size: 14px; }
-
-  /* --- chat history ------------------------------------------------------ */
-
-  /**
-   * The switcher bar: which chat you are in, always visible.
-   *
-   * Sticky, because on a long conversation the one thing you might want while
-   * scrolled to the bottom is to start a different one.
-   */
-  #convo-bar {
-    position: sticky; top: 0; z-index: 30;
-    background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 7px 14px;
-  }
-
-  #convo-current {
-    display: flex; align-items: center; gap: 8px;
-    max-width: 100%;
-    background: none; border: none; color: var(--text);
-    font-family: inherit; font-size: 13px; font-weight: 600;
-    cursor: pointer; padding: 5px 2px;
-  }
-
-  /* min-width:0 so a long title truncates instead of pushing the chevron off. */
-  #convo-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  #convo-current .chev { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
-  #convo-current[aria-expanded="true"] .chev { color: var(--accent); }
-
-  /**
-   * THE `hidden` ATTRIBUTE DOES NOT WIN AGAINST A `display` RULE.
-   *
-   * `hidden` works by the browser's own stylesheet setting `display: none`, and
-   * ANY author rule that sets display beats it — so `#history-panel { display:
-   * flex }` left the panel permanently on screen, covering the chat's own
-   * header. Worse, it looked broken rather than open: the list only loads when
-   * the panel is OPENED through historyPanel(), which had never run, so it sat
-   * on "Loading…" for ever, and the chevron that would have opened it properly
-   * was underneath the thing covering it.
-   *
-   * Stated as a rule rather than worked around by swapping to a class, because
-   * the next element with `hidden` and a display rule will hit the same thing.
-   */
-  [hidden] { display: none !important; }
-
-  /* Catches the tap that closes the dropdown, and dims what is behind it. */
-  #history-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.4); }
-
-  #history-panel {
-    position: fixed; z-index: 41;
-    top: 0; left: 0; right: 0;
-    max-height: 70vh;
     background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    border-radius: 0 0 12px 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    display: flex; flex-direction: column;
-    padding: 12px;
-  }
-
-  /* Anchored under the bar rather than full-width once there is room for it. */
-  @media (min-width: 700px) {
-    #history-panel { left: 14px; right: auto; width: 420px; }
-  }
-
-  .btn-newchat {
-    width: 100%;
-    background: var(--accent); color: #000; border: none; border-radius: 8px;
-    padding: 10px; font-size: 14px; font-weight: 600; font-family: inherit;
-    cursor: pointer; margin-bottom: 12px;
-  }
-
-  #history-list { flex: 1; overflow-y: auto; }
-
-  .hp-item {
-    display: flex; align-items: center; gap: 4px;
-    border-radius: 8px; margin-bottom: 2px;
-  }
-  .hp-item:hover { background: var(--bg); }
-  .hp-item.current { background: var(--bg); }
-
-  /**
-   * The title is a button so the whole row is a tap target, and min-width:0
-   * lets it shrink — without it a long title pushes the rename and delete
-   * controls off the edge of the panel.
-   */
-  .hp-open {
-    flex: 1; min-width: 0; text-align: left;
-    background: none; border: none; color: var(--text);
-    font-family: inherit; font-size: 13px; line-height: 1.35;
-    padding: 9px 8px; cursor: pointer;
-  }
-  .hp-open .hp-when { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-  .hp-open .hp-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .hp-act {
-    background: none; border: none; color: var(--text-muted);
-    cursor: pointer; font-size: 13px; padding: 6px;
-    /* 30px square: a thumb target, not a mouse target. */
-    min-width: 30px; min-height: 30px;
-  }
-  .hp-act:hover { color: var(--accent); }
-  .hp-act.hp-del:hover { color: var(--error); }
-
-  .hp-empty { color: var(--text-muted); font-size: 13px; padding: 10px 2px; line-height: 1.5; }
-
-  .hp-note {
-    font-size: 11px; color: var(--text-muted);
-    border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; line-height: 1.5;
-  }
-
-  /**
-   * A message withheld because the reader's access changed.
-   *
-   * Said out loud rather than dropped: a gap in your own conversation with no
-   * explanation reads as data loss, and the thing that happened is not a loss.
-   */
-  .withheld {
-    font-style: italic;
-    color: var(--text-muted);
-    border-left: 2px solid var(--accent-dim);
-    padding-left: 10px;
-  }
-
-  .typing {
-    display: flex;
-    gap: 4px;
-    padding: 4px 0;
-  }
-
-  .typing span {
-    width: 6px;
-    height: 6px;
-    background: var(--accent);
-    border-radius: 50%;
-    opacity: 0.4;
-    animation: pulse 1.4s infinite;
-  }
-
-  .typing span:nth-child(2) { animation-delay: 0.2s; }
-  .typing span:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes pulse {
-    0%, 80%, 100% { opacity: 0.4; transform: scale(1); }
-    40% { opacity: 1; transform: scale(1.2); }
-  }
-
-  /**
-   * What it is doing, while it does it.
-   *
-   * Replaces the three dots on a question that runs queries. Sized and spaced
-   * to be read on a phone at arm's length rather than studied: one line per
-   * step, the finished ones dimmed and ticked, the live one carrying the dot
-   * that was the whole animation before.
-   */
-  .progress { padding: 2px 0; }
-
-  /**
-   * The current step, and the only line visible when it is shut.
-   *
-   * The default disclosure triangle is removed and drawn as a chevron on the
-   * right instead: the marker's place is beside the dot, and two markers at the
-   * start of one line reads as a bullet with a stutter.
-   */
-  .progress-live {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    cursor: pointer;
-    list-style: none;
-    font-size: 13px;
-    line-height: 1.35;
-  }
-
-  .progress-live::-webkit-details-marker { display: none; }
-
-  .progress-now { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
-
-  /* The affordance. A chevron alone gives no reason to press it. */
-  .progress-count {
-    margin-left: auto;
-    flex-shrink: 0;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
-  .progress-count::after {
-    content: ' \25BE';
-    display: inline-block;
-    transition: transform 0.15s ease;
-  }
-
-  .progress[open] .progress-count::after { transform: rotate(180deg); }
-
-  /* Everything it has done, including the live step, so the expanded view is
-     the whole story rather than the story minus the bit you were reading. */
-  .progress-steps {
-    display: flex; flex-direction: column; gap: 7px;
-    margin-top: 9px;
-    padding-top: 9px;
-    border-top: 1px solid var(--border);
-  }
-
-  .progress[open] .progress-live { color: var(--text-muted); }
-
-  .progress-step {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-size: 13px;
-    line-height: 1.35;
-    color: var(--text-muted);
-    /* Steps arrive while the reader is looking at the panel, so they fade in
-       rather than snapping — a line appearing instantly reads as a flicker. */
-    animation: step-in 0.25s ease-out;
-  }
-
-  @keyframes step-in {
-    from { opacity: 0; transform: translateY(-3px); }
-    to   { opacity: 1; transform: none; }
-  }
-
-  /**
-   * A fixed-size slot, so a step does not shift sideways when its dot becomes
-   * a tick. The marks are drawn INSIDE it by ::after, because the tick and the
-   * dot are different shapes and sizes and sharing one box made the tick come
-   * out as a chevron — which is what rendering it and looking showed.
-   */
-  .progress-step .dot {
-    position: relative;
-    width: 10px; height: 10px;
-    flex-shrink: 0;
-  }
-
-  .progress-step .dot::after {
-    content: '';
-    position: absolute;
-    left: 2px; top: 2px;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-
-  .progress-step.done { opacity: 0.55; }
-  .progress-step.done .dot::after {
-    /* A tick: an L rotated 45°, and it only reads as one if it is TALLER than
-       it is wide. Equal sides draw a chevron. */
-    left: 3px; top: 0;
-    width: 4px; height: 8px;
-    border-radius: 0;
-    background: none;
-    border-right: 2px solid var(--accent);
-    border-bottom: 2px solid var(--accent);
-    transform: rotate(45deg);
-  }
-
-  .progress-step.live { color: var(--text); }
-  .progress-step.live .dot::after { animation: pulse 1.4s infinite; }
-
-  /**
-   * A label wraps rather than running off the screen.
-   *
-   * "Reading daily trade — Neon Pigeon, 2026-09-22 to 2026-09-28" is longer
-   * than a phone is wide, and without min-width:0 a flex child refuses to
-   * shrink below its content and overflows the bubble instead — clipped, with
-   * the dates cut off, which is the half of the line worth reading.
-   */
-  .progress-step > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-
-  /* The elapsed seconds, so a long answer is visibly long rather than stuck. */
-  .progress-elapsed {
-    font-size: 11px;
-    color: var(--text-muted);
-    opacity: 0.7;
-    margin-left: 16px;
-  }
-
-  .tool-indicator {
-    font-size: 12px;
-    color: var(--text-muted);
-    padding: 4px 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .tool-indicator::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    background: var(--accent-dim);
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  /* External sources.
-     Deliberately unlike the answer bubble: a figure from the web is somebody
-     else's claim about somebody else's business, and it must not read as though
-     it came from our own reconciled data. The quote is shown, not just the
-     link, so a claim can be checked without leaving the page. */
-  .sources {
-    margin-top: 10px;
-    padding: 10px 12px;
-    border-left: 2px solid var(--border);
-    background: transparent;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .sources-title {
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    font-size: 10px;
-    margin-bottom: 8px;
-  }
-
-  .source-item { margin-bottom: 8px; line-height: 1.45; }
-  .source-item:last-child { margin-bottom: 0; }
-  .source-item a { color: var(--text-muted); text-decoration: underline; }
-  .source-item a:hover { color: var(--accent); }
-  .source-quote { display: block; opacity: 0.8; font-style: italic; margin-top: 2px; }
-
-  #input-area {
-    padding: 16px 20px;
-    border-top: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-
-  #model-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  #model-row select {
-    font-size: 12px;
-    padding: 2px 6px;
-  }
-  #model-note { font-size: 11px; }
-  .input-row {
-    max-width: 780px;
-    margin: 0 auto;
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-  }
-
-  #question {
-    flex: 1;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 12px 16px;
-    color: var(--text);
-    font-size: 14px;
-    font-family: inherit;
-    line-height: 1.5;
-    resize: none;
-    max-height: 150px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  #question:focus { border-color: var(--accent); }
-  #question::placeholder { color: var(--text-muted); }
-
-  #send {
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 10px;
-    width: 40px;
-    height: 40px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: background 0.2s, opacity 0.2s;
-  }
-
-  #send:hover { background: var(--accent-dim); }
-  #send:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  #send svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .welcome {
-    max-width: 780px;
-    margin: auto;
-    text-align: center;
-    padding: 40px 20px;
-  }
-
-  .welcome .logo-big {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8b3500 60%, #2a0e00 100%);
-    box-shadow: 0 0 40px rgba(232, 147, 58, 0.25);
-    margin: 0 auto 20px;
-  }
-
-  .welcome h2 {
-    font-size: 22px;
-    margin-bottom: 8px;
-  }
-
-  .welcome p {
-    color: var(--text-muted);
-    font-size: 14px;
-    margin-bottom: 24px;
-    line-height: 1.5;
-  }
-
-  .suggestions {
-    display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
+  }
+  .logo {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim) 60%, #5a2f08);
+  }
+  header h1 { font-size: 15px; font-weight: 600; }
+  .subtitle { font-size: 11px; color: var(--text-muted); }
+  header nav { margin-left: auto; display: flex; gap: 14px; font-size: 13px; }
+  header nav a { color: var(--text-muted); text-decoration: none; }
+  header nav a.active, header nav a:hover { color: var(--accent); }
+
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+
+  .loading { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
+
+  /* --- venue switcher ------------------------------------------------- */
+  .venues { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .venue-chip {
+    padding: 6px 12px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+  }
+  .venue-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
+
+  /* --- the window label ----------------------------------------------- */
+  .window { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
+  .window strong { color: var(--text); font-weight: 600; }
+  .window .thin { color: var(--accent); }
+
+  /* --- headline tiles -------------------------------------------------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .tile .value { font-size: 24px; font-weight: 600; line-height: 1.25; margin-top: 2px; }
+  .tile .delta { font-size: 12px; margin-top: 2px; }
+  .up { color: var(--success); }
+  .down { color: var(--error); }
+  .flat, .unknown { color: var(--text-muted); }
+
+  /* --- the week's line -------------------------------------------------- */
+  .chart { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  .chart h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .chart svg { width: 100%; height: auto; display: block; }
+
+  /* --- detail table ----------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  td:last-child, th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .panel > h2 { font-size: 13px; font-weight: 600; padding: 12px 14px 8px; }
+  .panel table tr:last-child td { border-bottom: none; }
+
+  /* The definition line. Smaller, muted, visibly subordinate to the figures --
+     it is reference material you read once and then stop seeing. Same rule and
+     same class as the chat and the briefing. */
+  .figure-note {
+    font-size: 0.8em; line-height: 1.5; color: var(--text-muted);
+    font-style: normal; padding: 8px 14px 12px;
   }
 
-  .suggestion {
-    background: var(--surface-hover);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 13px;
-    color: var(--text);
-    cursor: pointer;
-    transition: border-color 0.2s;
+  /* --- forward book ------------------------------------------------------ */
+  .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; }
+  .book .day {
+    flex: 0 0 auto; min-width: 58px; text-align: center;
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; background: var(--bg);
+  }
+  .book .day .dow { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+  .book .day .n { font-size: 17px; font-weight: 600; }
+  .book .day.today { border-color: var(--accent); }
+  /* A day the venue is shut. Said in words, never as a 0 -- Firangi closes
+     every Sunday, and a zero in a row of covers reads as nobody having booked.
+     Same rule as plotting a closed day as a gap rather than a zero bar. */
+  .book .day.shut { opacity: 0.55; }
+  .book .day .shut-label { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+  .figure-note a { color: var(--accent); }
+
+  /* --- advice ------------------------------------------------------------ */
+  .rec { border-bottom: 1px solid var(--border); padding: 12px 14px; }
+  .rec:last-child { border-bottom: none; }
+  .rec-venue { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .rec-headline { font-size: 14px; font-weight: 600; color: var(--accent); margin: 2px 0 6px; }
+  .rec-body { font-size: 13px; }
+  .rec-body p { margin-bottom: 8px; }
+  /* `display: block; overflow-x: auto` so a wide recommendation table scrolls
+     itself instead of widening the whole page on a phone. These tables carry
+     no min-width, so the table may be its own scrolling box -- the admin
+     page's .table-scroll wrapper is only needed where a minimum exists. */
+  .rec-body table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; display: block; overflow-x: auto; }
+  .rec-body th, .rec-body td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  .rec-body th { background: var(--surface-hover); }
+  .rec-body svg { max-width: 100%; height: auto; }
+  .rec-body ul, .rec-body ol { margin: 8px 0 8px 18px; }
+  .rec-body li { margin: 4px 0; }
+  .rec-body a { color: var(--accent); }
+
+  /* --- ask box ------------------------------------------------------------ */
+  .ask { display: flex; gap: 8px; margin-bottom: 24px; }
+  .ask input {
+    flex: 1; min-width: 0; padding: 11px 14px; font-size: 15px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+  }
+  .ask input:focus { outline: none; border-color: var(--accent); }
+  .ask button {
+    padding: 11px 16px; font-size: 14px; border: none; border-radius: 10px;
+    background: var(--accent); color: #1a1008; font-weight: 600; cursor: pointer;
   }
 
-  .suggestion:hover { border-color: var(--accent); }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 14px; }
 
-  .error-msg {
-    color: var(--error);
-    font-size: 13px;
-    padding: 8px 12px;
-    background: rgba(232, 64, 64, 0.08);
-    border-radius: 8px;
-    border: 1px solid rgba(232, 64, 64, 0.2);
-  }
+  .post-thumb { max-width: 100%; border-radius: 8px; vertical-align: middle; margin: 4px 6px 4px 0; }
+  .post-thumb.expired { max-width: 0; max-height: 0; margin: 0; opacity: 0; }
 
-  @media (max-width: 600px) {
-    header { padding: 12px 16px; }
-    #chat { padding: 12px; gap: 12px; }
-    .bubble { max-width: 92%; font-size: 14px; }
-    #input-area { padding: 12px 16px; }
-    .welcome { padding: 24px 16px; }
-    .welcome h2 { font-size: 20px; }
-    .welcome p { font-size: 13px; }
-    .suggestions { flex-direction: column; }
-    .suggestion { font-size: 13px; padding: 10px 12px; }
+  @media (max-width: 420px) {
+    main { padding: 12px; }
+    .tiles { grid-template-columns: 1fr 1fr; gap: 8px; }
+    /* Three tiles in two columns leaves the last one stranded beside a hole.
+       Let an odd last tile take the full width instead. */
+    .tiles .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .tile .value { font-size: 20px; }
   }
 </style>
 </head>
 <body>
-<div id="app-shell">
   <header>
     <div class="logo"></div>
     <div>
-      <h1>Sauron</h1>
-      <div class="subtitle">The Dandy Collection - AI Business Advisor</div>
+      <h1>Dashboard</h1>
+      <div class="subtitle">The Dandy Collection</div>
     </div>
-    <nav id="nav" style="margin-left:auto;display:flex;gap:16px;font-size:14px">
-      <a href="/" style="color:var(--accent);text-decoration:none">Chat</a>
-      <a href="/briefing.html" style="color:var(--text-muted);text-decoration:none">Briefing</a>
-      <a href="/plan.html" style="color:var(--text-muted);text-decoration:none">Plan</a>
-      <a href="/admin.html" id="admin-link" style="color:var(--text-muted);text-decoration:none;display:none">Admin</a>
-      <a href="#" id="logout-link" style="color:var(--text-muted);text-decoration:none;display:none">Logout</a>
+    <nav>
+      <a href="/" class="active">Dashboard</a>
+      <a href="/chat.html">Chat</a>
+      <a href="/plan.html">Plan</a>
+      <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
+      <a href="#" id="logout-link">Logout</a>
     </nav>
   </header>
 
-  <!--
-    THE CURRENT CHAT, WITH THE REST BEHIND A CHEVRON.
-
-    This started as a slide-over reached from a "History" link, which hid two
-    things that matter: WHICH conversation you are in, and that there are
-    others. Khai pointed at the pattern -- show the current one, let it drop
-    down -- and it is better for exactly that reason. The title is always on
-    screen, switching is one tap, and no layout is given up to a list nobody is
-    reading most of the time.
-  -->
-  <div id="convo-bar">
-    <button id="convo-current" aria-haspopup="listbox" aria-expanded="false">
-      <span id="convo-title">New chat</span>
-      <span class="chev" aria-hidden="true">&#9662;</span>
-    </button>
-  </div>
-
-  <div id="history-overlay" hidden></div>
-  <div id="history-panel" hidden role="listbox" aria-label="Your chats">
-    <button id="new-chat" class="btn-newchat">+ New chat</button>
-    <div id="history-list"><div class="hp-empty">Loading&hellip;</div></div>
-    <div class="hp-note">Kept for a year. Only you can read these.</div>
-  </div>
-
-  <div id="chat">
-    <div class="welcome" id="welcome">
-      <div class="logo-big"></div>
-      <h2>Ask Sauron</h2>
-      <p>I can answer questions about your venue performance, product mix, revenue trends, and more. All answers come from your real operational data.</p>
-      <!--
-        The briefing used to render here, above the suggestions. It moved to
-        /briefing.html on 1 Sep 2026: a recommendation carries tables, charts
-        and four rating buttons, and stacking that on top of a chat input made
-        both jobs worse. CLAUDE.md's point still stands -- the recommendations
-        are the product and the analytics are table stakes -- so it is the
-        first item in the nav rather than the first thing on this page.
-      -->
-
-      <div class="suggestions">
-        <div class="suggestion" onclick="askSuggestion(this)">How did Neon Pigeon do yesterday?</div>
-        <div class="suggestion" onclick="askSuggestion(this)">Compare all venues for the last week</div>
-        <div class="suggestion" onclick="askSuggestion(this)">What are the top sellers at Fat Prince?</div>
-        <div class="suggestion" onclick="askSuggestion(this)">What data is available?</div>
-      </div>
-    </div>
-  </div>
-
-  <div id="input-area">
-    <!--
-      The model choice, offered rather than deduced.
-
-      The tiering in model-policy.ts decides what a JOB needs; it cannot know
-      what a given question is worth to the person paying for it. Only the
-      model changes -- thinking, effort and the output ceiling stay with the
-      purpose -- so Sonnet buys a cheaper answer to the same question rather
-      than a deliberately worse one.
-    -->
-    <div id="model-row">
-      <label for="model-select">Model</label>
-      <!--
-        The labels now describe what the code does. Until 16 Sep 2026 choosing
-        Sonnet changed the model and nothing else, so "quicker and cheaper" ran
-        the same adaptive thinking at the same high effort with the same twelve
-        tool rounds -- and on 14 Sep a question that chose it outlived the edge
-        timeout and returned nothing. The depth moves with the choice now, which
-        is what makes the second label true.
-      -->
-      <select id="model-select">
-        <option value="opus">Opus — thinks hardest, slower, dearer</option>
-        <option value="sonnet">Sonnet — lighter thinking, quicker and cheaper</option>
-      </select>
-      <span id="model-note"></span>
-    </div>
-    <div class="input-row">
-      <textarea id="question" rows="1" placeholder="Ask about your venues..." autofocus></textarea>
-      <button id="send" title="Send">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="22" y1="2" x2="11" y2="13"></line>
-          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-        </svg>
-      </button>
-    </div>
-  </div>
-</div>
-
-<div id="chart-modal" aria-hidden="true">
-  <button id="chart-modal-close" aria-label="Close chart">&times;</button>
-  <div id="chart-modal-inner"></div>
-</div>
+  <main id="app">
+    <div class="loading">Loading…</div>
+  </main>
 
 <!--
-  The ONE markdown renderer, shared by every page that shows an answer.
-  A classic script so the global reaches an inline script and a module alike,
-  and a src= so the preload scanner can start it during the parse. See the
-  long note at the top of markdown.js for what three copies of it had cost.
+  The ONE markdown renderer, shared by every page that shows an answer. A
+  classic script so the global reaches an inline script and a module alike, and
+  a src= so the preload scanner can start it during the parse.
 -->
 <script src="/markdown.js"></script>
 <script>
-const chat = document.getElementById('chat');
-const input = document.getElementById('question');
-const sendBtn = document.getElementById('send');
-const modelSelect = document.getElementById('model-select');
+let token = null;
+let payload = null;
+let selected = null;
 
-/**
- * Remembered per browser, because a choice you have to re-make every question
- * is one nobody uses.
- *
- * Wrapped because localStorage throws outright in a private window or with
- * site data blocked, and a chat that will not load over a remembered dropdown
- * is a poor trade.
- */
-try {
-  const saved = localStorage.getItem('sauron-model');
-  if (saved === 'opus' || saved === 'sonnet') modelSelect.value = saved;
-} catch (e) { /* no remembered choice; the default stands */ }
-
-/**
- * Switching mid-conversation is legitimate and is NOT free, so it says so.
- *
- * Prompt caches are model-scoped, so the first question after a switch pays to
- * write a fresh prefix instead of reading the cached one. Worth knowing before
- * somebody toggles it back and forth expecting to save money.
- */
-modelSelect.addEventListener('change', () => {
-  try { localStorage.setItem('sauron-model', modelSelect.value); } catch (e) { /* not remembered */ }
-  const note = document.getElementById('model-note');
-  note.textContent = history.length > 0
-    ? 'Switched mid-conversation — the next answer rebuilds the cache, so it costs a little more than usual.'
-    : '';
-});
-/**
- * The welcome screen, and a copy of it to put back.
- *
- * `let`, not `const` — addMessage() clears this the first time anything is said,
- * and starting a new chat restores it. It was a const and the assignment threw
- * "Assignment to constant variable", which is why New chat emptied the page and
- * then stopped: chat.innerHTML had already been cleared, and nothing after the
- * throw ever ran.
- *
- * The HTML is captured because a new chat should look like the app does when
- * you open it — the four suggestion chips included. Replacing it with a
- * sentence saying "New chat" is strictly less useful than the screen that
- * offers you four questions. The chips use inline onclick, so they work again
- * the moment the markup is back.
- */
-let welcome = document.getElementById('welcome');
-const WELCOME_HTML = welcome ? welcome.outerHTML : '';
-
-const appShell = document.getElementById('app-shell');
-function syncViewport() {
-  if (window.visualViewport) {
-    appShell.style.height = window.visualViewport.height + 'px';
-    appShell.style.top = window.visualViewport.offsetTop + 'px';
-  }
-}
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', syncViewport);
-  window.visualViewport.addEventListener('scroll', syncViewport);
-  syncViewport();
-}
-
-let history = [];
-let busy = false;
-let authToken = null;
-let supabaseClient = null;
-// Venues this user may see, for the note-capture venue picker.
-let myVenues = [];
-
-(async function initAuth() {
-  /**
-   * Both at once, because neither needs the other.
-   *
-   * These two were serial for no reason: a round trip for two public strings,
-   * and only then the client download that is the expensive half. Issued
-   * together, the config lands inside the time the bundle is already spending
-   * on the wire and costs nothing measurable.
-   */
-  // Inlined by the server, so there is nothing to wait for. The fetch remains
-  // as a fallback: if the substitution ever fails, the page authenticates the
-  // way it always did rather than not at all.
+(async function init() {
+  // Both at once. The config is two public strings and the client is 60 KB;
+  // serialising them paid for the round trip twice.
   const [cfg, { createClient }] = await Promise.all([
     window.__SAURON_CONFIG__ ?? fetch('/api/config').then(r => r.json()),
     import('/vendor/supabase.js'),
   ]);
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
-
-  supabaseClient = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) {
-    window.location.href = '/login.html';
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+    document.getElementById('app').innerHTML = '<div class="loading">Auth not configured.</div>';
     return;
   }
 
-  authToken = session.access_token;
+  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  token = session.access_token;
 
   /**
-   * Who I am, and the terms module, fired together the moment there is a token.
+   * THE DATA STARTS NOW, not after the terms check and /api/me.
    *
-   * Both only need the token, and /api/me was queued behind nothing but the
-   * order it happened to be written in. It also APPLIES ITSELF in a .then
-   * rather than being awaited here: the terms gate below can sit waiting for a
-   * human for minutes, and the header should not be missing its admin link for
-   * all of that.
+   * The dashboard read is the slow one here -- it touches daily_operations and
+   * reservations for two weeks across every venue in scope. Everything below
+   * needs only the token, so none of it has any business being in front.
    */
+  const dash = fetchDashboard();
+  const recs = fetchRecommendations();
   const gate = import('/terms-gate.js');
-  const me = fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } })
-    .then(async (res) => {
-      if (!res.ok) return;
-      const body = await res.json();
-      myVenues = body.venues || [];
-      if (body.isOwner) document.getElementById('admin-link').style.display = '';
-    })
-    .catch(() => { /* the header degrades; the chat does not depend on it */ });
+  const mePromise = fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
 
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
-    authToken = session?.access_token || null;
-    if (!authToken) window.location.href = '/login.html';
-  });
-
-  /**
-   * The terms, before anything else loads. Blocking: the app is not usable
-   * until they are accepted, and /ask refuses regardless of what this does.
-   */
   const { enforceTerms } = await gate;
-  await enforceTerms(authToken);
-  await me;
+  const terms = await enforceTerms(token);
 
-  document.getElementById('logout-link').style.display = '';
+  const meRes = await mePromise;
+  if (!meRes.ok) { window.location.href = '/login.html'; return; }
+  const me = await meRes.json();
+  if (me.isOwner) document.getElementById('admin-link').style.display = '';
+
   document.getElementById('logout-link').addEventListener('click', async (e) => {
     e.preventDefault();
-    await supabaseClient.auth.signOut();
+    await supabase.auth.signOut();
     window.location.href = '/login.html';
   });
 
+  /**
+   * SPEED MUST NOT CHANGE AN ANSWER.
+   *
+   * Both requests above were issued before any acceptance existed, and the
+   * server correctly refuses a reader who has not accepted the terms. If the
+   * gate had to appear, the parallel requests were refused and have to be made
+   * again; `enforceTerms` returns 'already' when it showed nothing, which is
+   * the only way to tell the two cases apart.
+   */
+  const [data, recData] = terms === 'already'
+    ? await Promise.all([dash, recs])
+    : await Promise.all([fetchDashboard(), fetchRecommendations()]);
+
+  render(data, recData);
 })();
 
-function autoResize() {
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+function fetchDashboard() {
+  return fetch('/api/dashboard', { headers: { Authorization: 'Bearer ' + token } })
+    .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
+    .catch(e => ({ ok: false, status: 0, body: { message: e.message } }));
 }
 
-input.addEventListener('input', autoResize);
-
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    send();
-  }
-});
-
-sendBtn.addEventListener('click', send);
-
-function askSuggestion(el) {
-  input.value = el.textContent;
-  send();
+function fetchRecommendations() {
+  return fetch('/api/recommendations', { headers: { Authorization: 'Bearer ' + token } })
+    .then(r => (r.ok ? r.json() : { recommendations: [] }))
+    .catch(() => ({ recommendations: [] }));
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-
-// Charts render small inline to keep the conversation readable, so a click
-// opens the same SVG at full width. The SVG has a viewBox, so it scales
-// cleanly rather than being re-rendered at a second size.
-function openChart(svgHtml) {
-  const modal = document.getElementById('chart-modal');
-  document.getElementById('chart-modal-inner').innerHTML = svgHtml;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
-function closeChart() {
-  const modal = document.getElementById('chart-modal');
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
-  document.getElementById('chart-modal-inner').innerHTML = '';
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const modal = document.getElementById('chart-modal');
-  if (!modal) return;
-  // Backdrop closes; clicks inside the panel do not bubble out and close it.
-  modal.addEventListener('click', closeChart);
-  document.getElementById('chart-modal-inner').addEventListener('click', e => e.stopPropagation());
-  document.getElementById('chart-modal-close').addEventListener('click', closeChart);
-});
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeChart();
-});
-
+const money = n => (n === null || n === undefined)
+  ? '—'
+  : '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 /**
- * "Teach Sauron this" — capture a lesson where it is actually created.
- *
- * Knowledge is produced in the conversation, not in an admin form, which is
- * why the admin form sat unused. The question is stored alongside the note:
- * "food cost runs high in July" is nearly useless six months later, while
- * "asked why July margin dropped -> durian season" is actionable.
- *
- * Nothing captured here reaches a prompt until an owner approves it. The
- * system must never write its own lessons — a confident wrong answer would
- * otherwise become a permanent stored fact.
+ * A PER-UNIT figure keeps its cents. Spend per head and average check are
+ * quoted to the cent everywhere else in this app -- $163.45, not $163 -- and
+ * rounding them here would make the dashboard disagree with the answer you get
+ * by asking the same question in the chat.
  */
+const money2 = n => (n === null || n === undefined)
+  ? '—'
+  : '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = n => (n === null || n === undefined) ? '—' : Number(n).toFixed(1) + '%';
+const num = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('en-SG');
 
-/**
- * PDF and Image, on one assistant reply.
- *
- * The briefing got these first and the chat needs them more: a briefing is read
- * where it lives, while a chat answer is the thing somebody wants to forward to
- * a manager who will never open this app. Both call the same
- * /card-export.js, because two copies of an exporter drift and the one that
- * drifts is the one used less.
- */
-function addExportButtons(bar, bubble, question) {
-  const message = bubble.closest('.message');
-  if (!message) return;
-
-  const pdf = document.createElement('button');
-  pdf.className = 'export-btn';
-  pdf.textContent = 'PDF';
-  pdf.title = 'Save or print this answer — keeps tables and selectable text';
-  pdf.addEventListener('click', () => printMessage(message));
-  bar.appendChild(pdf);
-
-  const img = document.createElement('button');
-  img.className = 'export-btn';
-  img.textContent = 'Image';
-  img.title = 'An image for WhatsApp — previews in the thread, but the text stops being selectable';
-  img.addEventListener('click', () => shareMessageImage(message, bubble, question, img));
-  bar.appendChild(img);
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
 }
 
 /**
- * One reply as a PDF, through the browser's own print pipeline.
+ * A movement, rendered.
  *
- * A class on <body> plus one on the message, so the print stylesheet holds the
- * rule and cleanup is removing two class names rather than restoring styles a
- * cancelled print would have left behind. afterprint fires on cancel as well as
- * on save, which is what makes it the right place to undo it.
+ * `unknown` prints a reason rather than an arrow. A dash with no explanation
+ * reads as a system fault; "no data last week" is a fact about the business.
  */
-function printMessage(message) {
-  message.classList.add('print-target');
-  document.body.classList.add('print-one');
-
-  const cleanup = () => {
-    message.classList.remove('print-target');
-    document.body.classList.remove('print-one');
-    window.removeEventListener('afterprint', cleanup);
-  };
-  window.addEventListener('afterprint', cleanup);
-
-  window.print();
+function delta(m, kind) {
+  if (!m || m.direction === 'unknown') return '<span class="unknown">no comparison</span>';
+  const sign = m.pct > 0 ? '+' : '';
+  const body = kind === 'money'
+    ? sign + money(m.delta) + ' (' + sign + m.pct.toFixed(1) + '%)'
+    : sign + m.pct.toFixed(1) + '%';
+  const arrow = m.direction === 'up' ? '▲' : m.direction === 'down' ? '▼' : '■';
+  return '<span class="' + m.direction + '">' + arrow + ' ' + body + '</span>';
 }
 
-async function shareMessageImage(message, bubble, question, btn) {
-  const label = btn.textContent;
-  btn.textContent = 'Building...';
-  btn.classList.add('working');
-
-  try {
-    const { cardToPng } = await import('/card-export.js');
-
-    /**
-     * The QUESTION is the headline.
-     *
-     * A briefing recommendation carries its own headline; a chat reply does
-     * not, and an image of an answer with no sight of what was asked is a set
-     * of figures with no subject. Forwarded on, that is exactly how a number
-     * gets used for something it does not say.
-     */
-    const blob = await cardToPng(message, {
-      headline: question || 'Sauron',
-      tag: '',
-      meta: new Date().toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore' }),
-      bodyEl: bubble,
-    });
-
-    const name = 'sauron-' + (question || 'answer')
-      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '.png';
-    const file = new File([blob], name, { type: 'image/png' });
-
-    // The share sheet first, a download second. canShare({files}) is the only
-    // honest test: navigator.share exists on desktop Chrome without file
-    // support, which is the platform the fallback matters most on.
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file] });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
-  } catch (e) {
-    // AbortError is the user closing the share sheet, which is not a failure.
-    if (e && e.name !== 'AbortError') {
-      console.error('[chat] image export failed', e);
-      alert('Could not build the image. Use PDF instead — it does not depend on this.');
-    }
-  } finally {
-    btn.textContent = label;
-    btn.classList.remove('working');
-  }
-}
-
-function addTeachButton(bubble, question, answerText) {
-  const bar = document.createElement('div');
-  bar.className = 'teach-bar';
-
-  const btn = document.createElement('button');
-  btn.className = 'teach-btn';
-  btn.textContent = '+ Teach Sauron this';
-  bar.appendChild(btn);
-
-  /**
-   * Taking the answer away with you.
-   *
-   * On the bar that already exists rather than a new one: both of these are
-   * things you do to a reply you have just finished reading, and a second row
-   * of controls under every message turns a conversation into a toolbar.
-   */
-  addExportButtons(bar, bubble, question);
-
-  bubble.appendChild(bar);
-
-  btn.addEventListener('click', () => {
-    btn.remove();
-
-    const box = document.createElement('div');
-    box.className = 'teach-box';
-    const venueOpts = '<option value="">All venues</option>' +
-      (myVenues || []).map(v => '<option value="' + v.venue_id + '">' + escapeHtml(v.slug) + '</option>').join('');
-    box.innerHTML =
-      '<div class="teach-hint">What should Sauron remember? Write the lesson, not the whole answer.</div>' +
-      '<textarea class="teach-text" rows="3"></textarea>' +
-      '<div class="teach-row"><select class="teach-venue">' + venueOpts + '</select>' +
-      '<select class="teach-conf">' +
-        '<option value="observed">Observed</option>' +
-        '<option value="rule">Rule</option>' +
-        '<option value="hypothesis">Hypothesis</option>' +
-      '</select>' +
-      '<button class="teach-save">Save for review</button>' +
-      '<button class="teach-cancel">Cancel</button></div>';
-    bar.appendChild(box);
-
-    const text = box.querySelector('.teach-text');
-    // Seeded with the answer so there is something to cut down rather than a
-    // blank box, which is what stops people writing anything at all.
-    text.value = (answerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    text.focus();
-
-    box.querySelector('.teach-cancel').addEventListener('click', () => bar.remove());
-
-    box.querySelector('.teach-save').addEventListener('click', async () => {
-      const note = text.value.trim();
-      if (!note) return;
-      const saveBtn = box.querySelector('.teach-save');
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving...';
-      try {
-        const res = await fetch('/api/notes/capture', {
-          method: 'POST',
-          headers: { Authorization: 'Bearer ' + authToken, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            note: note,
-            venue_id: box.querySelector('.teach-venue').value || null,
-            confidence: box.querySelector('.teach-conf').value,
-            source_question: question,
-          }),
-        });
-        const data = await res.json();
-        bar.innerHTML = data.error
-          ? '<div class="teach-hint">Could not save: ' + escapeHtml(data.error) + '</div>'
-          : '<div class="teach-hint">Saved. An owner will review it before Sauron uses it.</div>';
-      } catch (e) {
-        bar.innerHTML = '<div class="teach-hint">Could not save \u2014 check your connection.</div>';
-      }
-    });
-  });
-}
-
-function addMessage(role, content, isHtml) {
-  if (welcome) welcome.remove();
-
-  const msg = document.createElement('div');
-  msg.className = 'message ' + role;
-
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = role === 'user' ? 'K' : '';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-
-  if (isHtml) {
-    bubble.innerHTML = content;
-  } else {
-    bubble.innerHTML = role === 'user' ? '<p>' + escapeHtml(content) + '</p>' : renderMarkdown(content);
-  }
-
-  msg.appendChild(avatar);
-  msg.appendChild(bubble);
-  chat.appendChild(msg);
-  chat.scrollTop = chat.scrollHeight;
-
-  return bubble;
-}
-
-/**
- * The live progress panel.
- *
- * WHY IT REPLACED THE DOTS. A question that runs a twelve-round tool loop takes
- * well over a minute, and three bouncing dots say nothing about whether it is
- * working, stuck, or dead. The steps here are the engine's own account of what
- * it is doing, streamed as it happens.
- *
- * IT STARTS AS THE DOTS AND BECOMES A LIST. The first thing shown is still the
- * old indicator, because a quick lookup finishes before any step arrives and a
- * panel that flashes up and vanishes is worse than the dots it replaced. The
- * list appears only once there is something true to put in it.
- */
-function createProgress() {
-  if (welcome) welcome.remove();
-
-  const msg = document.createElement('div');
-  msg.className = 'message assistant';
-  msg.id = 'typing-indicator';
-
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
-
-  msg.appendChild(avatar);
-  msg.appendChild(bubble);
-  chat.appendChild(msg);
-  chat.scrollTop = chat.scrollHeight;
-
-  const started = Date.now();
-  const steps = [];
-  let box = null, live = null, liveText = null, done = null, count = null, elapsedEl = null;
-
-  // Only after six seconds, and only while something is still running. On a
-  // fast answer a timer is noise; on a slow one it is the difference between
-  // "this is taking a while" and "this has died".
-  const ticker = setInterval(() => {
-    if (!elapsedEl) return;
-    const secs = Math.round((Date.now() - started) / 1000);
-    elapsedEl.textContent = secs >= 6 ? secs + 's' : '';
-  }, 1000);
-
-  /**
-   * ONE LINE BY DEFAULT: what it is doing NOW, with everything it has done
-   * behind a chevron.
-   *
-   * The first version listed every step as it happened, which on a twelve-round
-   * question grew into a wall of ticks taller than the answer — and the only
-   * line anybody was reading was the last one. Khai pointed at the pattern:
-   * show the current task, let the history drop down.
-   *
-   * A native <details> carries the open/closed state, the keyboard behaviour
-   * and the semantics for free. The live step lives in the <summary> so it is
-   * the line you see when it is shut.
-   */
-  function ensureBox() {
-    if (box) return;
-    bubble.innerHTML = '';
-
-    box = document.createElement('details');
-    box.className = 'progress';
-
-    const summary = document.createElement('summary');
-    summary.className = 'progress-live';
-    live = document.createElement('span');
-    live.className = 'dot';
-    liveText = document.createElement('span');
-    liveText.className = 'progress-now';
-    count = document.createElement('span');
-    count.className = 'progress-count';
-    summary.appendChild(live);
-    summary.appendChild(liveText);
-    summary.appendChild(count);
-
-    done = document.createElement('div');
-    done.className = 'progress-steps';
-
-    elapsedEl = document.createElement('div');
-    elapsedEl.className = 'progress-elapsed';
-
-    box.appendChild(summary);
-    box.appendChild(done);
-    box.appendChild(elapsedEl);
-    bubble.appendChild(box);
-  }
-
-  function render() {
-    liveText.textContent = steps[steps.length - 1] || '';
-
-    /**
-     * The count is the whole affordance: a chevron on its own gives no reason
-     * to press it. "4 done" says there is something behind it. Hidden at one
-     * step, because "0 done" is noise on a question that ran nothing.
-     */
-    const earlier = steps.length - 1;
-    count.textContent = earlier > 0 ? earlier + ' done' : '';
-
-    done.innerHTML = steps.map(function (label, i) {
-      const isLive = i === steps.length - 1;
-      return '<div class="progress-step ' + (isLive ? 'live' : 'done') + '">' +
-        '<span class="dot"></span><span>' + escapeHtml(label) + '</span></div>';
-    }).join('');
-  }
-
-  return {
-    /**
-     * Add one or more steps. The last one is what is happening now; everything
-     * before it is settled by its arrival — which is what "the next thing
-     * started" means, and avoids a completion event that could be lost and
-     * leave a line spinning for ever.
-     */
-    step(labels) {
-      ensureBox();
-      for (const label of labels) steps.push(label);
-      render();
-      chat.scrollTop = chat.scrollHeight;
-    },
-    remove() {
-      clearInterval(ticker);
-      if (msg.parentNode) msg.remove();
-    },
-  };
-}
-
-/**
- * Ask over the event stream, reporting progress, and return the answer.
- *
- * Throws on anything that means "this route did not work" — a non-2xx, a body
- * that is not a stream, or a stream that ended without a `done` event — so the
- * caller can fall back to /ask. It deliberately does NOT throw for an `error`
- * event, which is the server answering properly with bad news: retrying that on
- * the other route would just ask a failing question twice.
- */
-async function askStreaming(question, progress) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-
-  const res = await fetch('/ask/stream', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
-  });
-
-  // 401 and 403 are real answers about this person, not a broken route, so they
-  // must not fall through to /ask and produce the same refusal a second time.
-  if (res.status === 401 || res.status === 403) {
-    const err = await res.json().catch(() => ({ error: 'Not authorised' }));
-    return { fatal: err.error || 'Not authorised' };
-  }
-  if (!res.ok || !res.body) throw new Error('stream unavailable: ' + res.status);
-
-  // Preloaded in <head>, so this is already in cache and costs no round trip.
-  const { createEventParser, progressLines } = await import('/sse-parse.js');
-  const parser = createEventParser();
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let result = null;
-  let failure = null;
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-      if (event.kind === 'done') { result = event.result; continue; }
-      if (event.kind === 'error') { failure = event.error; continue; }
-
-      const lines = progressLines(event);
-      if (lines.length) progress.step(lines);
-    }
-  }
-
-  if (failure) return { fatal: failure };
-  // A stream that ended without an answer is a broken route, not an answer.
-  if (!result) throw new Error('stream ended without a result');
-  return { data: result };
-}
-
-/** The original route, unchanged, used when the stream cannot be had. */
-async function askPlain(question) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-
-  const res = await fetch('/ask', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
-  });
+function render(res, recData) {
+  const app = document.getElementById('app');
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Request failed' }));
-    return { fatal: err.error || 'Something went wrong' };
-  }
-  return { data: await res.json() };
-}
-
-
-/* --- chat history --------------------------------------------------------- */
-
-/**
- * Which thread this conversation belongs to.
- *
- * Null until the first answer comes back: the server creates the thread when it
- * saves the first exchange and returns the id, rather than the browser making
- * one up. A client-chosen id would mean an empty thread for every question
- * somebody started typing and abandoned.
- */
-let conversationId = null;
-
-function historyPanel(open) {
-  document.getElementById('history-panel').hidden = !open;
-  document.getElementById('history-overlay').hidden = !open;
-  document.getElementById('convo-current').setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (open) loadConversations();
-}
-
-/** Keep the bar showing the thread you are actually in. */
-function setConvoTitle(title) {
-  document.getElementById('convo-title').textContent = title || 'New chat';
-}
-
-function whenText(iso) {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (!Number.isFinite(days)) return '';
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return days + ' days ago';
-  const months = Math.floor(days / 30);
-  return months + (months === 1 ? ' month ago' : ' months ago');
-}
-
-async function loadConversations() {
-  const list = document.getElementById('history-list');
-  let data;
-  try {
-    const res = await fetch('/api/conversations', { headers: { Authorization: 'Bearer ' + authToken } });
-    /**
-     * A non-OK response has to be caught EXPLICITLY. A 401 or a 500 still
-     * parses as JSON, `data.conversations` comes back undefined, and the panel
-     * would report "no saved chats yet" — which is a failure disguised as good
-     * news, and the reader has no way to tell the difference.
-     */
-    if (!res.ok) {
-      list.innerHTML = '<div class="hp-empty">Could not load your chats (' + res.status + ').</div>';
-      return;
-    }
-    data = await res.json();
-  } catch (e) {
-    list.innerHTML = '<div class="hp-empty">Could not load your chats.</div>';
+    const msg = res.body && res.body.message ? res.body.message : 'Could not load the dashboard.';
+    app.innerHTML = '<div class="loading">' + esc(msg) + '</div>';
     return;
   }
 
-  const items = (data && data.conversations) || [];
-  if (items.length === 0) {
-    // Said plainly rather than left blank: nothing here yet and something went
-    // wrong look identical to somebody staring at an empty panel.
-    list.innerHTML = '<div class="hp-empty">No saved chats yet. Ask something and it will appear here.</div>';
-    return;
-  }
+  payload = res.body;
+  // An owner lands on the group; anybody with one venue lands on it.
+  selected = payload.group ? 'group' : payload.venues[0].slug;
+  draw(recData);
+}
 
-  list.innerHTML = items.map(function (c) {
-    const title = escapeHtml(c.title || 'Untitled');
-    return '<div class="hp-item' + (c.id === conversationId ? ' current' : '') + '" data-id="' + escapeHtml(c.id) + '">' +
-      '<button class="hp-open"><span class="hp-title">' + title + '</span>' +
-        '<span class="hp-when">' + whenText(c.updated_at) + '</span></button>' +
-      '<button class="hp-act hp-rename" title="Rename">&#9998;</button>' +
-      '<button class="hp-act hp-del" title="Delete">&times;</button>' +
-    '</div>';
-  }).join('');
+function draw(recData) {
+  const w = payload.window;
+  const all = payload.group ? [payload.group, ...payload.venues] : payload.venues;
+  const v = all.find(x => x.slug === selected) || all[0];
+
+  const chips = all.length > 1
+    ? '<div class="venues">' + all.map(x =>
+        '<button class="venue-chip' + (x.slug === selected ? ' on' : '') + '" data-slug="' + esc(x.slug) + '">' +
+        esc(x.venue) + '</button>').join('') + '</div>'
+    : '';
 
   /**
-   * Keep the bar in step with the list.
-   *
-   * The bar is set optimistically from the question the moment an answer comes
-   * back, because waiting would leave it saying "New chat" over a conversation
-   * that plainly is not new. The real title is written a second later by the
-   * cheap model, so the two disagree until something reloads — this is that
-   * something, and it costs nothing because the list has just been fetched.
+   * The window, spelled out, because the comparison is the one thing a reader
+   * cannot verify from the numbers. "6 days vs the same 6 days" is what makes
+   * the arrow trustworthy -- against a whole previous week it would show a fall
+   * every day except Sunday.
    */
-  const mine = items.find(function (c) { return c.id === conversationId; });
-  if (mine && mine.title) setConvoTitle(mine.title);
+  const windowLine =
+    '<div class="window">Week to date · <strong>' + fmtRange(w.current.start, w.current.end) + '</strong> · ' +
+    (w.thin
+      ? '<span class="thin">one day against one day — too thin to read as a trend</span>'
+      : w.days + ' days against the same ' + w.days + ' days last week') +
+    '</div>';
 
-  list.querySelectorAll('.hp-item').forEach(function (row) {
-    const id = row.dataset.id;
-    row.querySelector('.hp-open').addEventListener('click', function () { openConversation(id); });
-    row.querySelector('.hp-rename').addEventListener('click', async function () {
-      const current = row.querySelector('.hp-title').textContent;
-      const next = prompt('Rename this chat', current);
-      if (next === null || !next.trim()) return;
-      const res = await fetch('/api/conversations/' + id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
-        body: JSON.stringify({ title: next.trim() }),
-      });
-      if (!res.ok) { alert('Could not rename that chat.'); return; }
-      loadConversations();
-    });
-    row.querySelector('.hp-del').addEventListener('click', async function () {
-      const title = row.querySelector('.hp-title').textContent;
-      if (!confirm('Delete "' + title + '"? This cannot be undone.')) return;
-      const res = await fetch('/api/conversations/' + id, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + authToken },
-      });
-      if (!res.ok) { alert('Could not delete that chat.'); return; }
-      // Deleting the thread you are in leaves you on a blank one rather than
-      // looking at a conversation that no longer exists.
-      if (id === conversationId) startNewChat();
-      loadConversations();
-    });
-  });
+  const tiles =
+    '<div class="tiles">' +
+      tile('Net sales', money(v.net_sales), delta(v.change.net_sales, 'money')) +
+      tile('Covers', num(v.covers), delta(v.change.covers)) +
+      tile('Spend per head', v.avg_spend_per_head === null ? '—' : money2(v.avg_spend_per_head), delta(v.change.avg_spend_per_head)) +
+    '</div>';
+
+  const rows = [
+    ['Gross sales', money(v.gross_sales)],
+    ['Food', money(v.food_sales) + (v.food_pct === null ? '' : ' — ' + pct(v.food_pct))],
+    ['Beverage', money(v.beverage_sales) + (v.food_pct === null ? '' : ' — ' + pct(100 - v.food_pct))],
+    ['Discounts', money(v.total_discounts) + (v.discount_rate_pct === null ? '' : ' — ' + pct(v.discount_rate_pct))],
+    ['Service charge', money(v.service_charge)],
+    ['Net sales', money(v.net_sales)],
+    ['Covers', num(v.covers)],
+    ['Transactions', num(v.transactions)],
+    ['Average check', v.avg_check === null ? '—' : money2(v.avg_check)],
+    ['Trading days', v.trading_days + (v.closed_days.length ? ' (' + v.closed_days.length + ' closed)' : '')],
+  ];
+
+  const table =
+    '<div class="panel"><h2>Week to date</h2><table><tbody>' +
+    rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
+    '</tbody></table>' +
+    '<p class="figure-note">Gross = food + beverage, service charge excluded · ' +
+    'Net sales = gross less discounts plus the 10% service charge, so it sits above gross · ' +
+    'Discounts = item + order, as a share of gross · ' +
+    'Spend per head = food &amp; beverage ÷ covers · Average check = revenue per bill</p></div>';
+
+  document.getElementById('app').innerHTML =
+    chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
+    advicePanel(recData, v) + askBox(v);
+
+  document.querySelectorAll('.venue-chip').forEach(b =>
+    b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
+
+  const ask = document.getElementById('ask-input');
+  const go = () => {
+    const q = ask.value.trim();
+    if (q) window.location.href = '/chat.html?q=' + encodeURIComponent(q);
+  };
+  document.getElementById('ask-go').addEventListener('click', go);
+  ask.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
 
-function startNewChat() {
-  conversationId = null;
-  history = [];
-  // Back to how the app looks when you open it, chips and all.
-  chat.innerHTML = WELCOME_HTML;
-  welcome = document.getElementById('welcome');
-  setConvoTitle('New chat');
-  historyPanel(false);
-  chat.scrollTop = 0;
+function tile(label, value, deltaHtml) {
+  return '<div class="tile"><div class="label">' + label + '</div>' +
+         '<div class="value">' + value + '</div>' +
+         '<div class="delta">' + deltaHtml + '</div></div>';
 }
 
 /**
- * Replay a stored thread.
+ * The week's daily line, drawn by hand.
  *
- * The messages arrive ALREADY re-checked against who this person is right now —
- * a turn that read a venue or a data domain they no longer have access to comes
- * back with its text replaced by an explanation and its charts stripped. The
- * browser is not deciding anything here; it is rendering what the server
- * allowed.
+ * NO CHART LIBRARY. Nothing on any page loads from a third party, and a chart
+ * of seven bars is a few dozen lines of SVG against a cold origin's DNS, TCP
+ * and TLS on the critical path. The app already renders its own SVG charts in
+ * src/ai/chart-svg.ts for the same reason.
+ *
+ * A CLOSED DAY IS A GAP, NOT A ZERO BAR. A zero draws as a collapse, and
+ * Firangi closes every Sunday -- the chart layer already has this rule and the
+ * dashboard must not disagree with it.
  */
-async function openConversation(id) {
-  historyPanel(false);
-  chat.innerHTML = '';
-  welcome = null;
+function chartPanel(v) {
+  const days = v.daily;
+  if (!days.length) return '';
 
-  let data;
-  try {
-    const res = await fetch('/api/conversations/' + id, { headers: { Authorization: 'Bearer ' + authToken } });
-    if (!res.ok) { addMessage('assistant', '<div class="error-msg">Could not open that chat.</div>', true); return; }
-    data = await res.json();
-  } catch (e) {
-    addMessage('assistant', '<div class="error-msg">Could not open that chat.</div>', true);
-    return;
-  }
+  const W = 320, H = 110, pad = 18;
+  const max = Math.max(...days.map(d => d.net_sales ?? 0), 1);
+  const bw = (W - pad * 2) / Math.max(days.length, 1);
 
-  conversationId = id;
-  setConvoTitle(data.title);
-  history = [];
-
-  for (const m of data.messages || []) {
-    if (m.role === 'user') {
-      addMessage('user', m.content);
-      history.push({ role: 'user', content: m.content });
-      continue;
+  let bars = '';
+  days.forEach((d, i) => {
+    const x = pad + i * bw + bw * 0.18;
+    const w = bw * 0.64;
+    const label = new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' });
+    if (d.net_sales === null) {
+      bars += '<text x="' + (x + w / 2) + '" y="' + (H - pad - 4) + '" text-anchor="middle" ' +
+              'font-size="9" fill="#8888a0">closed</text>';
+    } else {
+      const h = Math.max(1, (d.net_sales / max) * (H - pad * 2 - 10));
+      bars += '<rect x="' + x + '" y="' + (H - pad - h) + '" width="' + w + '" height="' + h +
+              '" rx="2" fill="#e8933a" opacity="0.85"></rect>';
     }
+    bars += '<text x="' + (x + w / 2) + '" y="' + (H - 5) + '" text-anchor="middle" ' +
+            'font-size="10" fill="#8888a0">' + esc(label) + '</text>';
+  });
 
-    if (m.withheld) {
-      addMessage('assistant', '<div class="withheld">' + escapeHtml(m.content) + '</div>', true);
-      // NOT pushed into history: re-sending a withheld placeholder as context
-      // would have the model answer about an explanation rather than the data.
-      continue;
-    }
-
-    for (const chart of m.charts || []) {
-      const wrap = document.createElement('div');
-      wrap.className = 'message assistant';
-      wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
-      const card = wrap.querySelector('.chart-card');
-      card.title = chart.title || 'Chart';
-      card.addEventListener('click', () => openChart(card.innerHTML));
-      chat.appendChild(wrap);
-    }
-
-    addMessage('assistant', m.content);
-    history.push({ role: 'assistant', content: m.content });
-  }
-
-  if (data.withheld > 0) {
-    const note = document.createElement('div');
-    note.className = 'message assistant';
-    note.innerHTML = '<div class="avatar"></div><div class="bubble"><div class="withheld">' +
-      data.withheld + (data.withheld === 1 ? ' answer in this chat is' : ' answers in this chat are') +
-      ' hidden because your access has changed since you asked.</div></div>';
-    chat.appendChild(note);
-  }
-
-  chat.scrollTop = chat.scrollHeight;
+  return '<div class="chart"><h2>Net sales by day</h2>' +
+         '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Net sales by day this week">' +
+         bars + '</svg></div>';
 }
 
-document.getElementById('convo-current').addEventListener('click', function () {
-  historyPanel(document.getElementById('history-panel').hidden);
-});
-// Escape closes it, like any other menu.
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') historyPanel(false);
-});
-document.getElementById('history-overlay').addEventListener('click', function () { historyPanel(false); });
-document.getElementById('new-chat').addEventListener('click', startNewChat);
+/**
+ * The forward book. Expected covers, never presented as achieved.
+ *
+ * Reservations are ingested about 60 days forward, so this is real data and not
+ * a projection -- but today is part-done and the rest are bookings that have not
+ * happened. The heading says "expected" for exactly that reason.
+ */
+function bookPanel(v, w) {
+  if (!v.upcoming || !v.upcoming.length) return '';
+  const days = v.upcoming.slice(0, 7).map(u => {
+    const dow = new Date(u.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'short', timeZone: 'UTC' });
+    const isToday = u.date === w.today;
+    return '<div class="day' + (isToday ? ' today' : '') + (u.closed ? ' shut' : '') + '">' +
+           '<div class="dow">' + esc(isToday ? 'Today' : dow) + '</div>' +
+           '<div class="n">' + (u.closed ? '<span class="shut-label">Closed</span>' : u.covers) + '</div></div>';
+  }).join('');
+  return '<div class="panel"><h2>Expected covers, next 7 days</h2>' +
+         '<div style="padding:0 14px 12px"><div class="book">' + days + '</div></div>' +
+         '<p class="figure-note">Booked covers not yet cancelled, from SevenRooms. Today is part-done, so its figure includes guests already seated.</p></div>';
+}
 
-async function send() {
-  const question = input.value.trim();
-  if (!question || busy) return;
+/**
+ * The week's advice, on the same screen as the numbers it is about.
+ *
+ * This is the whole reason the dashboard is the home page rather than a fourth
+ * tab: the brief says the analytics are table stakes and the recommendations
+ * are the product, and that they must live in one integrated surface. Two
+ * screens is the split it says not to make.
+ */
+function advicePanel(recData, v) {
+  const recs = (recData && recData.recommendations) || [];
+  const mine = v.slug === 'group' ? recs : recs.filter(r => r.venue_id === v.venue_id);
+  const shown = mine.slice(0, 3);
 
-  busy = true;
-  sendBtn.disabled = true;
-  input.value = '';
-  autoResize();
+  const withheld = recData && recData.withheld_for_role
+    ? '<p class="figure-note">' + recData.withheld_for_role + ' recommendation(s) are not shown for your role.</p>'
+    : '';
 
-  addMessage('user', question);
-  const progress = createProgress();
-
-  try {
-    /**
-     * The stream first, the old route if it cannot be had.
-     *
-     * An intermediary that buffers an event stream is a real thing and gives no
-     * sign that it is doing it, so the fallback is not ceremony — without it,
-     * one proxy between a venue and Railway would turn a nicety into a chat
-     * that does not answer. Falling back costs the progress display and nothing
-     * else: /ask is exactly what shipped before today.
-     */
-    let outcome;
-    try {
-      outcome = await askStreaming(question, progress);
-    } catch (streamError) {
-      console.warn('[ask] event stream unavailable, falling back to /ask:', streamError.message);
-      outcome = await askPlain(question);
-    }
-
-    progress.remove();
-
-    if (outcome.fatal) {
-      addMessage('assistant', '<div class="error-msg">Error: ' + escapeHtml(outcome.fatal) + '</div>', true);
-      busy = false;
-      sendBtn.disabled = false;
-      return;
-    }
-
-    const data = outcome.data;
-
-    /**
-     * The thread this now belongs to. The server created it on the first save
-     * and tells us which it was, so the next question continues the same one.
-     */
-    if (data.conversation_id) {
-      const isNew = conversationId !== data.conversation_id;
-      conversationId = data.conversation_id;
-      // The server titles a new thread from the first question. Shown straight
-      // away rather than after a refresh, so the bar is never stale.
-      if (isNew) setConvoTitle(question.length > 60 ? question.slice(0, 57) + '…' : question);
-    }
-
-    if (data.toolCalls && data.toolCalls.length > 0) {
-      const toolNames = [...new Set(data.toolCalls.map(t => t.name.replace(/_/g, ' ')))];
-      const toolDiv = document.createElement('div');
-      toolDiv.className = 'message assistant';
-      toolDiv.innerHTML =
-        '<div class="avatar"></div>' +
-        '<div class="tool-indicator">Queried: ' + toolNames.join(', ') + '</div>';
-      chat.appendChild(toolDiv);
-    }
-
-    // Charts come back as server-rendered SVG. They are inserted before the
-    // answer so the user sees the shape of the data first, then the reading of
-    // it. The SVG is generated by our own renderer from warehouse rows, not by
-    // the model, so it is safe to inline.
-    if (data.charts && data.charts.length > 0) {
-      for (const chart of data.charts) {
-        const wrap = document.createElement('div');
-        wrap.className = 'message assistant';
-        wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
-        const card = wrap.querySelector('.chart-card');
-        card.title = chart.title || 'Chart';
-        card.addEventListener('click', () => openChart(card.innerHTML));
-        chat.appendChild(wrap);
-      }
-    }
-
-    // Defence in depth: the server should never send an empty answer, but a
-    // blank bubble is the least useful possible failure, so never render one.
-    const answerText = (data.answer && data.answer.trim())
-      ? data.answer
-      : '_No response was returned. Please try asking again._';
-    const answerBubble = addMessage('assistant', answerText);
-
-    // External sources, attached under the answer they belong to.
-    //
-    // This is the reason web search runs through Anthropic rather than a plain
-    // search API: each citation carries the page AND the sentence the claim was
-    // taken from, so an external figure can be checked rather than trusted. A
-    // warehouse figure has no entry here and needs none — it came from our own
-    // data. href is escaped and forced http(s) because the url is external text.
-    if (data.sources && data.sources.length > 0) {
-      const box = document.createElement('div');
-      box.className = 'sources';
-      const items = data.sources.map(s => {
-        const safeUrl = /^https?:\/\//i.test(s.url || '') ? s.url : '';
-        const label = escapeHtml(s.title || s.url || 'source');
-        const link = safeUrl
-          ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>'
-          : label;
-        // One entry per PAGE, with every passage under it. Emitting a row per
-        // citation rendered the same government forecast seven times.
-        const quotes = (s.quotes || []).map(function (q) {
-          return '<span class="source-quote">“' + escapeHtml(q) + '”</span>';
-        }).join('');
-        return '<div class="source-item">' + link + quotes + '</div>';
-      }).join('');
-      box.innerHTML = '<div class="sources-title">From the web — not our data</div>' + items;
-      answerBubble.appendChild(box);
-    }
-
-    addTeachButton(answerBubble, question, answerText);
-
-    history.push({ role: 'user', content: question });
-    history.push({ role: 'assistant', content: answerText });
-
-    // Keep history manageable (last 10 turns)
-    if (history.length > 20) {
-      history = history.slice(-20);
-    }
-
-  } catch (e) {
-    progress.remove();
-    addMessage('assistant', '<div class="error-msg">Network error. Check your connection and try again.</div>', true);
+  if (!shown.length) {
+    return '<div class="panel"><h2>This week’s advice</h2>' +
+           '<div class="empty">Nothing this week. An engine that always has something to say is one nobody believes — a quiet week is a valid result.</div>' +
+           withheld + '</div>';
   }
 
-  busy = false;
-  sendBtn.disabled = false;
-  input.focus();
+  return '<div class="panel"><h2>This week’s advice</h2>' +
+    shown.map(r =>
+      '<div class="rec">' +
+        '<div class="rec-venue">' + esc(r.venue) + '</div>' +
+        '<div class="rec-headline">' + esc(r.headline) + '</div>' +
+        '<div class="rec-body">' + renderMarkdown(r.body || '') + '</div>' +
+      '</div>').join('') +
+    withheld +
+    '<p class="figure-note"><a href="/briefing.html">Open the full briefing</a> to rate these or read the evidence behind them.</p>' +
+    '</div>';
+}
+
+function askBox(v) {
+  const name = v.slug === 'group' ? 'the group' : v.venue;
+  return '<div class="ask">' +
+    '<input id="ask-input" type="text" placeholder="Ask about ' + esc(name) + '…" ' +
+    'autocomplete="off" autocapitalize="sentences">' +
+    '<button id="ask-go">Ask</button></div>';
+}
+
+function fmtRange(a, b) {
+  const f = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-SG', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return a === b ? f(a) : f(a) + ' – ' + f(b);
 }
 </script>
 </body>

@@ -730,11 +730,25 @@ unreadable.
 
 ## Build order & current status
 
-**Status: planning complete, nothing built yet. Starting Phase 0.**
+**Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
+started.** 50 migrations, 25 query tools, 11 ingest sources, 1,128 tests.
+
+This line was wrong for months — it still read "planning complete, nothing built
+yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
+here than anywhere else: a fresh session reads this file first and would set
+about building a backbone that already exists. Update it when a phase moves.
 
 - **Phase 0** (now): create accounts (Supabase, Anthropic API, GitHub); build backbone tables + RLS + first policy; seed test data & verify venue isolation; wire the Revel sample file end-to-end (parser → validate → upsert → query back under RLS); one Claude query tool answering a real question.
 - **Phase 1**: automate Gmail delivery + watchdog; add Xero, StaffAny, SevenRooms, Zeemart one at a time.
-- **Phase 2**: custom dashboards (per-venue + HQ).
+- **Phase 2** (built 4 Oct 2026): the dashboard is the HOME PAGE, not a fourth
+  tab — the brief says the analytics and the advice must live in one surface, so
+  the week's recommendations are embedded in it and the chat moved to
+  `/chat.html`. It leads with WEEK TO DATE against **the same weekday span** of
+  the week before: Mon–Sat against Mon–Sat, never against a whole previous week,
+  which would show a fall every day except Sunday. `src/lib/dashboard-window.ts`
+  holds that and `dashboard-rollup.ts` the group line, split out so the pure
+  logic is testable without credentials. Everything the page draws arrives in
+  ONE request.
 - **Phase 3**: chatbot + Insight & Recommendation Engine + chart generation + Telegram.
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 

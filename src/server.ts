@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { buildDashboard } from './lib/dashboard.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
@@ -1233,6 +1234,50 @@ app.post('/api/notes/capture', async (c) => {
  * plug for the query tools. The filter below is the control; the policy on the
  * table is what protects anything reading with a user token.
  */
+/**
+ * Everything the dashboard draws, in one request.
+ *
+ * ONE CALL, DELIBERATELY. The front-end rules say never to serialise requests
+ * that do not depend on each other, and the strongest form of that is not to
+ * make the second request at all. This is the page people open most, on a phone
+ * between services, so figures, the daily line, the forward book and the week's
+ * advice all come back together.
+ *
+ * THE VENUE LIST IS THE CONTROL. This runs with the service role, which
+ * bypasses RLS entirely. An owner gets every venue; anybody else gets exactly
+ * the venues on their roles and nothing else. An EMPTY list is refused rather
+ * than widened -- "no venues" must never be read as "no restriction", which is
+ * BUILD_LOG 4.3 word for word.
+ */
+app.get('/api/dashboard', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  // Same gate as the briefing: this is trading data, margins and advice.
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const { data: allVenues } = await supabaseAdmin.from('venues').select('id, name, slug');
+  const scoped = user.isOwner
+    ? (allVenues ?? [])
+    : (allVenues ?? []).filter(v => user.venues.some(uv => uv.venue_id === v.id));
+
+  if (scoped.length === 0) {
+    // Not an error the page should retry. Somebody with no venue grant has an
+    // account and no data, and saying so beats an empty dashboard that looks
+    // like a venue which stopped trading.
+    return c.json({ error: 'no_venues', message: 'Your account is not assigned to a venue yet. Ask an owner to add you.' }, 403);
+  }
+
+  try {
+    const payload = await buildDashboard(scoped);
+    return c.json(payload);
+  } catch (e: any) {
+    console.error(`[dashboard] ${e?.message ?? e}`);
+    return c.json({ error: e?.message ?? 'Could not build the dashboard' }, 500);
+  }
+});
+
 app.get('/api/recommendations', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);

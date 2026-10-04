@@ -118,7 +118,12 @@ test('the pages that render markdown tables all handle a wide one', () => {
    * where a minimum exists.
    */
   const surfaces: [string, RegExp][] = [
-    ['index.html', /\.bubble table \{[^}]*\}/],
+    // index.html is the DASHBOARD since the home page moved; the chat it used
+    // to be is chat.html. The dashboard embeds the week's recommendations, so
+    // it renders model-written tables too and needs the same handling — it did
+    // not have it, and this test is what found that.
+    ['index.html', /\.rec-body table \{[^}]*\}/],
+    ['chat.html', /\.bubble table \{[^}]*\}/],
     ['briefing.html', /\.rec-body table \{[^}]*\}/],
     ['plan.html', /\.msg\.agent \.bubble table \{[^}]*\}/],
   ];

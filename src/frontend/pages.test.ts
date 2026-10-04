@@ -360,3 +360,62 @@ test('the shared renderer escapes before it does anything else', () => {
   // https only, or a url becomes an attribute in a live document.
   assert.match(md, /\/\^https:\\\/\\\/\/i\.test\(u\)/, 'safeUrl no longer allowlists https');
 });
+
+/**
+ * The home page IS the dashboard, and the chat moved to /chat.html.
+ *
+ * Done by renaming rather than by routing: `serveStatic` serves index.html at
+ * `/`, so the file that is index.html is the home page and there is no route to
+ * get wrong. That makes it easy to undo by accident too, which is why it is
+ * asserted.
+ *
+ * The brief's reason for the move: "the dashboard and the AI advice must live
+ * in one integrated surface" — the analytics are table stakes and the
+ * recommendations are the product, so splitting them across two tabs is the one
+ * thing it says not to do.
+ */
+test('the home page is the dashboard', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /<title>Dashboard - Sauron<\/title>/, 'index.html is no longer the dashboard');
+  assert.ok(home.includes("fetch('/api/dashboard'"), 'the home page does not load the dashboard');
+  assert.ok(pages.includes('chat.html'), 'chat.html is gone — the chat has nowhere to live');
+});
+
+test('the dashboard loads its data and its advice in parallel, not in a chain', () => {
+  /**
+   * This is the page people open most, on a phone on mobile data between
+   * services. The dashboard read touches two weeks of daily_operations and
+   * reservations across every venue in scope; putting the terms check or
+   * /api/me in front of it was what made the briefing page slow (BUILD_LOG 5.6).
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const dashAt = home.indexOf('const dash = fetchDashboard();');
+  const recsAt = home.indexOf('const recs = fetchRecommendations();');
+  const gateAt = home.indexOf("const gate = import('/terms-gate.js')");
+  const meAt = home.indexOf("const mePromise = fetch('/api/me'");
+
+  assert.ok(dashAt > 0, 'the dashboard fetch is no longer started early');
+  assert.ok(recsAt > dashAt, 'the recommendations fetch should start alongside, not before');
+  assert.ok(gateAt > dashAt && meAt > dashAt, 'the terms gate and /api/me must not be awaited in front of the data');
+
+  // And the correctness half: a gate that had to appear means both requests
+  // were issued before an acceptance existed and were correctly refused.
+  assert.ok(
+    home.includes("terms === 'already'"),
+    'the dashboard must re-fetch when the terms gate had to appear — speed must not change an answer',
+  );
+});
+
+test('every page offers the dashboard, and none still calls / the chat', () => {
+  // The nav is hand-written on each page, so a new page is the obvious place
+  // for this to drift. A link reading "Chat" that points at / now lands on the
+  // dashboard, which is the confusing half-migration worth preventing.
+  for (const page of ['chat.html', 'briefing.html', 'plan.html', 'admin.html']) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<a href="\/"[^>]*>Dashboard<\/a>/, `public/${page} has no link to the dashboard`);
+    assert.ok(
+      !/<a href="\/"[^>]*>Chat<\/a>/.test(html),
+      `public/${page} still labels / as "Chat" — it is the dashboard now`,
+    );
+  }
+});
