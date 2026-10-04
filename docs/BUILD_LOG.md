@@ -812,6 +812,45 @@ with the whole suite green. `src/frontend/pages.test.ts` now compiles every
 page's inline script without running it, and carries a test proving it still
 rejects broken code.
 
+### 5.13 The dashboard got "slower a lot" in one afternoon, by being added to
+
+Reported by Khai on 4 Oct 2026, hours after four features shipped to the
+dashboard at once. No production timings existed, so the causes were measured
+on a local Postgres 16 with production-sized data (142,896 reservations
+against production's 142,623):
+
+| Cause | Measured locally | Fix |
+|---|---|---|
+| **Two batches in sequence.** Retention, cost of sales, bills and the new forecast need only the DATE, but started only after the sales-and-covers batch finished — the serialisation 5.6 had already removed from the browser, rebuilt on the server | One full batch of waiting, every load, before the heaviest work began | Everything that needs only the date starts before the first `await`. A test asserts it by position in the source |
+| **The forecast's history query and backtest** ran on every load, on the critical path | ~260 ms query; ~250 ms of CPU, during which Node answered **nobody** | Hourly cache, and an index: the backtest is now two binary searches per forecast. **~50 ms**, output byte-identical across 18 compared runs |
+| **Lifetime retention undid migration 044's speed fix.** A bound before everything held is a scan of everything held — and the comment written with it claimed the index kept it fast | 65–115 ms at a year, **120–200 ms** at lifetime, every load, uncached | Hourly cache. The comment now says what it costs |
+
+**The cache is stale-while-revalidate, keyed by identity and refreshed by
+token** (`src/lib/hourly-cache.ts`). The hour turning over serves the previous
+hour's value at once and refreshes behind it, so only a never-seen key waits —
+the first load after a deploy, a new month. Concurrent loads share one query.
+A failure is never cached; a "nothing to show" is never cached either.
+**Sales and covers are never cached** — they are what the page is opened for
+and a test asserts neither passes through it.
+
+**A cold panel ships as "still calculating", never as its empty state.** Each
+optional panel gets 250 ms after the core is in; a panel still running is named
+in `pending` and the work carries on into the cache. The empty states are the
+trap: "no P&L ingested" printed about a figure ten seconds away is a false
+statement, and on a cold cache it would have been printed four times.
+
+**And production now measures itself.** One log line per load —
+`[dashboard] 840ms data_through=… core=… retention=hit@0ms forecast=stale@0ms`
+— and the same as a `Server-Timing` header in the browser's network panel.
+This entry's numbers came from a laptop because the server had none; the next
+one will not have to.
+
+**Recurs? Every customer, and every time a panel is added.** Each addition was
+reasonable on its own and measured on its own; nobody measured the PAGE. The
+rule that came out of it: a new dashboard panel is either live-and-cheap or
+cached-and-optional, and it says which in `buildDashboard` — there is no third
+kind.
+
 ### 5.10 The retry was wrapped around everything except the call that failed
 
 Spotted by Khai in the admin console: three `sevenrooms:auth-error` rows at

@@ -177,11 +177,12 @@ describe('how deep "ever" actually goes', () => {
     assert.equal(horizonLabel('not-a-date'), null);
   });
 
-  test('the lookback is bounded, not infinite', () => {
+  test('the lookback is a real number of days, not infinite', () => {
     /**
-     * Migration 044 exists because an unbounded history scan timed out in
-     * production. The window stays real and simply sits before anything we
-     * hold, so the index is still usable.
+     * The RPC takes days and does the subtraction in Postgres, so it must be a
+     * finite number. It does NOT keep migration 044's speed — a bound before
+     * everything is a scan of everything — which is why the dashboard caches
+     * retention by the hour.
      */
     assert.ok(Number.isFinite(LIFETIME_LOOKBACK_DAYS));
     assert.ok(LIFETIME_LOOKBACK_DAYS > 365 * 20);

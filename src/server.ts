@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { buildDashboard } from './lib/dashboard.js';
+import { buildDashboard, type DashboardTimings } from './lib/dashboard.js';
 import { isPeriodKind } from './lib/dashboard-window.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
@@ -1282,7 +1282,16 @@ app.get('/api/dashboard', async (c) => {
   }
 
   try {
-    const payload = await buildDashboard(scoped, undefined, requested);
+    const timings: DashboardTimings = {};
+    const payload = await buildDashboard(scoped, undefined, requested, timings);
+    /**
+     * Server-Timing: where the load went, readable in the browser's network
+     * panel without access to the server logs. Names and milliseconds only --
+     * nothing in it is a business figure.
+     */
+    c.header('Server-Timing', Object.entries(timings)
+      .map(([name, t]) => `${name};dur=${t.ms}` + (t.cache ? `;desc="${t.cache}"` : ''))
+      .join(', '));
     return c.json(payload);
   } catch (e: any) {
     console.error(`[dashboard] ${e?.message ?? e}`);

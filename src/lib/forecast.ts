@@ -107,6 +107,70 @@ export function parsePickup(raw: unknown): PickupData {
   return { served, booked };
 }
 
+/**
+ * The history, indexed once per venue so every lookup is a binary search.
+ *
+ * WHY THIS EXISTS: SPEED, MEASURED. The backtest asks for ~2,700 forecasts per
+ * load of fresh history, and each one scanned every night on record to find
+ * twelve -- about 250 ms of CPU on production-sized data, during which the Node
+ * server could answer nobody else. Grouped by weekday and days out and sorted
+ * by date, "the last twelve Tuesdays before the 3rd" is two binary searches;
+ * a level over twelve weeks is two more and a subtraction of prefix sums.
+ *
+ * Built lazily and held against the PickupData object itself, so it lives
+ * exactly as long as the data it indexes and can never describe another set.
+ */
+interface VenueIndex {
+  /** `${weekday}|${lead}` -> nights in date order, trading nights only. */
+  byKey: Map<string, { dates: string[]; pickup: number[]; served: number[] }>;
+  servedDates: string[];
+  /** prefix[i] = sum of the first i nights' covers. */
+  servedPrefix: number[];
+}
+
+const indexes = new WeakMap<PickupData, Map<string, VenueIndex | null>>();
+
+/** First position at which `x` could be inserted keeping `arr` sorted. */
+function lowerBound(arr: string[], x: string): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < x) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+function indexFor(data: PickupData, venueId: string): VenueIndex | null {
+  let perData = indexes.get(data);
+  if (!perData) { perData = new Map(); indexes.set(data, perData); }
+  if (perData.has(venueId)) return perData.get(venueId)!;
+
+  const served = data.served.get(venueId);
+  const booked = data.booked.get(venueId);
+  let built: VenueIndex | null = null;
+  if (served) {
+    // Bookings are optional here: last year's method needs only served covers.
+    const byKey = new Map<string, { dates: string[]; pickup: number[]; served: number[] }>();
+    for (const date of booked ? [...booked.keys()].sort() : []) {
+      const s = served.get(date);
+      if (s === undefined) continue;                 // closed or missing: not a night to learn from
+      const wd = weekday(date);
+      for (const [lead, b] of booked!.get(date)!) {
+        const k = `${wd}|${lead}`;
+        if (!byKey.has(k)) byKey.set(k, { dates: [], pickup: [], served: [] });
+        const e = byKey.get(k)!;
+        e.dates.push(date); e.pickup.push(s - b); e.served.push(s);
+      }
+    }
+    const servedDates = [...served.keys()].sort();
+    const servedPrefix = [0];
+    for (const d of servedDates) servedPrefix.push(servedPrefix[servedPrefix.length - 1] + served.get(d)!);
+    built = { byKey, servedDates, servedPrefix };
+  }
+  perData.set(venueId, built);
+  return built;
+}
+
 export interface PickupForecast {
   mid: number;
   lo: number;
@@ -127,26 +191,18 @@ export interface PickupForecast {
 export function pickupForecast(
   data: PickupData, venueId: string, target: string, lead: number, bookedNow: number, asOf: string,
 ): PickupForecast | null {
-  const served = data.served.get(venueId);
-  const booked = data.booked.get(venueId);
-  if (!served || !booked) return null;
+  const idx = indexFor(data, venueId);
+  const nights = idx?.byKey.get(`${weekday(target)}|${lead}`);
+  if (!nights) return null;
 
-  const from = addDays(asOf, -TRAINING_WEEKS * 7);
-  const wd = weekday(target);
-  const pickups: number[] = [];
-  let maxServed = 0;
+  // Same weekday, same days out, in [asOf - 12 weeks, asOf): nights served
+  // BEFORE the forecast was made, so a backtest cannot see its own answer.
+  const lo = lowerBound(nights.dates, addDays(asOf, -TRAINING_WEEKS * 7));
+  const hi = lowerBound(nights.dates, asOf);
+  if (hi - lo < MIN_OBSERVATIONS) return null;
 
-  for (const [date, byLead] of booked) {
-    if (date < from || date >= asOf || weekday(date) !== wd) continue;
-    const s = served.get(date);
-    const b = byLead.get(lead);
-    if (s === undefined || b === undefined) continue;
-    pickups.push(s - b);
-    if (s > maxServed) maxServed = s;
-  }
-
-  if (pickups.length < MIN_OBSERVATIONS) return null;
-  pickups.sort((a, b) => a - b);
+  const pickups = nights.pickup.slice(lo, hi).sort((a, b) => a - b);
+  const maxServed = Math.max(...nights.served.slice(lo, hi));
 
   // Never below zero: a forecast of minus four covers is arithmetic, not trade.
   const at = (q: number) => Math.max(0, Math.round(bookedNow + quantile(pickups, q)));
@@ -154,12 +210,11 @@ export function pickupForecast(
 }
 
 /** Mean covers per trading night over [from, to). Null when too thin to be a level. */
-function level(series: Map<string, number>, from: string, to: string): number | null {
-  let sum = 0, n = 0;
-  for (const [date, v] of series) {
-    if (date >= from && date < to) { sum += v; n++; }
-  }
-  return n >= MIN_LEVEL_DAYS ? sum / n : null;
+function level(idx: VenueIndex, from: string, to: string): number | null {
+  const lo = lowerBound(idx.servedDates, from);
+  const hi = lowerBound(idx.servedDates, to);
+  const n = hi - lo;
+  return n >= MIN_LEVEL_DAYS ? (idx.servedPrefix[hi] - idx.servedPrefix[lo]) / n : null;
 }
 
 /**
@@ -176,7 +231,8 @@ export function lastYearForecast(
   data: PickupData, venueId: string, target: string, asOf: string,
 ): number | null {
   const served = data.served.get(venueId);
-  if (!served) return null;
+  const idx = indexFor(data, venueId);
+  if (!served || !idx) return null;
 
   const ly = addDays(target, -364);
   const nights = [addDays(ly, -7), ly, addDays(ly, 7)]
@@ -184,8 +240,8 @@ export function lastYearForecast(
     .filter((v): v is number => v !== undefined);
   if (nights.length < 2) return null;
 
-  const recent = level(served, addDays(asOf, -TRAINING_WEEKS * 7), asOf);
-  const before = level(served, addDays(asOf, -364 - TRAINING_WEEKS * 7), addDays(asOf, -364));
+  const recent = level(idx, addDays(asOf, -TRAINING_WEEKS * 7), asOf);
+  const before = level(idx, addDays(asOf, -364 - TRAINING_WEEKS * 7), addDays(asOf, -364));
   if (recent === null || before === null || before === 0) return null;
 
   const mean = nights.reduce((a, b) => a + b, 0) / nights.length;

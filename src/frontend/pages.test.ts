@@ -1101,14 +1101,68 @@ test('the forecast starts from the same book the strip above prints', () => {
 
 test('a failed forecast costs the panel, never the page, and names the likely cause', () => {
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
-  const fn = lib.slice(lib.indexOf('async function buildForecast('), lib.indexOf('async function buildRetention('));
-  assert.match(fn, /return null;/);
-  assert.match(fn, /051_cover_pickup\.sql/, 'an unapplied migration would look like a venue with no history');
+  const load = lib.slice(lib.indexOf('async function loadForecastInputs('), lib.indexOf('function assembleForecast('));
+  assert.match(load, /051_cover_pickup\.sql/, 'an unapplied migration would look like a venue with no history');
+  // And the panel wrapper turns any failure into a missing panel, logged.
+  assert.match(lib, /console\.warn\(`\[dashboard\] \$\{name\} unavailable/);
 });
 
-test('the forecast history is cached per Singapore hour, not recomputed per load', () => {
-  // The heaviest read the page makes, and it only changes when the hourly
-  // SevenRooms ingest does.
+/**
+ * Speed, 4 Oct 2026. Khai: "The load of the dashboard is slower a lot."
+ *
+ * Measured locally on production-sized data: the forecast added ~260 ms of
+ * query and ~250 ms of CPU, and the lifetime retention change nearly doubled
+ * that query — all of it waiting behind the sales and covers batch, because the
+ * panels that need only the DATE started only after it finished. These hold
+ * the repair in place.
+ */
+test('the date-only panels start BEFORE the lookup the core waits on', () => {
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
-  assert.match(lib, /const key = `\$\{today\}\|\$\{clockHour\}\|\$\{ids\.join\(','\)\}`/);
+  const fn = lib.slice(lib.indexOf('export async function buildDashboard('), lib.indexOf('async function loadForecastInputs('));
+  const firstAwait = fn.indexOf("await supabaseAdmin\n    .from('daily_operations')");
+  assert.ok(firstAwait > 0, 'the data-through lookup has moved; update this test');
+  for (const started of ['retentionCache.get(', 'costsCache.get(', 'forecastCache.get(', 'getDayMoments(', 'getClosedWeekdays(']) {
+    const at = fn.indexOf(started);
+    assert.ok(at > 0 && at < firstAwait, `${started} starts after the first await — serialised again`);
+  }
 });
+
+test('the slow panels are cached by hour, and sales and covers never are', () => {
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  for (const c of ['retentionCache', 'costsCache', 'periodCostsCache', 'forecastCache']) {
+    assert.match(lib, new RegExp(`const ${c} = new HourlyCache`), `${c} is gone`);
+  }
+  // The token is the Singapore day and hour: the ingest is hourly at most.
+  assert.match(lib, /const token = `\$\{day\}\|\$\{hour\}`/);
+  // The live figures must never pass through a cache.
+  assert.ok(!/Cache\.get\([^)]*readOperations/.test(lib), 'sales were put behind the cache');
+  assert.ok(!/Cache\.get\([^)]*getCovers/.test(lib), 'covers were put behind the cache');
+});
+
+test('an optional panel holds the page only briefly, and says when it is still coming', () => {
+  /**
+   * Cold, a panel gets a short grace after the core and then ships as "still
+   * calculating". Without the page side of that it would fall through to its
+   * EMPTY state — "no P&L ingested" about a figure seconds away.
+   */
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /settleWithin\(c\.value, PANEL_GRACE_MS\)/);
+  assert.match(lib, /pending\.push\(name\)/);
+
+  const home = readFileSync('public/index.html', 'utf8');
+  for (const [fn, key] of [
+    ['retentionPanel', 'retention'], ['costPanel', 'costs'],
+    ['periodCostPanel', 'period_costs'], ['forecastPanel', 'forecast'],
+  ]) {
+    const body = home.slice(home.indexOf(`function ${fn}(`), home.indexOf(`function ${fn}(`) + 400);
+    assert.match(body, new RegExp(`calculating\\(payload, '${key}'`), `${fn} shows its empty state while still computing`);
+  }
+});
+
+test('every load is measured, in the logs and in the browser', () => {
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /console\.log\(\s*`\[dashboard\] \$\{timings\.total\.ms\}ms`/);
+  const server = readFileSync('src/server.ts', 'utf8');
+  assert.match(server, /c\.header\('Server-Timing'/);
+});
+

@@ -134,10 +134,16 @@ export function leftCensored(
  * itself. A hundred years; the RPC takes days and does the subtraction in
  * Postgres, which is happy with 1926.
  *
- * NOT `Infinity`, NOT a null meaning "no limit". The RPC's window is what makes
- * its index usable -- migration 044 exists because an unbounded history scan
- * timed out in production -- so the bound stays real and simply sits before
- * anything we hold.
+ * NOT `Infinity`, NOT a null meaning "no limit" -- the RPC takes a number of
+ * days and a real one keeps it valid SQL.
+ *
+ * IT DOES COST, and an earlier version of this comment said otherwise. Migration
+ * 044 made retention fast by bounding the history scan to a year; a bound before
+ * everything we hold is a scan of everything we hold. Measured on
+ * production-sized data: 65-115 ms at 365 days, 120-200 ms at lifetime. That is
+ * paid once an hour, not per load, because the dashboard caches retention
+ * (src/lib/hourly-cache.ts) -- which is what makes the lifetime measure
+ * affordable, not the index.
  */
 export const LIFETIME_LOOKBACK_DAYS = 36_500;
 

@@ -23,7 +23,8 @@
 import { supabaseAdmin } from '../auth/session.js';
 import { salesFiguresOf, classSplitOf, foodAndBevSalesOf } from './sales.js';
 import { getCovers, getDayMoments } from './covers.js';
-import { serviceDays, serviceNote, syncAge, sgtClock } from './service-day.js';
+import { serviceDays, serviceNote, syncAge, sgtClock, sgtToday } from './service-day.js';
+import { HourlyCache, settleWithin, type CacheState } from './hourly-cache.js';
 import {
   parsePickup, backtest, venueForecast, groupForecast, combineBacktests, scoreBacktest, seasonalLift,
   BACKTEST_DAYS, TRAINING_WEEKS,
@@ -178,19 +179,100 @@ export interface DashboardPayload {
    * has no forecast panel, rather than no page.
    */
   forecast: Record<string, CoverForecast> | null;
+  /**
+   * Panels still computing when the page was sent -- cold cache only. The page
+   * says "still calculating" for these instead of its empty state, which would
+   * be a false statement about a figure that is seconds away.
+   */
+  pending: string[];
   venues: VenueWeek[];
   /** Present only when more than one venue is in scope. */
   group: VenueWeek | null;
 }
 
+/** Where a dashboard load spent its time, for the log line and Server-Timing. */
+export type DashboardTimings = Record<string, { ms: number; cache?: CacheState }>;
+
+/**
+ * How long the optional panels may hold the page once sales and covers are in.
+ *
+ * Short on purpose. Sales and covers are what the page is opened for; a panel
+ * that is still computing after they are ready ships as "still calculating"
+ * and carries on into the cache, where the next load finds it. A warm cache
+ * answers in well under a millisecond, so this only ever applies cold -- the
+ * first load after a deploy, or of a new month.
+ */
+const PANEL_GRACE_MS = 250;
+
+/**
+ * The slow, slow-changing panels, cached by hour. See hourly-cache.ts for why
+ * these four and why never sales or covers.
+ */
+const retentionCache = new HourlyCache<Record<string, RetentionBlock>>();
+const costsCache = new HourlyCache<Record<string, CostBlock>>();
+const periodCostsCache = new HourlyCache<Record<string, WeeklyCogs>>();
+const forecastCache = new HourlyCache<ForecastInputs>();
+
+/**
+ * A builder that returns null for "nothing there" and for "failed" alike, made
+ * to throw instead -- so the cache never keeps a null for an hour. A failure is
+ * retried next load; a venue with genuinely nothing is cheap to re-ask.
+ */
+const orThrow = <T>(name: string, p: Promise<T | null>) =>
+  p.then(v => { if (v === null) throw new Error(`${name}: nothing to show`); return v; });
+
 export async function buildDashboard(
   venues: Array<{ id: string; name: string; slug: string }>,
   today?: string,
   period?: PeriodKind,
+  timings: DashboardTimings = {},
 ): Promise<DashboardPayload> {
   if (venues.length === 0) {
     throw new Error('dashboard: no venues in scope — refusing rather than reading every venue');
   }
+
+  const t0 = performance.now();
+  const since = () => Math.round(performance.now() - t0);
+
+  /**
+   * ONE INSTANT FOR THE WHOLE PAYLOAD. Reading the clock separately per venue
+   * would let three venues in one response describe three different moments,
+   * and at 20:59 two of them would say 20:59 and one 21:00.
+   */
+  const now = new Date();
+  const day = today ?? sgtToday(now);
+  const hour = sgtClock(now).slice(0, 2);
+  const token = `${day}|${hour}`;
+  const ids = venues.map(v => v.id);
+  const scope = [...ids].sort().join(',');
+  const month = lastCompleteMonth(day);
+
+  /**
+   * EVERYTHING THAT NEEDS ONLY THE DATE STARTS NOW, before the one lookup the
+   * rest depends on.
+   *
+   * This was two batches in sequence: sales and covers, THEN retention, cost of
+   * sales, bills and the forecast -- none of which depend on the first batch.
+   * The second batch therefore waited for the slowest read of the first before
+   * starting its own, which is the serialisation CLAUDE.md forbids, and it went
+   * unnoticed while the second batch was light. Today's additions made it heavy.
+   */
+  const track = <T>(name: string, c: { state: CacheState; value: Promise<T> }) => {
+    c.value.then(() => { timings[name] = { ms: since(), cache: c.state }; }, () => {});
+    return c;
+  };
+  const retentionC = track('retention', retentionCache.get(`${month.start}|${scope}`, token,
+    () => orThrow('retention', buildRetention(venues, day))));
+  const costsC = track('costs', costsCache.get(`${month.start}|${scope}`, token,
+    () => orThrow('costs', buildCosts(venues, day))));
+  // Keyed by venues only, so the hour turning over -- or the day -- serves the
+  // last history while the new one loads. The book it is applied to is live.
+  const forecastC = track('forecast', forecastCache.get(scope, token,
+    () => loadForecastInputs([...ids].sort(), day, hour)));
+  const holidaysP = supabaseAdmin.from('public_holidays').select('holiday_date, name')
+    .gt('holiday_date', day).lte('holiday_date', addDays(day, SERVICE_FORWARD));
+  const momentsP = Promise.all(venues.map(v => getDayMoments(v.id, day)));
+  const closedP = Promise.all(venues.map(v => getClosedWeekdays(v.id)));
 
   /**
    * THE LAST DAY WE ACTUALLY HAVE, before any window is built.
@@ -205,14 +287,19 @@ export async function buildDashboard(
   const { data: latest } = await supabaseAdmin
     .from('daily_operations')
     .select('business_date')
-    .in('venue_id', venues.map(v => v.id))
-    .lte('business_date', today ?? new Date().toISOString().slice(0, 10))
+    .in('venue_id', ids)
+    // The Singapore day, not the server's: UTC is still yesterday until 8am.
+    .lte('business_date', day)
     .order('business_date', { ascending: false })
     .limit(1);
   const dataThrough: string | null = latest?.[0]?.business_date ?? null;
+  timings.data_through = { ms: since() };
 
-  const window = periodWindow(period ?? defaultPeriod(today), today, dataThrough);
-  const ids = venues.map(v => v.id);
+  const window = periodWindow(period ?? defaultPeriod(day), day, dataThrough);
+  const periodCostsC = track('period_costs', periodCostsCache.get(
+    `${window.current.start}|${window.current.end}|${day}|${scope}`, token,
+    () => orThrow('period_costs', buildPeriodCosts(venues, window.current.start, window.current.end, day)),
+  ));
 
   /**
    * Everything that does not depend on anything else, at once.
@@ -236,18 +323,13 @@ export async function buildDashboard(
      *
      * Seating times are what separate "has eaten" from "is sitting here" from
      * "has not arrived", and they live on individual bookings. One extra read
-     * per venue, for one date -- and only this panel pays for it.
+     * per venue, for one date -- and only this panel pays for it. Started
+     * above, with everything else that needs only the date.
      */
-    Promise.all(venues.map(v => getDayMoments(v.id, window.today))),
-    Promise.all(venues.map(v => getClosedWeekdays(v.id))),
+    momentsP,
+    closedP,
   ]);
-
-  /**
-   * ONE INSTANT FOR THE WHOLE PAYLOAD. Reading the clock separately per venue
-   * would let three venues in one response describe three different moments,
-   * and at 20:59 two of them would say 20:59 and one 21:00.
-   */
-  const now = new Date();
+  timings.core = { ms: since() };
 
   const out: VenueWeek[] = venues.map((v, i) => {
     const mine = currentRows.filter(r => r.venue_id === v.id);
@@ -401,13 +483,53 @@ export async function buildDashboard(
     };
   });
 
-  // Independent of each other and of everything above; neither blocks the page.
-  const [retention, costs, periodCosts, forecast] = await Promise.all([
-    buildRetention(venues, window.today),
-    buildCosts(venues, window.today),
-    buildPeriodCosts(venues, window.current.start, window.current.end, window.today),
-    buildForecast(venues, out, window.today, now),
+  /**
+   * THE OPTIONAL PANELS, given a short grace once the core is in.
+   *
+   * A warm cache has them already. Cold, each gets PANEL_GRACE_MS more; one
+   * still running after that is named in `pending` so the page can say "still
+   * calculating" rather than its empty state -- "no retention figures yet"
+   * would be a false statement about a figure that is ten seconds away -- and
+   * the work carries on into the cache for the next load.
+   */
+  const pending: string[] = [];
+  const panel = async <T>(name: string, c: { value: Promise<T> }): Promise<T | null> => {
+    try {
+      const r = await settleWithin(c.value, PANEL_GRACE_MS);
+      if (r.timedOut) { pending.push(name); return null; }
+      return r.value;
+    } catch (e: any) {
+      // Named, never swallowed: an unapplied migration otherwise looks exactly
+      // like a venue with nothing to show.
+      if (!/nothing to show/.test(String(e?.message))) console.warn(`[dashboard] ${name} unavailable: ${e?.message ?? e}`);
+      return null;
+    }
+  };
+  const [retention, costs, periodCosts, forecastInputs, { data: hols }] = await Promise.all([
+    panel('retention', retentionC),
+    panel('costs', costsC),
+    panel('period_costs', periodCostsC),
+    panel('forecast', forecastC),
+    holidaysP,
   ]);
+  const holidays = new Map<string, string>((hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]));
+  const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays) : null;
+
+  timings.total = { ms: since() };
+  /**
+   * ONE LINE PER LOAD, in the Railway logs. "The dashboard is slower" was
+   * answered from a local database because production had no measurement at
+   * all; this is that measurement. Read it as: total, then where it went, then
+   * how each cached panel was served.
+   */
+  console.log(
+    `[dashboard] ${timings.total.ms}ms` +
+    ` data_through=${timings.data_through?.ms}ms core=${timings.core?.ms}ms` +
+    ['retention', 'costs', 'period_costs', 'forecast']
+      .map(n => ` ${n}=${pending.includes(n) ? 'pending' : `${timings[n]?.cache ?? 'failed'}@${timings[n]?.ms ?? '?'}ms`}`)
+      .join('') +
+    ` venues=${venues.length}`,
+  );
   /**
    * THE SIX-MONTH COST LINE IS OFF, and `buildCostTrend` is kept rather than
    * deleted. Khai, 4 Oct 2026: "Cost of sales chart section not necessary no
@@ -421,7 +543,7 @@ export async function buildDashboard(
    */
   const costTrendByVenue = null;
   return {
-    window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue, forecast,
+    window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue, forecast, pending,
     venues: out, group: out.length > 1 ? rollUp(out, now) : null,
   };
 }
@@ -429,28 +551,24 @@ export async function buildDashboard(
 
 
 /**
- * The history behind the forecast, per hour.
+ * The forecast's history, cacheable: the reconstructed books and served
+ * covers, and the backtest run over them.
  *
- * CACHED BECAUSE IT ONLY CHANGES WHEN THE INGEST DOES. Reconstructing the book
- * for every night of the last nine months at five leads, plus two years of
- * served covers, is the heaviest read this page makes -- and SevenRooms lands
- * hourly, so a second dashboard load in the same hour would recompute an
- * identical answer. The key carries the Singapore hour because the cutoff is
- * taken at that clock time; at 17:00 the history is re-read as it stood at 17:00.
+ * THE HEAVIEST THING THIS PAGE READS, and it only changes when the SevenRooms
+ * ingest does -- so it goes through the hourly cache in buildDashboard rather
+ * than being recomputed per load. Throws on failure, so a failure is retried
+ * next load rather than cached as nothing for an hour.
  *
- * In-process, so a restart or a second instance simply recomputes. Nothing
- * here needs to survive one.
+ * Separate from the assembly below because the assembly needs the service
+ * strip's book, which is live, and this does not. Caching the two together
+ * would freeze tonight's bookings for an hour.
  */
-const pickupCache = new Map<string, { data: PickupData; records: Map<string, BacktestRecord[]> }>();
+interface ForecastInputs { data: PickupData; records: Map<string, BacktestRecord[]> }
 
-async function loadPickup(
-  venues: Array<{ id: string }>, today: string, clockHour: string, leads: number[],
-): Promise<{ data: PickupData; records: Map<string, BacktestRecord[]> }> {
-  const ids = venues.map(v => v.id).sort();
-  const key = `${today}|${clockHour}|${ids.join(',')}`;
-  const hit = pickupCache.get(key);
-  if (hit) return hit;
+const FORECAST_LEADS = Array.from({ length: SERVICE_FORWARD }, (_, i) => i + 1);
 
+async function loadForecastInputs(ids: string[], today: string, clockHour: string): Promise<ForecastInputs> {
+  const leads = FORECAST_LEADS;
   const longestLead = Math.max(...leads);
   const { data: raw, error } = await supabaseAdmin.rpc('cover_pickup', {
     p_venue_ids: ids,
@@ -461,87 +579,61 @@ async function loadPickup(
     p_final_from: addDays(today, -(BACKTEST_DAYS + 364 + TRAINING_WEEKS * 7 + longestLead + 14)),
     p_to: addDays(today, -1),
     p_leads: leads,
+    // The cutoff is taken at this Singapore hour; see migration 051.
     p_clock: `${clockHour}:00`,
   });
-  if (error) throw new Error(error.message);
-
+  if (error) {
+    throw new Error(
+      `cover_pickup: ${error.message}` +
+      (/cover_pickup/.test(error.message) ? ' -- has migration 051_cover_pickup.sql been applied?' : ''),
+    );
+  }
   const data = parsePickup(raw);
-  const records = new Map(ids.map(id => [id, backtest(data, id, today, leads)] as const));
-  const entry = { data, records };
-
-  // Keep it small: a day has 24 hours and there are a handful of venue scopes.
-  if (pickupCache.size > 32) pickupCache.delete(pickupCache.keys().next().value!);
-  pickupCache.set(key, entry);
-  return entry;
+  return { data, records: new Map(ids.map(id => [id, backtest(data, id, today, leads)] as const)) };
 }
 
 /**
- * Forecast covers for the nights after today on the service strip.
- *
- * A FAILURE COSTS THE PANEL, NEVER THE PAGE -- same rule as retention. The
- * likeliest failure is migration 051 not being applied yet, and it is named.
+ * The forecast for the nights after today, from cached history and the LIVE
+ * book. Synchronous and cheap: the expensive half is loadForecastInputs.
  */
-async function buildForecast(
+function assembleForecast(
   venues: Array<{ id: string; name: string; slug: string }>,
   out: VenueWeek[],
   today: string,
-  now: Date,
-): Promise<Record<string, CoverForecast> | null> {
-  try {
-    const leads = Array.from({ length: SERVICE_FORWARD }, (_, i) => i + 1);
-    const hour = sgtClock(now).slice(0, 2);
+  inputs: ForecastInputs,
+  holidays: Map<string, string>,
+): Record<string, CoverForecast> {
+  const { data, records } = inputs;
+  const leads = FORECAST_LEADS;
+  const result: Record<string, CoverForecast> = {};
+  const perVenue: CoverForecast[] = [];
 
-    const [{ data, records }, { data: hols }] = await Promise.all([
-      loadPickup(venues, today, hour, leads),
-      supabaseAdmin.from('public_holidays').select('holiday_date, name')
-        .gt('holiday_date', today).lte('holiday_date', addDays(today, SERVICE_FORWARD)),
-    ]);
-    const holidays = new Map<string, string>(
-      (hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]),
-    );
-
-    const result: Record<string, CoverForecast> = {};
-    const perVenue: CoverForecast[] = [];
-
-    for (const [i, v] of venues.entries()) {
-      /**
-       * THE BOOK IS THE SERVICE STRIP'S, not a second read. The forecast must
-       * start from exactly the "booked" number printed one panel up -- two
-       * reads a few hundred milliseconds apart could disagree by a booking,
-       * and a forecast built on 61 under a cell saying 62 is a discrepancy
-       * somebody will spend ten minutes on.
-       */
-      const days = out[i].service
-        .filter(d => d.basis === 'book')
-        .map(d => ({ date: d.date, booked: d.covers, closed: d.closed }));
-      const f = venueForecast(data, v.id, today, days, leads, holidays, records.get(v.id) ?? []);
-      result[v.slug] = f;
-      perVenue.push(f);
-    }
-
-    if (venues.length > 1) {
-      const groupRecords = combineBacktests(venues.map(v => records.get(v.id) ?? []));
-      // The group's own served series, for its seasonal lift.
-      const summed = new Map<string, number>();
-      for (const v of venues) {
-        for (const [d, n] of data.served.get(v.id) ?? []) summed.set(d, (summed.get(d) ?? 0) + n);
-      }
-      result.group = groupForecast(
-        perVenue,
-        scoreBacktest(groupRecords, leads),
-        seasonalLift(summed, today, SERVICE_FORWARD),
-      );
-    }
-
-    return result;
-  } catch (e: any) {
-    const msg = e?.message ?? String(e);
-    console.warn(
-      `[dashboard] forecast unavailable: ${msg}` +
-      (/cover_pickup/.test(msg) ? ' -- has migration 051_cover_pickup.sql been applied?' : ''),
-    );
-    return null;
+  for (const [i, v] of venues.entries()) {
+    /**
+     * THE BOOK IS THE SERVICE STRIP'S, not a second read. The forecast must
+     * start from exactly the "booked" number printed one panel up -- two reads
+     * a few hundred milliseconds apart could disagree by a booking, and a
+     * forecast built on 61 under a cell saying 62 is a discrepancy somebody
+     * will spend ten minutes on.
+     */
+    const days = out[i].service
+      .filter(d => d.basis === 'book')
+      .map(d => ({ date: d.date, booked: d.covers, closed: d.closed }));
+    const f = venueForecast(data, v.id, today, days, leads, holidays, records.get(v.id) ?? []);
+    result[v.slug] = f;
+    perVenue.push(f);
   }
+
+  if (venues.length > 1) {
+    const groupRecords = combineBacktests(venues.map(v => records.get(v.id) ?? []));
+    // The group's own served series, for its seasonal lift.
+    const summed = new Map<string, number>();
+    for (const v of venues) {
+      for (const [d, n] of data.served.get(v.id) ?? []) summed.set(d, (summed.get(d) ?? 0) + n);
+    }
+    result.group = groupForecast(perVenue, scoreBacktest(groupRecords, leads), seasonalLift(summed, today, SERVICE_FORWARD));
+  }
+  return result;
 }
 
 /**

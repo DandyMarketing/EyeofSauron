@@ -916,6 +916,20 @@ function servicePanel(v, w) {
  * Printed anyway, a beverage cost of 2% looks like the best bar in Singapore.
  */
 /**
+ * A panel the server is still computing, said as such.
+ *
+ * Only on a cold cache -- the first load after a deploy, or of a new month --
+ * and the figure arrives on the next refresh. Without this the panel would fall
+ * through to its EMPTY state, and "no retention figures yet" or "no P&L
+ * ingested" are false statements about figures that are seconds away.
+ */
+function calculating(payload, key, title) {
+  if (!(payload.pending || []).includes(key)) return null;
+  return '<div class="panel"><h2>' + esc(title) + '</h2>' +
+    '<div class="empty">Still calculating \u2014 this appears when you refresh in a moment.</div></div>';
+}
+
+/**
  * Forecast covers for the nights after today, and how far to trust them.
  *
  * Khai, 4 Oct 2026: "Next to make would be just under upcoming reservations,
@@ -943,6 +957,8 @@ function servicePanel(v, w) {
  * it.
  */
 function forecastPanel(payload, v) {
+  const wait = calculating(payload, 'forecast', 'Forecast covers');
+  if (wait) return wait;
   const f = payload.forecast && payload.forecast[v.slug];
   if (!f || !f.days || !f.days.length) return '';
 
@@ -1057,6 +1073,8 @@ function forecastPanel(payload, v) {
 }
 
 function periodCostPanel(payload, v, w) {
+  const wait = calculating(payload, 'period_costs', 'Cost of sales \u00b7 ' + w.label.toLowerCase());
+  if (wait) return wait;
   const c = payload.period_costs && payload.period_costs[v.slug];
   if (!c) return '';
 
@@ -1081,6 +1099,8 @@ function periodCostPanel(payload, v, w) {
 }
 
 function costPanel(payload, v) {
+  const wait = calculating(payload, 'costs', 'Cost of sales');
+  if (wait) return wait;
   const c = payload.costs && payload.costs[v.slug];
   if (!c) return '';
 
@@ -1133,6 +1153,8 @@ function monthlySection(payload, v) {
 }
 
 function retentionPanel(payload, v) {
+  const wait = calculating(payload, 'retention', 'Guests');
+  if (wait) return wait;
   const r = payload.retention && payload.retention[v.slug];
   if (!r) {
     return '<div class="panel"><h2>Guests</h2>' +
