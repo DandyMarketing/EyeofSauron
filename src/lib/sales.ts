@@ -142,6 +142,34 @@ export interface SalesFigures {
   total_discounts: number;
 }
 
+/**
+ * What each figure MEANS, travelling with the figure itself.
+ *
+ * WHY IN THE TOOL RESPONSE AND NOT ONLY THE PROMPT. The definitions were in the
+ * system prompt, correctly, and the prompt ALSO carried an older contradictory
+ * line saying gross sales was "product sales before discounts/tax". Given both,
+ * the model used the wrong one and labelled food & beverage as gross sales. A
+ * definition written far from the number is a definition that can disagree with
+ * the number; this one is returned by the same function that computes it.
+ *
+ * These are the business's definitions and NOT the textbook ones — service
+ * charge sitting inside gross sales is the opposite of the usual F&B
+ * convention, which is exactly why a reader who is not told will be about 10%
+ * wrong and will never know it. See the header of this file and BUILD_LOG 2.4.
+ *
+ * Phrased for an operator to read verbatim, not for a model to paraphrase.
+ */
+export const FIGURE_DEFINITIONS = {
+  gross_sales: 'Food + beverage + the 10% service charge, before discounts',
+  food_bev_sales: 'Food + beverage alone, no service charge. The basis for cost percentages and spend per head',
+  net_sales: 'Gross sales less discounts. What "sales" means when nobody says which',
+  service_charge: 'The 10% charged on the discounted amount. Already inside gross and net sales — never add it on top',
+  total_discounts: 'Item discounts + order discounts. Coupons are reported separately by Revel and are not included',
+  avg_spend_per_head: 'Food & beverage ÷ SevenRooms covers. Revenue per PERSON. Deliberately not Revel\'s "Average Sale Per Guest", which uses a different numerator and denominator',
+  avg_check: 'Revenue per BILL, not per person. It rises when parties are larger, so it describes table mix as much as selling',
+  net_to_account_for: 'Total cash + card collected, including GST. The only figure here that carries tax',
+} as const;
+
 export function salesFiguresOf(row: SalesRow): SalesFigures {
   return {
     // Falls back to food+bev when there is no net sales to derive gross from,

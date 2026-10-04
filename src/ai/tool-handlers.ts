@@ -8,7 +8,7 @@ import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
 import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
-import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf } from '../lib/sales.js';
+import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, FIGURE_DEFINITIONS } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
@@ -1260,6 +1260,13 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       no_show_covers: c?.no_show_covers ?? null,
       avg_spend_per_head: c?.covers ? Number((gross / c.covers).toFixed(2)) : null,
       covers_check: coversVariance(c?.covers ?? null, data.total_guests),
+
+      /**
+       * The definitions travel WITH the figures, so an answer cannot describe
+       * a metric one way today and another way tomorrow. The prompt tells the
+       * model to use this wording rather than its own.
+       */
+      figure_definitions: FIGURE_DEFINITIONS,
     });
   }
 
@@ -1385,6 +1392,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     // means the floor SOP was not followed, not that the figure is wrong.
     covers_sop_review: sopBreaches.length > 0 ? sopBreaches : undefined,
     daily,
+    figure_definitions: FIGURE_DEFINITIONS,
   });
 }
 
@@ -1492,6 +1500,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     covers_source: 'sevenrooms',
     revenue_source: 'revel',
     venues: results,
+    figure_definitions: FIGURE_DEFINITIONS,
   });
 }
 

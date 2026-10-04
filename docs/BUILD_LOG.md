@@ -277,6 +277,31 @@ wrong. Asking about one day and asking about a one-day range returned different
 figures for the same question, so whichever a reader happened to use decided
 whether they got a sensible answer.
 
+**The prompt held the wrong definition too, and that is probably what chose
+it.** The system prompt carried an old "Key context" line — `"Gross Sales" =
+product sales before discounts/tax`, which is the food & beverage figure — and,
+further down, the correct one: gross sales is food + beverage + the 10% service
+charge. **Both were in front of the model at once**, and the warehouse column of
+the same name holds the first meaning, so the wrong definition was corroborated
+by the data and looked right. Removed, with a test asserting it stays removed.
+
+A contradiction in a prompt is not a 50/50 risk. It is an answer nobody can
+predict, reproduce, or debug from the output.
+
+**Every definition was addressed to the MODEL and none to the reader**, which
+Khai raised directly: *"you would want to describe what gross sales is whenever
+Sauron spits it out."* Right, and the reason is specific — these definitions are
+not the textbook ones. Service charge sitting inside gross sales is the opposite
+of the usual F&B convention, so an operator who assumes the standard meaning is
+about 10% out with nothing in the answer to tell them. They will not ask.
+
+The definitions now live in `FIGURE_DEFINITIONS` beside the functions that
+compute them and are **returned in every sales tool response**
+(`figure_definitions`, ~230 tokens a call), rather than only in the prompt. A
+definition written far from the number can disagree with the number, which is
+what just happened. The prompt requires one line of definitions under a table or
+a short parenthesis in prose, once per answer, in the tools' wording.
+
 ### 1.10 A table drawn with spaces, in a code block
 **Symptom.** The same answer's table arrived as fixed-width ASCII with a row of
 dashes under the header, inside a code block.

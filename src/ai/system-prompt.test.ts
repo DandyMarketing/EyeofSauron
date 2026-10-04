@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { SYSTEM_PROMPT_BASE } from './system-prompt.js';
+import { FIGURE_DEFINITIONS } from '../lib/sales.js';
 
 /**
  * Standing rules in the prompt, asserted rather than hoped for.
@@ -39,4 +41,86 @@ test('both chart tools are offered, not just the time-series one', () => {
   // only chart tool named could not draw what the findings were about.
   assert.match(SYSTEM_PROMPT_BASE, /create_chart/);
   assert.match(SYSTEM_PROMPT_BASE, /create_composition_chart/);
+});
+
+test('the prompt carries exactly ONE definition of gross sales', () => {
+  /**
+   * It carried two, and they contradicted each other. An old "Key context" line
+   * said gross sales was "product sales before discounts/tax" — which is the
+   * food & beverage figure — while the sales-definitions block said gross sales
+   * is food + beverage + the 10% service charge. Both were in front of the
+   * model at once.
+   *
+   * Asked for Neon Pigeon's 29 Sep 2026 sales it used the first and reported
+   * NET LARGER THAN GROSS, in a table, to Khai. The warehouse column of the
+   * same name holds the first meaning too (BUILD_LOG 1.9), so the wrong
+   * definition was corroborated by the data and looked right.
+   *
+   * A contradiction in a prompt is not a 50/50 risk, it is an answer nobody can
+   * predict or reproduce.
+   */
+  assert.ok(
+    !/product sales before discounts/i.test(SYSTEM_PROMPT_BASE),
+    'the old contradictory definition of gross sales is back in the prompt',
+  );
+  assert.match(
+    SYSTEM_PROMPT_BASE,
+    /GROSS SALES = food \+ beverage \+ the 10% service charge/,
+    'the business definition of gross sales is missing',
+  );
+
+  // "gross - discounts + service fee + tax" described Net To Account For using
+  // "gross" in the OTHER sense, which is how the contradiction read as coherent.
+  assert.ok(
+    !/gross - discounts \+ service fee/.test(SYSTEM_PROMPT_BASE),
+    'Net To Account For is defined using "gross" in the food-and-beverage sense again',
+  );
+});
+
+test('the prompt tells the model to DEFINE a figure for the reader, not just to know it', () => {
+  /**
+   * The definitions were all there and all correct, and every one of them was
+   * addressed to the model. Nothing said to pass them on. An operator reading
+   * "gross sales $3,980" assumes the textbook meaning — service charge OUTSIDE
+   * — and is about 10% wrong with nothing in the answer to tell them.
+   */
+  assert.match(SYSTEM_PROMPT_BASE, /SAY WHAT EACH FIGURE MEANS, EVERY TIME YOU REPORT ONE/);
+
+  // The form matters as much as the rule: a glossary at the end of every answer
+  // would be ignored by the third one.
+  assert.match(SYSTEM_PROMPT_BASE, /Define each figure ONCE per answer/);
+  assert.match(SYSTEM_PROMPT_BASE, /It is a definition, not a lesson/);
+
+  // And it must use the wording the tools return, or the same metric gets
+  // described two different ways on two different days.
+  assert.match(SYSTEM_PROMPT_BASE, /figure_definitions/);
+});
+
+test('every figure the prompt says to define has a definition to use', () => {
+  /**
+   * The prompt names the figures that must never appear bare. If one of them
+   * has no entry in FIGURE_DEFINITIONS, the model is told to use wording that
+   * does not exist and will invent it — which is the drift this is meant to
+   * stop.
+   */
+  for (const field of [
+    'gross_sales', 'net_sales', 'food_bev_sales',
+    'avg_spend_per_head', 'avg_check', 'net_to_account_for',
+  ] as const) {
+    assert.ok(
+      FIGURE_DEFINITIONS[field] && FIGURE_DEFINITIONS[field].length > 10,
+      `${field} is named in the prompt but has no definition in FIGURE_DEFINITIONS`,
+    );
+  }
+});
+
+test('the definitions are returned beside the figures, not only in the prompt', () => {
+  // A definition written far from the number can disagree with the number —
+  // which is exactly what happened. Every sales response carries them.
+  const src = readFileSync('src/ai/tool-handlers.ts', 'utf8');
+  const occurrences = (src.match(/figure_definitions: FIGURE_DEFINITIONS/g) ?? []).length;
+  assert.equal(
+    occurrences, 3,
+    `expected query_sales (both paths) and compare_venues to return the definitions, found ${occurrences}`,
+  );
 });
