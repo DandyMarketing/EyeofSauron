@@ -149,7 +149,26 @@ export async function buildDashboard(
     throw new Error('dashboard: no venues in scope — refusing rather than reading every venue');
   }
 
-  const window = periodWindow(period ?? defaultPeriod(today), today);
+  /**
+   * THE LAST DAY WE ACTUALLY HAVE, before any window is built.
+   *
+   * Revel delivers overnight carrying the previous day, so during any given day
+   * the warehouse's most recent complete day is yesterday. A window running to
+   * the calendar's today therefore holds one day less TRADE than the window it
+   * is compared against -- five days against six -- and reports a fall every
+   * day of every week. The dates were right and the data behind one of them
+   * was not, which is the hardest version of this to see.
+   */
+  const { data: latest } = await supabaseAdmin
+    .from('daily_operations')
+    .select('business_date')
+    .in('venue_id', venues.map(v => v.id))
+    .lte('business_date', today ?? new Date().toISOString().slice(0, 10))
+    .order('business_date', { ascending: false })
+    .limit(1);
+  const dataThrough: string | null = latest?.[0]?.business_date ?? null;
+
+  const window = periodWindow(period ?? defaultPeriod(today), today, dataThrough);
   const ids = venues.map(v => v.id);
 
   /**

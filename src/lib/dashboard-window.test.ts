@@ -257,3 +257,76 @@ test('February against January is flagged as a length difference', () => {
   assert.deepEqual(w.current, { start: '2026-02-01', end: '2026-02-28' });
   assert.ok(w.warnings.some(x => /28 days against 31/.test(x)), w.warnings.join(' | '));
 });
+
+/**
+ * The data lag, which is this file's own defect arriving through the back door.
+ *
+ * Revel delivers overnight at about 04:26 SGT carrying the PREVIOUS day, so
+ * during any given day the warehouse's most recent complete day is yesterday.
+ * A window running to the calendar's today therefore holds one day less TRADE
+ * than the window it is compared against — five days against six — and reports
+ * a fall every single day of every single week.
+ *
+ * The dates were right. The data behind one of them was not, which is the
+ * hardest version of this to see: nothing in the window looks wrong.
+ */
+describe('the window is built from the last day with data, not the calendar', () => {
+  test('week to date stops where the data stops, and both sides shorten', () => {
+    // Saturday 3 Oct, warehouse through Friday 2 Oct.
+    const w = periodWindow('wtd', '2026-10-03', '2026-10-02');
+    assert.deepEqual(w.current, { start: '2026-09-28', end: '2026-10-02' });
+    assert.deepEqual(w.prior, { start: '2026-09-21', end: '2026-09-25' });
+    assert.equal(w.days, 5);
+  });
+
+  test('both sides still span the same number of days', () => {
+    // The property the whole file exists for, now under a lagging feed.
+    const span = (a: string, b: string) =>
+      (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400_000;
+    for (const day of ['2026-10-01', '2026-10-03', '2026-10-05', '2026-10-12']) {
+      const lagged = new Date(Date.parse(`${day}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+      const w = periodWindow('wtd', day, lagged);
+      assert.equal(span(w.current.start, w.current.end), span(w.prior.start, w.prior.end), day);
+    }
+  });
+
+  test('it says which day it actually runs to', () => {
+    // Silently reporting five days as "week to date" is the same answer with
+    // the explanation removed.
+    const w = periodWindow('wtd', '2026-10-03', '2026-10-02');
+    assert.equal(w.data_through, '2026-10-02');
+    assert.ok(w.warnings.some(x => /Runs to 2026-10-02, not today/.test(x)), w.warnings.join(' | '));
+  });
+
+  test('no lag means no caveat', () => {
+    const w = periodWindow('wtd', '2026-10-03', '2026-10-03');
+    assert.deepEqual(w.warnings, []);
+    assert.equal(w.current.end, '2026-10-03');
+  });
+
+  test('month to date shortens the same way', () => {
+    const w = periodWindow('mtd', '2026-10-12', '2026-10-11');
+    assert.deepEqual(w.current, { start: '2026-10-01', end: '2026-10-11' });
+    assert.deepEqual(w.prior, { start: '2026-09-01', end: '2026-09-11' });
+    assert.equal(w.days, 11);
+  });
+
+  test('LAST WEEK is computed from the calendar, not from the lag', () => {
+    /**
+     * The one period that must NOT follow the data. A completed week is
+     * historical; building it from `effective` would shift the week under
+     * review backwards every Monday morning before the overnight run lands, so
+     * the Tuesday review meeting would be looking at the wrong week.
+     */
+    const w = periodWindow('last_week', '2026-10-05', '2026-10-03');   // Monday, data to Saturday
+    assert.deepEqual(w.current, { start: '2026-09-28', end: '2026-10-04' });
+  });
+
+  test('but an incomplete completed week is flagged as partial', () => {
+    // A quiet week and a week missing two days of ingest look identical in a
+    // total, and only one of them is about the business.
+    const w = periodWindow('last_week', '2026-10-05', '2026-10-02');
+    assert.ok(w.warnings.some(x => /incomplete by 2 day\(s\)/.test(x)), w.warnings.join(' | '));
+    assert.ok(w.warnings.some(x => /rather than as a quiet week/.test(x)));
+  });
+});

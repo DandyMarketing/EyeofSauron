@@ -189,6 +189,22 @@ export interface PeriodWindow extends DashboardWindow {
   kind: PeriodKind;
   label: string;
   /**
+   * The last business date that actually has sales in the warehouse.
+   *
+   * REVEL ARRIVES OVERNIGHT, about 04:26 SGT, carrying the PREVIOUS day. So
+   * during any given day the warehouse's most recent complete day is yesterday,
+   * and a window running to "today" holds one day less data than the window it
+   * is compared against. Mon-to-Sat against Mon-to-Sat is five days of trade
+   * against six, and it shows a fall every single day of every single week.
+   *
+   * That is the defect this whole file was written to prevent, arriving through
+   * the back door: the dates were right and the DATA behind one of them was
+   * not. So the window is built from the last date with data, never from the
+   * calendar, and `data_through` is reported so the page can say which day it
+   * actually runs to.
+   */
+  data_through: string | null;
+  /**
    * Things true of this comparison that the figures cannot show.
    *
    * A month to date against the same dates last month can hold a different
@@ -199,32 +215,69 @@ export interface PeriodWindow extends DashboardWindow {
   warnings: string[];
 }
 
-export function periodWindow(kind: PeriodKind, today: string = sgtToday()): PeriodWindow {
-  const base = { today, kind, label: PERIOD_LABELS[kind] };
+export function periodWindow(
+  kind: PeriodKind,
+  today: string = sgtToday(),
+  dataThrough?: string | null,
+): PeriodWindow {
+  /**
+   * The effective "now" is the last day we have data for, not the calendar day.
+   * Everything below is built from it, so both sides of every comparison hold
+   * the same number of TRADED days rather than the same number of dates.
+   */
+  const effective = dataThrough && dataThrough < today ? dataThrough : today;
+  const base = { today, kind, label: PERIOD_LABELS[kind], data_through: dataThrough ?? null };
+
+  const lag = (w: PeriodWindow): PeriodWindow => {
+    if (!dataThrough || dataThrough >= today) return w;
+    return {
+      ...w,
+      warnings: [
+        `Runs to ${dataThrough}, not today: Revel delivers overnight so the current day is never in the warehouse yet. ` +
+        'Both sides of the comparison are cut to the same length, so the movement is still like for like.',
+        ...w.warnings,
+      ],
+    };
+  };
 
   if (kind === 'wtd' || kind === 'last_week') {
-    const w = dashboardWindow(today);
-    if (kind === 'wtd') return { ...w, ...base, warnings: [] };
+    const w = dashboardWindow(effective);
+    if (kind === 'wtd') return lag({ ...w, ...base, warnings: [] });
 
     // The completed week, and the one before it. Both are full Monday-to-Sunday
     // weeks, so there is no partial-period caveat at all.
-    const end = addDays(w.current.start, -1);          // the Sunday just gone
+    /**
+     * A COMPLETED week is historical, so it is computed from the CALENDAR and
+     * not from the data lag -- using `effective` would shift the week under
+     * review backwards every Monday morning before the overnight run lands,
+     * and a review meeting would be looking at the wrong week.
+     */
+    const cal = dashboardWindow(today);
+    const end = addDays(cal.current.start, -1);        // the Sunday just gone
     const start = addDays(end, -6);
+    const warnings: string[] = [];
+    if (dataThrough && dataThrough < end) {
+      warnings.push(
+        `The warehouse only runs to ${dataThrough}, so this week is incomplete by ` +
+        `${Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${dataThrough}T00:00:00Z`)) / 86400_000)} day(s). ` +
+        'Treat the totals as partial rather than as a quiet week.',
+      );
+    }
     return {
       ...base,
       current: { start, end },
       prior: { start: addDays(start, -7), end: addDays(end, -7) },
       days: 7,
       thin: false,
-      warnings: [],
+      warnings,
     };
   }
 
   if (kind === 'mtd') {
-    const start = monthStart(today);
+    const start = monthStart(effective);
     const priorStart = addMonths(start, -1);
-    const priorEnd = addMonths(today, -1);
-    const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+    const priorEnd = addMonths(effective, -1);
+    const days = Math.round((Date.parse(`${effective}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
 
     const warnings: string[] = [];
 
@@ -239,8 +292,7 @@ export function periodWindow(kind: PeriodKind, today: string = sgtToday()): Peri
      */
     const priorDays = Math.round(
       (Date.parse(`${priorEnd}T00:00:00Z`) - Date.parse(`${priorStart}T00:00:00Z`)) / 86400_000) + 1;
-    const curDays = Math.round(
-      (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+    const curDays = days;
     if (curDays !== priorDays) {
       warnings.push(
         `${curDays} days against ${priorDays}: the previous month is shorter, so it has no matching date. ` +
@@ -248,7 +300,7 @@ export function periodWindow(kind: PeriodKind, today: string = sgtToday()): Peri
       );
     }
 
-    const nowWeekend = weekendDays(start, today);
+    const nowWeekend = weekendDays(start, effective);
     const thenWeekend = weekendDays(priorStart, priorEnd);
     if (nowWeekend !== thenWeekend) {
       warnings.push(
@@ -257,14 +309,14 @@ export function periodWindow(kind: PeriodKind, today: string = sgtToday()): Peri
       );
     }
 
-    return {
+    return lag({
       ...base,
-      current: { start, end: today },
+      current: { start, end: effective },
       prior: { start: priorStart, end: priorEnd },
       days,
       thin: days <= 2,
       warnings,
-    };
+    });
   }
 
   // last_month: the month that has finished, against the one before it.
