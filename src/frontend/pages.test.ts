@@ -486,3 +486,29 @@ test('the engine is told not to call the reviewed week "this week"', () => {
     'the prompt still frames the briefing as being about "this week"',
   );
 });
+
+test('spend per head appears wherever average check does, and above it', () => {
+  /**
+   * Khai, 4 Oct 2026: "we only take average per person. You can put average
+   * check there but it's not a priority. Average spend per head is a priority."
+   *
+   * The first version of the dashboard's detail table carried average check and
+   * NO spend per head, which contradicts the brief in as many words: average
+   * check is revenue per BILL, it rises simply because parties are larger, and
+   * quoting it alone says as much about table mix as about how well a venue
+   * sells. tools.ts: "report it as secondary context, never on its own."
+   *
+   * The order is the fix, not the presence — both belong on the page, and the
+   * per-person one has to be the one the eye reaches first.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const sph = home.indexOf("['Spend per head'");
+  const chk = home.indexOf("['Average check'");
+
+  assert.ok(sph > 0, 'the dashboard table has no spend per head — the metric this business actually runs on');
+  assert.ok(chk > 0, 'average check has gone entirely; it is useful context, just not the lead');
+  assert.ok(sph < chk, 'average check is listed above spend per head — the per-person figure leads');
+
+  // And in the headline tiles, where there is no room for both to be equal.
+  assert.match(home, /tile\('Spend per head'/, 'spend per head is no longer a headline tile');
+});

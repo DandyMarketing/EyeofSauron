@@ -365,6 +365,20 @@ function draw(recData) {
     ['Service charge', money(v.service_charge)],
     ['Net sales', money(v.net_sales)],
     ['Covers', num(v.covers)],
+    /**
+     * SPEND PER HEAD LEADS, AND AVERAGE CHECK FOLLOWS IT.
+     *
+     * The first version of this table carried average check and no spend per
+     * head at all -- which the brief forbids in as many words: average check is
+     * revenue per BILL, it rises simply because parties are larger, and
+     * reporting it alone says as much about table mix as about how well the
+     * venue sells. The per-PERSON figure is the real productivity measure and
+     * it is the one this business works in.
+     *
+     * Order is the whole fix. They are both here, the per-person one is above,
+     * and average check reads as the context it is.
+     */
+    ['Spend per head', v.avg_spend_per_head === null ? '—' : money2(v.avg_spend_per_head)],
     ['Transactions', num(v.transactions)],
     ['Average check', v.avg_check === null ? '—' : money2(v.avg_check)],
     ['Trading days', v.trading_days + (v.closed_days.length ? ' (' + v.closed_days.length + ' closed)' : '')],
