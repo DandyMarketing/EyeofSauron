@@ -890,3 +890,51 @@ test('the legend carries the period mix, not just the colours', () => {
   assert.match(fn, /sharePct\(periodBev\)/);
   assert.match(home, /\.legend b \{/, 'the legend share has no style, so it reads as part of the label');
 });
+
+/**
+ * Food cost as a LINE, because one month of it is noise.
+ *
+ * A cost-of-sales line in a P&L is PURCHASES in the period, not consumption, so
+ * one large delivery near a month end lands against sales it has not produced
+ * yet. One month can read 40% and the next 31% with nothing wrong in either —
+ * which makes a single number on a dashboard actively misleading, because it
+ * looks like a measurement. Over six months the delivery noise mostly cancels
+ * and what is left is drift, which is the biggest controllable number in the
+ * business.
+ */
+test('the dashboard draws the cost trend, not just this month', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.ok(home.includes('function costTrendPanel('), 'there is no cost trend panel');
+  assert.match(home, /payload\.cost_trend/, 'the page never reads the trend');
+  assert.ok(
+    home.indexOf('costTrendPanel(payload, v)') > 0,
+    'the trend panel is defined but never rendered',
+  );
+});
+
+test('a month with no closed P&L breaks the line rather than joining across it', () => {
+  /**
+   * Two separate wrong pictures. Plotting a missing month as 0% draws a
+   * collapse in the food cost; joining the points either side draws a straight
+   * line through a month nobody measured. Both look like findings.
+   *
+   * One polyline per unbroken RUN is what makes the gap real — a single
+   * polyline with a hole in it connects straight across.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function costTrendPanel('), home.indexOf('function costPanel('));
+
+  assert.match(fn, /if \(!p\.available \|\| val === null/, 'an unavailable month is plotted like any other');
+  assert.match(fn, /const flush = \(\) =>/, 'the series is drawn as one path, so a gap is joined across');
+  assert.match(fn, /if \(run\.length > 1\)/, 'a run of one point would still draw a line');
+});
+
+test('the cost axis is drawn from the data, and says what range it covers', () => {
+  // A food cost moving between 30% and 40% is the whole story; anchoring the
+  // axis at zero flattens ten points of drift into a line that looks flat,
+  // which is the opposite of what the panel is for. So the labels state it.
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function costTrendPanel('), home.indexOf('function costPanel('));
+  assert.match(fn, /Math\.floor\(Math\.min\.apply\(null, values\) - 2\)/, 'the axis no longer fits the data');
+  assert.match(fn, /\[lo, hi\]\.forEach/, 'the range is not labelled, so the scale is invisible');
+});

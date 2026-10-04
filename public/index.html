@@ -834,6 +834,110 @@ function periodCostPanel(payload, v, w) {
     '</div>';
 }
 
+/**
+ * Food and beverage cost over six months.
+ *
+ * WHY A LINE AND NOT THE FIGURE. A cost-of-sales line in a P&L is PURCHASES in
+ * the period, not consumption, so one large delivery near a month end lands
+ * against sales it has not produced yet. One month can read 40% and the next
+ * 31% with nothing wrong in either, which makes a single number on a dashboard
+ * actively misleading -- it looks like a measurement. Over six months the
+ * delivery noise mostly cancels and what is left is drift, which is the thing
+ * worth acting on and the biggest controllable number in the business.
+ *
+ * A MONTH WITH NO CLOSED P&L IS A GAP, and the line is BROKEN across it rather
+ * than joined. Plotting it as 0% draws a collapse in the food cost; joining the
+ * points either side draws a straight line through a month nobody measured.
+ * Both look like findings.
+ *
+ * THE Y-AXIS IS DRAWN FROM THE DATA, not from zero. A food cost moving between
+ * 30% and 40% is the whole story, and anchoring at zero flattens ten points of
+ * drift into a line that looks flat -- the opposite of what this panel is for.
+ * The axis labels state the range, so nothing is hidden by it.
+ */
+function costTrendPanel(payload, v) {
+  const t = payload.cost_trend && payload.cost_trend[v.slug];
+  if (!t || !t.points.length) return '';
+
+  const pts = t.points;
+  const real = pts.filter(p => p.available && p.food_pct !== null);
+  if (real.length < 2) {
+    return '<div class="panel"><h2>Cost of sales trend</h2><div class="empty">' + esc(t.note) + '</div></div>';
+  }
+
+  const W = 320, H = 118, padX = 24, padTop = 14, padBottom = 20;
+  const plot = H - padTop - padBottom;
+
+  const values = pts.flatMap(p => [p.food_pct, p.beverage_pct]).filter(x => x !== null && x !== undefined);
+  const lo = Math.max(0, Math.floor(Math.min.apply(null, values) - 2));
+  const hi = Math.ceil(Math.max.apply(null, values) + 2);
+  const span = Math.max(1, hi - lo);
+
+  const stepX = (W - padX * 2) / Math.max(pts.length - 1, 1);
+  const xOf = i => padX + i * stepX;
+  const yOf = val => padTop + plot - ((val - lo) / span) * plot;
+
+  let svg = '';
+  [lo, hi].forEach(val => {
+    const y = yOf(val);
+    svg += '<line x1="' + padX + '" y1="' + y + '" x2="' + (W - padX) + '" y2="' + y +
+           '" stroke="#2a2a3a" stroke-width="0.5"></line>' +
+           '<text x="' + (padX - 3) + '" y="' + (y + 3) + '" text-anchor="end" font-size="7" fill="#8888a0">' +
+           val + '%</text>';
+  });
+
+  /**
+   * ONE PATH PER UNBROKEN RUN, not one path for the series. A single polyline
+   * with a missing month in it joins straight across the gap, which is the one
+   * thing this must not do.
+   */
+  const series = (key, colour) => {
+    let out = '';
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        out += '<polyline fill="none" stroke="' + colour + '" stroke-width="1.6" ' +
+               'stroke-linejoin="round" points="' + run.join(' ') + '"></polyline>';
+      }
+      run = [];
+    };
+    pts.forEach((p, i) => {
+      const val = p[key];
+      if (!p.available || val === null || val === undefined) { flush(); return; }
+      run.push(xOf(i) + ',' + yOf(val));
+      out += '<circle cx="' + xOf(i) + '" cy="' + yOf(val) + '" r="2.4" fill="' + colour + '"></circle>';
+    });
+    flush();
+    return out;
+  };
+
+  svg += series('beverage_pct', BEV_FILL);
+  svg += series('food_pct', FOOD_FILL);
+
+  pts.forEach((p, i) => {
+    if (p.available && p.food_pct !== null) {
+      svg += '<text x="' + xOf(i) + '" y="' + (yOf(p.food_pct) - 6) + '" text-anchor="middle" ' +
+             'font-size="7.5" font-weight="600" fill="#e4e4ef">' + Math.round(p.food_pct) + '</text>';
+    }
+    svg += '<text x="' + xOf(i) + '" y="' + (H - 5) + '" text-anchor="middle" font-size="8" fill="#8888a0">' +
+           esc(p.label) + '</text>';
+  });
+
+  const legend =
+    '<div class="legend">' +
+      '<span><i style="background:' + FOOD_FILL + '"></i>Food cost</span>' +
+      '<span><i style="background:' + BEV_FILL + '"></i>Beverage cost</span>' +
+    '</div>';
+
+  return '<div class="chart"><h2>Cost of sales, last six months</h2>' + legend +
+         '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Food and beverage cost percentage by month">' +
+         svg + '</svg>' +
+         '<p class="figure-note" style="padding:6px 0 0">' + esc(t.note) +
+         ' Figures on the line are food cost. A cost-of-sales line is PURCHASES in the month, not consumption, ' +
+         'so a single month moves with delivery timing — the shape over six is the part worth reading.</p>' +
+         '</div>';
+}
+
 function costPanel(payload, v) {
   const c = payload.costs && payload.costs[v.slug];
   if (!c) return '';
@@ -883,7 +987,7 @@ function monthlySection(payload, v) {
     || (payload.costs && payload.costs[v.slug] && payload.costs[v.slug].month);
   if (!month) return '';
   return '<div class="section-head">Last complete month · <strong>' + esc(month.label) + '</strong></div>' +
-         costPanel(payload, v) + retentionPanel(payload, v);
+         costPanel(payload, v) + costTrendPanel(payload, v) + retentionPanel(payload, v);
 }
 
 function retentionPanel(payload, v) {

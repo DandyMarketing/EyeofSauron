@@ -30,6 +30,7 @@ import {
   type RetentionCounts, type RetentionShares,
 } from './retention-month.js';
 import { costRatios, costCaveats, classifyCogs, type CostRatios, type PLRow } from './cost-ratios.js';
+import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { weeklyCogs, coverageFor, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
@@ -128,6 +129,15 @@ export interface DashboardPayload {
    * computed at all.
    */
   costs: Record<string, CostBlock> | null;
+  /**
+   * The same measure over six months, because one month of it is noise.
+   *
+   * A cost-of-sales line is purchases, not consumption, so a delivery near a
+   * month end lands against sales it has not produced yet. Over six months that
+   * mostly cancels and what is left is drift -- the thing worth acting on, and
+   * the thing nobody can see one month at a time.
+   */
+  cost_trend: Record<string, { points: CostPoint[]; note: string }> | null;
   /**
    * MONTHLY, and labelled as such. Null when SevenRooms has nothing to measure.
    * It sits on a week-to-date page because a week holds too few returning
@@ -301,12 +311,16 @@ export async function buildDashboard(
   });
 
   // Independent of each other and of everything above; neither blocks the page.
-  const [retention, costs, periodCosts] = await Promise.all([
+  const [retention, costs, periodCosts, costTrendByVenue] = await Promise.all([
     buildRetention(venues, window.today),
     buildCosts(venues, window.today),
     buildPeriodCosts(venues, window.current.start, window.current.end, window.today),
+    buildCostTrend(venues, window.today),
   ]);
-  return { window, retention, costs, period_costs: periodCosts, venues: out, group: out.length > 1 ? rollUp(out) : null };
+  return {
+    window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue,
+    venues: out, group: out.length > 1 ? rollUp(out) : null,
+  };
 }
 
 
@@ -565,6 +579,109 @@ async function buildPeriodCosts(
     return any ? out : null;
   } catch (e: any) {
     console.warn(`[dashboard] period costs failed: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
+
+/**
+ * Six months of food and beverage cost percentage, per venue.
+ *
+ * ONE PAIR OF QUERIES FOR THE WHOLE SPAN, not one per month. Six months times
+ * three venues is thirty-six round trips done the obvious way, on the page
+ * people open first; the rows come back once and are grouped in memory.
+ *
+ * A failure costs the panel, never the page.
+ */
+async function buildCostTrend(
+  venues: Array<{ id: string; name: string; slug: string }>,
+  today: string,
+): Promise<Record<string, { points: CostPoint[]; note: string }> | null> {
+  const months = trailingMonths(today, 6);
+  const spanStart = months[0];
+  // The last day of the final month, so the sales read covers all of it.
+  const lastMonth = new Date(`${months[months.length - 1]}T00:00:00Z`);
+  const spanEnd = new Date(Date.UTC(lastMonth.getUTCFullYear(), lastMonth.getUTCMonth() + 1, 0))
+    .toISOString().slice(0, 10);
+
+  try {
+    let any = false;
+    const out: Record<string, { points: CostPoint[]; note: string }> = {};
+
+    const perVenueInputs = new Map<string, MonthInput[]>();
+
+    await Promise.all(venues.map(async v => {
+      const [{ data: pl }, { data: ops }, accountMap] = await Promise.all([
+        supabaseAdmin.from('profit_and_loss')
+          .select('period_start, section, account_name, amount, is_summary')
+          .eq('venue_id', v.id)
+          .gte('period_start', spanStart)
+          .lte('period_start', spanEnd),
+        supabaseAdmin.from('daily_operations')
+          .select('business_date, gross_sales, sales_by_class')
+          .eq('venue_id', v.id)
+          .gte('business_date', spanStart)
+          .lte('business_date', spanEnd),
+        fetchAccountMap(v.id),
+      ]);
+
+      const inputs: MonthInput[] = months.map(start => {
+        const key = start.slice(0, 7);
+        const rows: PLRow[] = (pl ?? [])
+          .filter((r: any) => String(r.period_start).slice(0, 7) === key)
+          .map((r: any) => {
+            const { canonical_account, business_line } = resolveAccount(r.account_name, accountMap);
+            return { ...r, amount: Number(r.amount), canonical_account, business_line };
+          });
+
+        let food = 0, bev = 0;
+        for (const o of ops ?? []) {
+          if (String(o.business_date).slice(0, 7) !== key) continue;
+          const split = classSplitOf(o as any);
+          food += split.food_sales;
+          bev += split.beverage_sales;
+        }
+        return { start, rows, sales: { food_sales: food, beverage_sales: bev } };
+      });
+
+      perVenueInputs.set(v.slug, inputs);
+      const points = costTrend(inputs);
+      if (points.some(p => p.available)) any = true;
+      out[v.slug] = { points, note: trendNote(points) };
+    }));
+
+    if (venues.length > 1) {
+      /**
+       * The group line is NOT an average of the venue lines, and it is not one
+       * venue's line either. A 40% venue and a 25% venue are not a group at
+       * 32.5% unless they are the same size, and they never are.
+       *
+       * So the group's MONTHS are rebuilt from the summed cost rows and the
+       * summed sales and run through the same `costTrend` as every venue --
+       * which also means the group's gaps are computed the same way: a month is
+       * unavailable only when NO venue closed a P&L for it, not when one did
+       * not.
+       */
+      const groupInputs: MonthInput[] = months.map((start, i) => {
+        const rows: PLRow[] = [];
+        const sales = { food_sales: 0, beverage_sales: 0 };
+        for (const v of venues) {
+          const m = perVenueInputs.get(v.slug)?.[i];
+          if (!m) continue;
+          rows.push(...m.rows);
+          sales.food_sales += m.sales.food_sales;
+          sales.beverage_sales += m.sales.beverage_sales;
+        }
+        return { start, rows, sales };
+      });
+      const groupPoints = costTrend(groupInputs);
+      out.group = { points: groupPoints, note: trendNote(groupPoints) };
+    }
+
+
+    return any ? out : null;
+  } catch (e: any) {
+    console.warn(`[dashboard] cost trend failed: ${e?.message ?? e}`);
     return null;
   }
 }
