@@ -681,3 +681,49 @@ test('an under-covered cost figure is never printed as a percentage', () => {
   // And the coverage is beside every figure that IS shown.
   assert.match(home, /' covered<\/span>/);
 });
+
+/**
+ * A chart with no numbers on it is decoration.
+ *
+ * Khai, 4 Oct 2026, looking at the live dashboard: "pointless having a chart
+ * with no numbers on it." Right — the first version drew seven bars and
+ * labelled none of them, so a reader could see that Wednesday beat Thursday and
+ * could not tell you what either was worth. The decision an operator is making
+ * is about money, not about a shape.
+ */
+test('the daily chart puts its figures on the bars', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+
+  assert.match(fn, /k\(d\.net_sales\)/, 'the bars carry no value label');
+  assert.match(fn, /const k = n => n >= 1000/, 'there is no compact money format for a bar label');
+  // And the one figure worth stating in words.
+  assert.match(fn, /Best day /);
+});
+
+test('a long period switches layout instead of overlapping', () => {
+  /**
+   * Month to date is up to 31 bars. A value above each one is mush and seven
+   * weekday letters become thirty-one. Past ten bars it switches to gridlines
+   * carrying the scale and dates every seventh day — so a dense chart still has
+   * numbers on it, just not one per bar.
+   *
+   * The switch is on the DATA, not the period NAME, so a part-week and a
+   * part-month both land in the right layout.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+
+  assert.match(fn, /const dense = days\.length > 10;/, 'the layout no longer adapts to the number of days');
+  assert.match(fn, /\[0, 0\.5, 1\]\.forEach/, 'a dense chart has no gridlines, so it has no scale at all');
+  assert.match(fn, /i % 7 === 0/, 'a dense chart labels every day, which is unreadable at 390px');
+});
+
+test('a closed day is never drawn as a zero bar', () => {
+  // A zero draws as a collapse, and Firangi closes every Sunday. The chart
+  // layer already has this rule and the dashboard must not disagree with it.
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+  assert.match(fn, /if \(d\.net_sales === null\)/);
+  assert.match(fn, /'closed'/);
+});
