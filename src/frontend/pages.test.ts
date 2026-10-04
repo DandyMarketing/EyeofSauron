@@ -264,18 +264,20 @@ test('a page using the hidden attribute also neutralises display rules', () => {
 });
 
 /**
- * The definition line must be subordinate on EVERY page that renders an answer.
+ * ONE markdown renderer, and no page may keep a private copy.
  *
- * Khai, 4 Oct 2026: "the description of stuff in italics should be made into a
- * smaller font different color. Basically different formatting then the main
- * analysis so it doesn't get too wordy. Should apply across all functions."
+ * There were three, at 3934, 2704 and 1493 characters, and the drift had
+ * already cost real behaviour — plan.html rendered no italics at all, so the
+ * definition line would have shown its asterisks on that page alone;
+ * briefing.html left a broken-image icon where index.html substituted the alt
+ * text; plan.html escaped its input and the other two did not, so the same
+ * model output was trusted differently depending on where it landed.
  *
- * DISCOVERED, NOT LISTED, for the same reason as the auth rule above: a page
- * that renders markdown next year must carry this or Sauron's definitions
- * arrive there at full weight, competing with the analysis they annotate.
+ * Each of those was invisible from the page it broke, which is why this is a
+ * test and not a convention.
  */
 const markdownPages = pages.filter((p) =>
-  readFileSync(`public/${p}`, 'utf8').includes('function renderMarkdown('),
+  readFileSync(`public/${p}`, 'utf8').includes('renderMarkdown('),
 );
 
 test('every page that renders an answer was found', () => {
@@ -286,55 +288,75 @@ test('every page that renders an answer was found', () => {
 });
 
 for (const page of markdownPages) {
-  test(`${page}: a whole-italic paragraph renders as a subordinate note`, () => {
+  test(`${page}: uses the shared renderer rather than its own`, () => {
     const html = readFileSync(`public/${page}`, 'utf8');
 
     assert.ok(
-      html.includes('function wholeItalicBlock('),
-      `public/${page} cannot recognise a definition line, so it renders at full weight`,
+      !/function renderMarkdown\s*\(/.test(html),
+      `public/${page} has its own renderMarkdown again — that is how three copies drifted apart`,
     );
     assert.ok(
-      html.includes('class="figure-note"'),
-      `public/${page} never emits the figure-note class`,
+      !/function wholeItalicBlock\s*\(/.test(html),
+      `public/${page} has its own copy of wholeItalicBlock`,
     );
+    assert.ok(
+      html.includes('<script src="/markdown.js"></script>'),
+      `public/${page} calls renderMarkdown but never loads it — the page will throw`,
+    );
+
+    /**
+     * Loaded BEFORE the page's own script, and as a classic script.
+     *
+     * A `src` script is visible to the preload scanner so it starts during the
+     * parse, where a dynamic import() could not begin until the parse finished.
+     * Classic rather than a module because two of these pages have plain inline
+     * scripts, which cannot import.
+     */
+    assert.ok(
+      html.indexOf('<script src="/markdown.js">') < html.indexOf('renderMarkdown('),
+      `public/${page} loads the renderer after the code that calls it`,
+    );
+    assert.ok(
+      !/<script[^>]+src="\/markdown\.js"[^>]*type="module"/.test(html),
+      `public/${page} loads the renderer as a module, so window.renderMarkdown is never set`,
+    );
+  });
+
+  test(`${page}: styles the two classes the shared renderer emits`, () => {
+    // The renderer is shared; the styling is not, so a page that gains it must
+    // bring the rules or the output arrives unstyled.
+    const html = readFileSync(`public/${page}`, 'utf8');
     assert.match(
       html,
       /\.figure-note\s*\{[^}]*font-size:\s*0?\.8em[^}]*\}/s,
-      `public/${page} has no smaller font for .figure-note — the whole point of the rule`,
+      `public/${page} has no smaller font for .figure-note — definitions compete with the analysis`,
     );
     assert.match(
       html,
       /\.figure-note\s*\{[^}]*color:\s*var\(--text-muted\)[^}]*\}/s,
       `public/${page} does not mute the definition line`,
     );
-
-    /**
-     * Italics must exist at all. plan.html had NO single-asterisk rule, so a
-     * definition line arrived there as literal asterisks while the other two
-     * pages rendered it correctly — the drift this test is really guarding.
-     */
-    assert.ok(
-      /replace\(\/\\\*\(\.\+\?\)\\\*\/g, '<em>\$1<\/em>'\)/.test(html),
-      `public/${page} does not render single-asterisk italics, so a definition line shows its asterisks`,
-    );
-  });
-
-  test(`${page}: a table does not swallow the paragraph after it`, () => {
-    /**
-     * The table regex consumes the newline that ENDED the last row, so the
-     * following paragraph had only one newline in front of it, never split off
-     * as its own block, and was returned verbatim inside the table's block —
-     * losing its <p> entirely.
-     *
-     * It cost every paragraph directly after a table its spacing, silently, and
-     * it is why the definition line was never recognised as a paragraph at all.
-     * Found by rendering the page rather than by reading it.
-     */
-    const html = readFileSync(`public/${page}`, 'utf8');
     assert.match(
       html,
-      /return (table|t) \+ '[^']*<\/tbody><\/table>\\n\\n'|return table \+ '\\n\\n'/,
-      `public/${page}'s table rule does not end the block, so the next paragraph is glued to the table`,
+      /\.post-thumb\.expired\s*\{/,
+      `public/${page} has no rule for an expired thumbnail — a dead Instagram url leaves a broken icon`,
     );
   });
 }
+
+test('the shared renderer escapes before it does anything else', () => {
+  /**
+   * index.html and briefing.html passed model text straight into innerHTML.
+   * Nothing exploited it, but the text is not purely the model's: finance notes
+   * typed by staff on the Monday board and Instagram captions both travel
+   * through an answer, and the renderer cannot tell them apart.
+   */
+  const md = readFileSync('public/markdown.js', 'utf8');
+  assert.match(md, /let html = escapeHtml\(text\);/, 'the renderer no longer escapes its input');
+  assert.ok(
+    md.indexOf('let html = escapeHtml(text)') < md.indexOf("html.replace(/^#### "),
+    'escaping must happen before any markup is produced',
+  );
+  // https only, or a url becomes an attribute in a live document.
+  assert.match(md, /\/\^https:\\\/\\\/\/i\.test\(u\)/, 'safeUrl no longer allowlists https');
+});

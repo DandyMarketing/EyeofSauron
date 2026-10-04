@@ -107,7 +107,12 @@
   .rec-confidence { font-variant-numeric: tabular-nums; }
   .rec-body { font-size: 14px; line-height: 1.6; margin-top: 10px; color: var(--text); }
   .rec-body p { margin: 8px 0; }
-  .rec-body ul { margin: 8px 0 8px 18px; }
+  /* `ol` is here because ordered lists only started rendering as <ol> when
+     the renderer was shared: every old copy turned "1." into a bare <li>
+     with no parent, so there was never an element to style. Without the
+     indent the numbers hang outside the content box. */
+  .rec-body ul, .rec-body ol { margin: 8px 0 8px 18px; }
+  .rec-body li { margin: 4px 0; }
   .rec-body h2, .rec-body h3, .rec-body h4 { font-size: 14px; margin: 12px 0 4px; }
 
   /**
@@ -271,6 +276,22 @@
     margin-top: -2px;
     opacity: 0.95;
   }
+
+  /**
+   * Images emitted by the shared markdown renderer. The class is the same on
+   * every page so one renderer can serve them all; the sizing can still differ
+   * per page. `.expired` is the state its onerror sets when a signed Instagram
+   * url has aged out -- collapsed rather than left as a broken-image icon,
+   * because a broken icon reads as data we lost rather than a link that expired.
+   */
+  .post-thumb {
+    max-width: 100%;
+    border-radius: 8px;
+    vertical-align: middle;
+    margin: 4px 6px 4px 0;
+    background: rgba(255,255,255,0.04);
+  }
+  .post-thumb.expired { max-width: 0; max-height: 0; margin: 0; opacity: 0; }
 </style>
 </head>
 <body>
@@ -293,6 +314,13 @@
     <div class="loading">Loading...</div>
   </div>
 
+<!--
+  The ONE markdown renderer, shared by every page that shows an answer.
+  A classic script so the global reaches an inline script and a module alike,
+  and a src= so the preload scanner can start it during the parse. See the
+  long note at the top of markdown.js for what three copies of it had cost.
+-->
+<script src="/markdown.js"></script>
 <script>
 let token = null;
 let myVenues = [];
@@ -664,98 +692,7 @@ function escapeHtml(text) {
  * stripped, because a recommendation body is model-written prose.
  */
 
-/**
- * A paragraph that is ENTIRELY italic is a definition line, not emphasis.
- *
- * Sauron puts the "what each figure means" line under a table in italics, and
- * it must read as subordinate to the analysis rather than competing with it --
- * smaller and muted, via .figure-note. Detected here rather than with a special
- * syntax so the model needs no new markup and the same rule works on every page.
- *
- * The test is that the block opens with <em> and the FIRST </em> is also the
- * last thing in it. "*A* and *B*" is two emphasised words in a sentence and
- * must stay a normal paragraph.
- */
-function wholeItalicBlock(block) {
-  if (!block.startsWith('<em>') || !block.endsWith('</em>')) return null;
-  if (block.indexOf('</em>') !== block.length - 5) return null;
-  return block.slice(4, -5);
-}
-function renderMarkdown(text) {
-  let html = text;
 
-  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  const safeUrl = u => (/^https:\/\//i.test(u) ? u.replace(/["'<>]/g, '') : '');
-
-  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, url) => {
-    const safe = safeUrl(url);
-    if (!safe) return '';
-    const altText = String(alt).replace(/["'<>]/g, '');
-    return '<img src="' + safe + '" alt="' + altText + '" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%">';
-  });
-
-  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, linkText, url) => {
-    const safe = safeUrl(url);
-    if (!safe) return linkText;
-    return '<a href="' + safe + '" target="_blank" rel="noopener noreferrer">' + linkText + '</a>';
-  });
-
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Only the leading and trailing empties are dropped -- an empty cell in the
-  // MIDDLE is a real column, and discarding it shifts every later value one
-  // column left.
-  function splitTableRow(row) {
-    const parts = row.split('|');
-    if (parts.length && parts[0].trim() === '') parts.shift();
-    if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
-    return parts.map(c => c.trim());
-  }
-
-  html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (match, headerRow, sepRow, bodyRows) => {
-    const headers = splitTableRow(headerRow);
-    let table = '<table><thead><tr>';
-    headers.forEach(h => { table += '<th>' + h + '</th>'; });
-    table += '</tr></thead><tbody>';
-    bodyRows.trim().split('\n').forEach(row => {
-      if (!row.trim()) return;
-      const cells = splitTableRow(row);
-      while (cells.length < headers.length) cells.push('');
-      table += '<tr>';
-      for (let i = 0; i < headers.length; i++) table += '<td>' + cells[i] + '</td>';
-      table += '</tr>';
-    });
-    table += '</tbody></table>';
-    // The '\n\n' matters. This regex consumes the newline that ENDED the last
-    // row, so without it the next paragraph has only a single newline in front
-    // of it, never splits off as its own block, and is returned verbatim inside
-    // the table's block -- losing its <p> wrapper entirely. It silently cost
-    // every paragraph directly after a table its spacing, and it stopped the
-    // italic definition line from ever being recognised as its own paragraph.
-    return table + '\n\n';
-  });
-
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  html = html.split('\n\n').map(block => {
-    block = block.trim();
-    if (!block) return '';
-    if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<table') || block.startsWith('<img')) return block;
-    const note = wholeItalicBlock(block);
-    if (note !== null) return '<p class="figure-note">' + note.replace(/\n/g, '<br>') + '</p>';
-    return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
-  }).join('');
-
-  return html;
-}
 </script>
 </body>
 </html>

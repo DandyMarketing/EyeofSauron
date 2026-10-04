@@ -161,6 +161,22 @@
     margin-top: -2px;
     opacity: 0.95;
   }
+
+  /**
+   * Images emitted by the shared markdown renderer. The class is the same on
+   * every page so one renderer can serve them all; the sizing can still differ
+   * per page. `.expired` is the state its onerror sets when a signed Instagram
+   * url has aged out -- collapsed rather than left as a broken-image icon,
+   * because a broken icon reads as data we lost rather than a link that expired.
+   */
+  .post-thumb {
+    max-width: 100%;
+    border-radius: 8px;
+    vertical-align: middle;
+    margin: 4px 6px 4px 0;
+    background: rgba(255,255,255,0.04);
+  }
+  .post-thumb.expired { max-width: 0; max-height: 0; margin: 0; opacity: 0; }
 </style>
 </head>
 <body>
@@ -204,6 +220,13 @@
     </div>
   </footer>
 
+<!--
+  The ONE markdown renderer, shared by every page that shows an answer.
+  A classic script so the global reaches an inline script and a module alike,
+  and a src= so the preload scanner can start it during the parse. See the
+  long note at the top of markdown.js for what three copies of it had cost.
+-->
+<script src="/markdown.js"></script>
 <script type="module">
 let token = null;
 let history = [];
@@ -257,71 +280,6 @@ function escapeHtml(s) {
 
 /** The same subset briefing.html renders. Tables matter most here. */
 
-/**
- * A paragraph that is ENTIRELY italic is a definition line, not emphasis.
- *
- * Sauron puts the "what each figure means" line under a table in italics, and
- * it must read as subordinate to the analysis rather than competing with it --
- * smaller and muted, via .figure-note. Detected here rather than with a special
- * syntax so the model needs no new markup and the same rule works on every page.
- *
- * The test is that the block opens with <em> and the FIRST </em> is also the
- * last thing in it. "*A* and *B*" is two emphasised words in a sentence and
- * must stay a normal paragraph.
- */
-function wholeItalicBlock(block) {
-  if (!block.startsWith('<em>') || !block.endsWith('</em>')) return null;
-  if (block.indexOf('</em>') !== block.length - 5) return null;
-  return block.slice(4, -5);
-}
-function renderMarkdown(text) {
-  let html = escapeHtml(text);
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Italics were missing here entirely, so a definition line arrived as
-  // literal asterisks on this page alone. Must follow the bold rule, or **x**
-  // is eaten as two single-asterisk spans.
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  function splitRow(row) {
-    const parts = row.split('|');
-    if (parts.length && parts[0].trim() === '') parts.shift();
-    if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
-    return parts.map(c => c.trim());
-  }
-
-  html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (m, head, sep, body) => {
-    const headers = splitRow(head);
-    let t = '<table><thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
-    body.trim().split('\n').forEach(r => {
-      if (!r.trim()) return;
-      const cells = splitRow(r);
-      while (cells.length < headers.length) cells.push('');
-      t += '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
-    });
-    // The '\n\n' matters. This regex consumes the newline that ENDED the last
-    // row, so without it the next paragraph has only a single newline in front
-    // of it, never splits off as its own block, and is returned verbatim inside
-    // the table's block -- losing its <p> wrapper entirely. It silently cost
-    // every paragraph directly after a table its spacing, and it stopped the
-    // italic definition line from ever being recognised as its own paragraph.
-    return t + '</tbody></table>\n\n';
-  });
-
-  return html.split(/\n{2,}/).map(block => {
-    if (/^\s*<(h2|h3|table)/.test(block)) return block;
-    const lines = block.split('\n');
-    if (lines.every(l => /^\s*[-*]\s+/.test(l))) {
-      return '<ul>' + lines.map(l => '<li>' + l.replace(/^\s*[-*]\s+/, '') + '</li>').join('') + '</ul>';
-    }
-    const note = wholeItalicBlock(block);
-    if (note !== null) return '<p class="figure-note">' + note.replace(/\n/g, '<br>') + '</p>';
-    return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
-  }).join('');
-}
 
 function addMessage(who, cls, bodyHtml, queries) {
   document.getElementById('intro')?.remove();
