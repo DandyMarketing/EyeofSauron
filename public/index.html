@@ -14,6 +14,7 @@
 <link rel="modulepreload" href="/vendor/supabase.js">
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
+<link rel="modulepreload" href="/sse-parse.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -209,6 +210,42 @@
   .advice[open] .advice-head { -webkit-line-clamp: unset; }
   .advice-body { border-top: 1px solid var(--border); }
 
+
+  /* --- the answer, in place ---------------------------------------------- */
+  /* Above the bar and below the header, so the question, the answer and the
+     figures that prompted it are all on one screen. Capped at 70vh and
+     scrollable: a long answer must not push the input off the phone. */
+  .ask-sheet {
+    position: fixed; left: 0; right: 0; bottom: 62px; z-index: 19;
+    max-height: 70vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background: var(--surface); border-top: 1px solid var(--border);
+    box-shadow: 0 -12px 28px rgba(0,0,0,0.5);
+    padding: 14px 16px 18px;
+  }
+  .ask-close {
+    position: sticky; top: 0; float: right; margin: -6px -4px 0 8px;
+    background: none; border: none; color: var(--text-muted);
+    font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .ask-q { font-size: 15px; font-weight: 600; margin-bottom: 2px; overflow-wrap: anywhere; }
+  /* Shown, not hidden. The venue and period were appended to the question, and
+     adding to somebody's words without showing them is how a figure ends up
+     answering a question nobody asked. */
+  .ask-ctx { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+  .ask-progress { font-size: 13px; color: var(--accent); padding: 6px 0; }
+  .ask-answer { font-size: 14px; line-height: 1.6; }
+  .ask-answer p { margin-bottom: 8px; }
+  .ask-answer table {
+    border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%;
+    display: block; overflow-x: auto;
+  }
+  .ask-answer th, .ask-answer td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  .ask-answer th { background: var(--surface-hover); }
+  .ask-answer ul, .ask-answer ol { margin: 8px 0 8px 18px; }
+  .ask-answer li { margin: 4px 0; }
+  .ask-answer a { color: var(--accent); }
+  .ask-chart { margin: 8px 0; }
+  .ask-chart svg { width: 100%; height: auto; display: block; }
   /* --- the ask bar, pinned ------------------------------------------------ */
   /* The only unbounded thing on the page, and it was last after five panels.
      Fixed to the VIEWPORT rather than the document, so it rides above the
@@ -492,12 +529,12 @@ function draw(recData) {
     b.addEventListener('click', () => switchPeriod(b.dataset.period, recData)));
 
   const ask = document.getElementById('ask-input');
-  const go = () => {
-    const q = ask.value.trim();
-    if (q) window.location.href = '/chat.html?q=' + encodeURIComponent(q);
-  };
+  const go = () => askNow(v, w);
   document.getElementById('ask-go').addEventListener('click', go);
   ask.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  document.getElementById('ask-close').addEventListener('click', () => {
+    document.getElementById('ask-sheet').hidden = true;
+  });
 }
 
 /**
@@ -963,9 +1000,127 @@ function adviceLine(recData, v, today) {
  * Both land in the right place because the bar is fixed to the viewport rather
  * than to the document.
  */
+
+/**
+ * Ask, and answer HERE.
+ *
+ * Khai, 4 Oct 2026: "What is the point of the ask if you just move it to the
+ * chat." None — it prefilled a box on another page, which is a worse version of
+ * tapping Chat, and it cost the reader the numbers they were asking about. The
+ * answer now arrives on top of the figures that prompted it, which is also what
+ * the brief means by the dashboard and the advice living in one surface.
+ *
+ * THE VENUE AND PERIOD GO WITH THE QUESTION. "Why was Thursday quiet" is
+ * unanswerable without knowing which Thursday and whose. The context is
+ * appended to the question rather than sent as a parameter, because /ask takes
+ * a question and history and nothing else -- and it is SHOWN in the sheet, so
+ * nothing was added to somebody's words behind their back.
+ *
+ * STREAMED, with the same parser the chat uses. A single call can think for
+ * over a minute, and a spinner with no detail for that long reads as a hang.
+ * Falling back to the plain route matters more here than on the chat: this is
+ * the page people open first, and a feature that fails where a proxy buffers
+ * SSE would look like the product being broken rather than one route being.
+ */
+let askConversationId = null;
+
+async function askNow(v, w) {
+  const input = document.getElementById('ask-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  const sheet = document.getElementById('ask-sheet');
+  const body = document.getElementById('ask-sheet-body');
+  input.value = '';
+  input.blur();
+
+  const context = v.slug === 'group'
+    ? `(Context: all venues, ${w.label.toLowerCase()}, ${w.current.start} to ${w.current.end}.)`
+    : `(Context: ${v.venue}, ${w.label.toLowerCase()}, ${w.current.start} to ${w.current.end}.)`;
+
+  sheet.hidden = false;
+  body.innerHTML =
+    '<div class="ask-q">' + esc(question) + '</div>' +
+    '<div class="ask-ctx">' + esc(context) + '</div>' +
+    '<div class="ask-progress" id="ask-progress">Working…</div>';
+  sheet.scrollTop = 0;
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const payload = JSON.stringify({
+    question: question + '\n\n' + context,
+    conversation_id: askConversationId,
+  });
+
+  let result = null, failure = null;
+  try {
+    const res = await fetch('/ask/stream', { method: 'POST', headers, body: payload });
+    if (!res.ok || !res.body) throw new Error('stream unavailable: ' + res.status);
+
+    const { createEventParser, progressLines } = await import('/sse-parse.js');
+    const parser = createEventParser();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const step = document.getElementById('ask-progress');
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const event of parser.push(decoder.decode(value, { stream: true }))) {
+        if (event.kind === 'done') { result = event.result; continue; }
+        if (event.kind === 'error') { failure = event.error; continue; }
+        const lines = progressLines(event);
+        if (lines.length && step) step.textContent = lines[lines.length - 1];
+      }
+    }
+    if (!failure && !result) throw new Error('stream ended without a result');
+  } catch (e) {
+    // The plain route, for a proxy that buffers SSE. This is the first page
+    // people open; a stream-only feature would read as the product being down.
+    try {
+      const res = await fetch('/ask', { method: 'POST', headers, body: payload });
+      const data = await res.json();
+      if (!res.ok) failure = data.error || 'Something went wrong';
+      else result = data;
+    } catch (e2) {
+      failure = 'Could not reach Sauron. Check your connection and try again.';
+    }
+  }
+
+  if (failure) {
+    body.innerHTML =
+      '<div class="ask-q">' + esc(question) + '</div>' +
+      '<p class="figure-note" style="color:var(--error)">' + esc(failure) + '</p>';
+    return;
+  }
+
+  askConversationId = result.conversation_id || askConversationId;
+
+  /**
+   * Charts first, then the words. The SVG is generated by our own renderer from
+   * warehouse rows and not by the model, so it is safe to inline -- the same
+   * reasoning the chat applies to the same payload.
+   */
+  let charts = '';
+  for (const chart of result.charts || []) charts += '<div class="ask-chart">' + chart.svg + '</div>';
+
+  body.innerHTML =
+    '<div class="ask-q">' + esc(question) + '</div>' +
+    '<div class="ask-ctx">' + esc(context) + '</div>' +
+    charts +
+    '<div class="ask-answer">' + renderMarkdown(result.answer || '') + '</div>' +
+    '<p class="figure-note">' +
+      '<a href="/chat.html' + (askConversationId ? '?c=' + encodeURIComponent(askConversationId) : '') + '">' +
+      'Continue in chat</a> to follow up, or ask again below.</p>';
+}
+
 function askBar(v) {
   const name = v.slug === 'group' ? 'the group' : v.venue;
-  return '<div class="askbar"><div class="askbar-inner">' +
+  return '<div class="ask-sheet" id="ask-sheet" hidden>' +
+      '<button class="ask-close" id="ask-close" aria-label="Close">×</button>' +
+      '<div id="ask-sheet-body"></div>' +
+    '</div>' +
+    '<div class="askbar"><div class="askbar-inner">' +
     '<input id="ask-input" type="text" placeholder="Ask about ' + esc(name) + '…" ' +
     'autocomplete="off" autocapitalize="sentences">' +
     '<button id="ask-go" aria-label="Ask">Ask</button></div></div>';

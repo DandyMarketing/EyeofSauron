@@ -791,3 +791,62 @@ test('the stack sums to its own label, not to net sales', () => {
   // And the page has to say the tiles are a different quantity.
   assert.match(fn, /Net sales in the tiles above is a different figure/);
 });
+
+/**
+ * The ask bar answers HERE, and does not just move the question somewhere else.
+ *
+ * Khai, 4 Oct 2026: "What is the point of the ask if you just move it to the
+ * chat." None — it prefilled a box on another page, which is a worse version of
+ * tapping Chat, and it cost the reader the numbers they were asking about. The
+ * answer now arrives on top of the figures that prompted it, which is also what
+ * the brief means by the dashboard and the advice living in one surface.
+ */
+test('the dashboard answers in place rather than navigating away', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+
+  assert.ok(home.includes('async function askNow('), 'the dashboard does not ask anything itself');
+  assert.match(home, /fetch\('\/ask\/stream'/, 'the dashboard does not call the engine');
+  assert.ok(
+    !/location\.href = '\/chat\.html\?q=/.test(home),
+    'the ask bar still navigates to the chat — that is the thing it was fixed for',
+  );
+  assert.match(home, /id="ask-sheet"/, 'there is nowhere for the answer to appear');
+});
+
+test('the question the server was sent is shown, not hidden', () => {
+  /**
+   * The venue and the period are appended to the question, because "why was
+   * Thursday quiet" is unanswerable without knowing which Thursday and whose —
+   * /ask takes a question and history and nothing else. Adding to somebody's
+   * words without showing them is how a figure ends up answering a question
+   * nobody asked.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /const context = v\.slug === 'group'/, 'no venue or period context is attached');
+  assert.match(home, /class="ask-ctx"/, 'the appended context is never shown to the reader');
+  assert.match(home, /question \+ '\\n\\n' \+ context/, 'the context is not actually sent');
+});
+
+test('a stream that cannot be had falls back to the plain route', () => {
+  /**
+   * This is the first page people open. A stream-only feature failing where a
+   * proxy buffers SSE would read as the product being down rather than one
+   * route being — the same rule as the web-search tool costing the feature and
+   * never the chat.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('async function askNow('), home.indexOf('function askBar('));
+  assert.match(fn, /fetch\('\/ask', \{ method: 'POST'/, 'there is no non-streaming fallback');
+  assert.match(fn, /Could not reach Sauron/, 'a dead network reports nothing to the reader');
+});
+
+test('continuing in chat carries the thread, not a blank box', () => {
+  // Otherwise the follow-up starts a new conversation with no memory of what
+  // was just asked — the version of this that looks helpful and is not.
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /\/chat\.html' \+ \(askConversationId \? '\?c=' \+ encodeURIComponent\(askConversationId\)/);
+
+  const chat = readFileSync('public/chat.html', 'utf8');
+  assert.match(chat, /params\.get\('c'\)/, 'the chat ignores the thread it is handed');
+  assert.match(chat, /openConversation\(thread\)/, 'the chat does not open the handed-over thread');
+});

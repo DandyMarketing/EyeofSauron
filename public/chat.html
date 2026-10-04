@@ -1108,7 +1108,32 @@ let myVenues = [];
    * does not re-fill a box somebody has already cleared, and the question does
    * not sit in the address bar of a venue laptop.
    */
-  const handoff = new URLSearchParams(window.location.search).get('q');
+  const params = new URLSearchParams(window.location.search);
+
+  /**
+   * A conversation handed over from the dashboard, as ?c=
+   *
+   * The dashboard answers in place now, so the only reason to come here is to
+   * FOLLOW UP — which means arriving with the exchange already on screen rather
+   * than with an empty box and no memory of what was just asked. Without this
+   * the "Continue in chat" link would start a new thread and the follow-up
+   * would have no context, which is the version of this that looked helpful and
+   * was not.
+   */
+  const thread = params.get('c');
+  if (thread) {
+    history.replaceState(null, '', window.location.pathname);
+    openConversation(thread);
+  }
+
+  /**
+   * A question handed over as ?q= — prefilled, never sent.
+   *
+   * Kept for a link from anywhere else that wants to seed a question. The
+   * dashboard no longer uses it: prefilling a box on another page was the thing
+   * Khai rightly called pointless, since it is a worse version of tapping Chat.
+   */
+  const handoff = params.get('q');
   if (handoff) {
     const box = document.getElementById('question');
     box.value = handoff.slice(0, 2000);
