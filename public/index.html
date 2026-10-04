@@ -109,6 +109,8 @@
   .chart svg { width: 100%; height: auto; display: block; }
   .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); margin: -4px 0 6px; }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  /* The period share, next to the colour it belongs to. */
+  .legend b { color: var(--text); font-weight: 600; }
 
 
   /* --- detail table ----------------------------------------------------- */
@@ -672,14 +674,38 @@ function chartPanel(v) {
 
       // Beverage on top, food beneath it: food is the larger half at every
       // venue here, so the moving segment is the one the eye can follow.
-      svg += '<rect x="' + x + '" y="' + top + '" width="' + w + '" height="' + Math.max(0, h - foodH) +
+      const bevH = Math.max(0, h - foodH);
+      svg += '<rect x="' + x + '" y="' + top + '" width="' + w + '" height="' + bevH +
              '" fill="' + BEV_FILL + '" opacity="0.9"></rect>';
-      svg += '<rect x="' + x + '" y="' + (top + (h - foodH)) + '" width="' + w + '" height="' + foodH +
+      svg += '<rect x="' + x + '" y="' + (top + bevH) + '" width="' + w + '" height="' + foodH +
              '" fill="' + FOOD_FILL + '" opacity="0.9"></rect>';
 
       if (!dense) {
         svg += '<text x="' + mid + '" y="' + (top - 4) + '" text-anchor="middle" ' +
                'font-size="9" fill="#e4e4ef">' + k(d.gross_sales) + '</text>';
+
+        /**
+         * THE SHARE, INSIDE ITS OWN SEGMENT.
+         *
+         * The dollar total says how big the day was; the split says what it was
+         * made of, which is the thing that MOVES and the reason to look. Inside
+         * the block rather than beside it, so the colour does the labelling and
+         * there is no legend lookup in the middle of reading a bar.
+         *
+         * Only where it fits. A segment shorter than the text is a label
+         * hanging outside its own block, which reads as belonging to the one
+         * next door — and a 9% beverage night is self-evidently small without a
+         * number on it. The total above the bar is always there, so nothing is
+         * ever unlabelled.
+         */
+        const share = (part, segTop, segH, fill) => {
+          if (segH < 11) return '';
+          return '<text x="' + mid + '" y="' + (segTop + segH / 2 + 2.5) + '" text-anchor="middle" ' +
+                 'font-size="7.5" font-weight="600" fill="' + fill + '">' +
+                 Math.round(part / d.gross_sales * 100) + '%</text>';
+        };
+        svg += share(d.beverage_sales ?? 0, top, bevH, '#06302e');
+        svg += share(d.food_sales ?? 0, top + bevH, foodH, '#3a1f05');
       }
     }
 
@@ -723,10 +749,21 @@ function chartPanel(v) {
     }
   }
 
+  /**
+   * The legend carries the period's own mix, so it does two jobs rather than
+   * one. A key that only says which colour is which is a line of screen doing
+   * almost nothing; with the share on it, it is also the anchor the per-bar
+   * percentages move around.
+   */
+  const periodFood = days.reduce((n, d) => n + (d.food_sales ?? 0), 0);
+  const periodBev = days.reduce((n, d) => n + (d.beverage_sales ?? 0), 0);
+  const periodTotal = periodFood + periodBev;
+  const sharePct = n => periodTotal > 0 ? ' ' + Math.round(n / periodTotal * 100) + '%' : '';
+
   const legend =
     '<div class="legend">' +
-      '<span><i style="background:' + FOOD_FILL + '"></i>Food</span>' +
-      '<span><i style="background:' + BEV_FILL + '"></i>Beverage</span>' +
+      '<span><i style="background:' + FOOD_FILL + '"></i>Food<b>' + sharePct(periodFood) + '</b></span>' +
+      '<span><i style="background:' + BEV_FILL + '"></i>Beverage<b>' + sharePct(periodBev) + '</b></span>' +
     '</div>';
 
   return '<div class="chart"><h2>Sales by day, food and beverage</h2>' + legend +

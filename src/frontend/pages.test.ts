@@ -850,3 +850,43 @@ test('continuing in chat carries the thread, not a blank box', () => {
   assert.match(chat, /params\.get\('c'\)/, 'the chat ignores the thread it is handed');
   assert.match(chat, /openConversation\(thread\)/, 'the chat does not open the handed-over thread');
 });
+
+test('each segment carries its own share of the day', () => {
+  /**
+   * Khai: "you can also put the %mix of the sales into the charts." The dollar
+   * total says how big the day was; the split says what it was made of, which
+   * is the thing that MOVES and the reason to look at the chart rather than the
+   * table. Inside the block rather than beside it, so the colour does the
+   * labelling and there is no legend lookup mid-bar.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+
+  assert.match(fn, /const share = \(part, segTop, segH, fill\)/, 'segments carry no share label');
+  assert.match(fn, /share\(d\.beverage_sales \?\? 0, top, bevH/);
+  assert.match(fn, /share\(d\.food_sales \?\? 0, top \+ bevH, foodH/);
+});
+
+test('a segment too small for its label does not get one', () => {
+  /**
+   * A label taller than its own block hangs outside it and reads as belonging
+   * to the segment next door — which on a stacked bar means reporting the
+   * beverage share as the food share. A 3% sliver is self-evidently small
+   * without a number on it, and the total above the bar is always there, so
+   * nothing is ever left unlabelled.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+  assert.match(fn, /if \(segH < 11\) return '';/, 'a share label is drawn whatever the segment height');
+});
+
+test('the legend carries the period mix, not just the colours', () => {
+  // A key that only says which colour is which is a line of screen doing almost
+  // nothing. With the share on it, it is also the anchor the per-bar
+  // percentages move around.
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+  assert.match(fn, /const periodFood = days\.reduce/);
+  assert.match(fn, /sharePct\(periodBev\)/);
+  assert.match(home, /\.legend b \{/, 'the legend share has no style, so it reads as part of the label');
+});
