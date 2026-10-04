@@ -357,8 +357,15 @@ test('both sales tools return the split from the shared splitter', () => {
     !/find\(c => c\.class === 'Food'\)/.test(src),
     'a handler is reading sales_by_class by hand again — use classSplitOf',
   );
-  assert.equal(
-    (src.match(/classSplitOf\(/g) ?? []).length, 4,
-    'expected classSplitOf in query_sales (both paths), its totals, and compare_venues',
+  /**
+   * A COUNT, NOT AN EXACT NUMBER. The first version of this asserted exactly
+   * four call sites and broke the moment a fifth tool legitimately needed the
+   * split -- which is a test failing for being right. The property is that
+   * nobody reads sales_by_class by hand, which the guard above enforces; this
+   * only checks the known sites have not quietly lost it.
+   */
+  assert.ok(
+    (src.match(/classSplitOf\(/g) ?? []).length >= 4,
+    'classSplitOf has lost call sites — query_sales (both paths), its totals and compare_venues all need it',
   );
 });

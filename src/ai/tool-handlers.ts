@@ -8,6 +8,7 @@ import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 import { coverageByAccount } from '../lib/bill-coverage.js';
 import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
+import { costRatios, costCaveats } from '../lib/cost-ratios.js';
 import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf, FIGURE_DEFINITIONS } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
@@ -88,6 +89,8 @@ export async function handleToolCall(
       return queryTopPosts(input);
     case 'query_post_patterns':
       return queryPostPatterns(input);
+    case 'query_food_beverage_cost':
+      return queryFoodBeverageCost(input);
     case 'query_profit_and_loss':
       return queryProfitAndLoss(input);
     case 'query_supplier_bills':
@@ -412,6 +415,126 @@ async function queryPostPatterns(input: Record<string, any>): Promise<string> {
     ...result,
     how_to_read:
       'Groups are ranked by MEDIAN, because one post going unusually well drags a mean up and would put a group of three at the top on a single fluke. A large gap between median and mean means that group rests on one post — say so rather than recommending it. This is a correlation between a feature and a number, never a cause: posts are not assigned to categories at random, so a category that does well may simply be the one used for the strongest material.',
+  });
+}
+
+/**
+ * Food and beverage cost percentages: Xero's cost of sales over Revel's sales.
+ *
+ * TWO SYSTEMS OF RECORD, MEETING AT THE MONTH. Revel reports COGS as 0 on every
+ * line and always has, so cost can only come from the Xero P&L; the food /
+ * beverage SPLIT is a product-class fact only the POS holds. The P&L's finest
+ * grain is the month, so the sales side is summed over exactly the months the
+ * P&L actually returned -- never over the dates that were asked for.
+ *
+ * THAT ALIGNMENT IS THE WHOLE RISK. Ask for 1 Sep to 20 Oct and the P&L returns
+ * September only; summing Revel to 20 October would put seven weeks of sales
+ * under four weeks of cost and report a food cost of 21%. So the periods come
+ * back from the ledger and the sales query is built from them.
+ */
+async function queryFoodBeverageCost(input: Record<string, any>): Promise<string> {
+  const venueId = await getVenueId(input.venue_slug);
+  if (!input.start_date || !input.end_date) {
+    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
+  }
+
+  const { data: pl, error } = await supabase
+    .from('profit_and_loss')
+    .select('period_start, period_end, section, account_name, amount, is_summary')
+    .eq('venue_id', venueId)
+    .gte('period_start', input.start_date)
+    .lte('period_end', input.end_date);
+
+  if (error) return JSON.stringify({ error: error.message });
+  if (!pl || pl.length === 0) {
+    // Never inferred from revenue. "No P&L ingested" and "this venue had no
+    // costs" are wildly different answers and only one of them is ever true.
+    return JSON.stringify({
+      venue: input.venue_slug,
+      requested: `${input.start_date} to ${input.end_date}`,
+      message: 'No P&L has been ingested for this venue and period, so cost of sales is unknown. Say the data is missing rather than estimating a food cost.',
+    });
+  }
+
+  // The months the LEDGER covers, which is what the sales side must match.
+  const periods = [...new Set(pl.map(r => `${r.period_start}..${r.period_end}`))].sort();
+  const coveredStart = periods[0].split('..')[0];
+  const coveredEnd = periods[periods.length - 1].split('..')[1];
+
+  const accountMap = await fetchAccountMap(venueId);
+  let rows = pl.map(r => {
+    const { canonical_account, business_line } = resolveAccount(r.account_name, accountMap);
+    return { ...r, amount: Number(r.amount), canonical_account, business_line };
+  });
+
+  /**
+   * The sushi line rolls INTO the entity's COGS - Food, correctly. It is a B2B
+   * wholesale business with its own margin structure, so a blended food cost is
+   * right for "how is this venue doing" and wrong for a benchmark against
+   * another venue's kitchen. Filtering is offered and the basis is always
+   * reported.
+   */
+  const subLines = [...new Set(rows.filter(r => r.business_line !== 'main').map(r => r.business_line))];
+  if (input.business_line) rows = rows.filter(r => r.business_line === input.business_line);
+
+  // Revel sales over the months the P&L covers, paged -- the cap is a property
+  // of the database layer, not of this query's current size.
+  const ops: any[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data } = await supabase
+      .from('daily_operations')
+      .select('business_date, gross_sales, sales_by_class')
+      .eq('venue_id', venueId)
+      .gte('business_date', coveredStart)
+      .lte('business_date', coveredEnd)
+      .range(offset, offset + 999);
+    if (!data || data.length === 0) break;
+    ops.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  let food = 0, bev = 0;
+  for (const o of ops) {
+    const split = classSplitOf(o);
+    food += split.food_sales;
+    bev += split.beverage_sales;
+  }
+
+  const ratios = costRatios(rows as any, { food_sales: food, beverage_sales: bev });
+  const caveats = costCaveats(ratios, periods.length);
+
+  if (subLines.length > 0 && !input.business_line) {
+    caveats.push(
+      `This venue has cost lines outside the main business (${subLines.join(', ')}), which are INCLUDED here. ` +
+      'That is correct for the entity and wrong for a cross-venue benchmark — a wholesale line carries its own ' +
+      'margin structure. Re-run with business_line:"main" before comparing this against another venue, and say which basis you used.',
+    );
+  }
+
+  if (ops.length === 0) {
+    caveats.push('No Revel sales were found for these months, so the percentages have no denominator and only the cost figures are real.');
+  }
+
+  return JSON.stringify({
+    venue: input.venue_slug,
+    requested: `${input.start_date} to ${input.end_date}`,
+    /**
+     * What was actually MEASURED, which is often not what was asked for. A P&L
+     * month either exists or does not, so a request spanning a part-month
+     * silently measures less than it says -- naming it is the difference
+     * between a figure and a guess.
+     */
+    periods_measured: periods,
+    months: periods.length,
+    sales_basis: 'Revel food and beverage sales, before discounts and excluding service charge. Service charge is neither food nor drink; measuring a cost against a figure carrying it reads about 9% low.',
+    cost_basis: 'Xero profit and loss, cost of sales section, section totals excluded.',
+    food_cost: ratios.food,
+    beverage_cost: ratios.beverage,
+    combined_cost: ratios.combined,
+    unclassified_cost_of_sales: ratios.unclassified,
+    unclassified_total: ratios.unclassified_total,
+    business_line: input.business_line ?? 'all',
+    caveats,
   });
 }
 

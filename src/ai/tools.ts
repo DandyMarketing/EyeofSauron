@@ -115,6 +115,30 @@ export const queryTools: Tool[] = [
     },
   },
   {
+    name: 'query_food_beverage_cost',
+    description:
+      'FOOD AND BEVERAGE COST PERCENTAGES. Use this for any question about food cost, beverage cost, COGS, cost of sales as a percentage, or gross margin on product. It joins the two systems that hold the halves: COST from the Xero P&L (Revel reports COGS as 0 on every line and always has) and the food/beverage SALES SPLIT from Revel (the P&L cannot split its income lines that way). ' +
+      'THEY MEET AT THE MONTH, which is the P&L\'s finest grain, so the answer covers whole ledger months and NOT the dates you asked for. periods_measured names exactly which months were used — quote it, because asking for 1 Sep to 20 Oct measures September alone and reporting it as "Sep to Oct" is a wrong answer that looks right. ' +
+      'THE DENOMINATOR IS FOOD AND BEVERAGE SALES, before discounts and excluding service charge. Service charge is neither food nor drink, and a cost measured against a figure carrying it comes out about 9% low and reads as the kitchen improving. Never recompute these percentages against gross or net sales. ' +
+      'ALWAYS REPORT unclassified_cost_of_sales. Cost-of-sales lines that are neither food nor beverage by name — packaging, delivery commission, consumables — are EXCLUDED from both percentages, and so is any account nobody has mapped yet. The two look identical from the ratio and only one of them is fine. A food cost quoted while $4,000 of cost of sales sits unexplained is the most misleading answer this tool can give. ' +
+      'CROSS-VENUE COMPARISONS MUST USE business_line:"main". Neon Pigeon\'s sushi operation is B2B wholesale and rolls into COGS - Food, which is right for the entity and wrong for a benchmark: a blended food cost is not the same measurement as a restaurant-only one, and comparing them reads as a difference in kitchen performance when it is a difference in business model. ' +
+      'A COST OF SALES LINE IS PURCHASES, NOT CONSUMPTION, unless the venue posts a stock movement — a large delivery near a month end lands against sales it has not produced yet. One month is noisy; read the trend over a quarter before acting. The caveats array carries this and the others, and they are written to be said to the reader rather than summarised away. ' +
+      'If no P&L has been ingested for the period the response says so: say the data is missing rather than estimating a cost from revenue.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        venue_slug: { type: 'string', description: 'Venue slug, e.g. "neon-pigeon".' },
+        start_date: { type: 'string', description: 'Start of the range (YYYY-MM-DD). Whole P&L months inside it are used.' },
+        end_date: { type: 'string', description: 'End of the range (YYYY-MM-DD).' },
+        business_line: {
+          type: 'string',
+          description: 'Restrict to one business line. Use "main" for any cross-venue comparison, to exclude wholesale and other sub-businesses. Omit for the venue\'s full entity figure.',
+        },
+      },
+      required: ['venue_slug', 'start_date', 'end_date'],
+    },
+  },
+  {
     name: 'query_profit_and_loss',
     description:
       'Query Profit & Loss data from Xero for a venue over a period: revenue, cost of sales, operating expenses, and the account lines within each. Use this for any question about cost, margin, profit, food cost percentage, labour cost, overheads, or whether something was actually profitable. ' +
