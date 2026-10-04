@@ -12,6 +12,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
+import type { DaySnapshot } from './service-day.js';
 
 function venue(over: Partial<VenueWeek> = {}): VenueWeek {
   return {
@@ -27,10 +28,16 @@ function venue(over: Partial<VenueWeek> = {}): VenueWeek {
       avg_spend_per_head: { delta: 0.2, pct: 2, direction: 'up' },
     },
     daily: [{ date: '2026-09-28', net_sales: 1045, gross_sales: 1000, food_sales: 600, beverage_sales: 400, covers: 100 }],
-    upcoming: [{ date: '2026-10-03', covers: 20, closed: false }],
+    service: [{ date: '2026-10-03', basis: 'book', covers: 20, closed: false }],
+    synced_at: null, synced_label: null, synced_stale: false, service_note: '',
     ...over,
   };
 }
+
+const snapshot = (over: Partial<DaySnapshot> = {}): DaySnapshot => ({
+  as_of: '20:00', finished: 0, in_house: 0, to_come: 0, bookings_to_come: 0,
+  lost: 0, unaccounted: 0, seating_tracked: true, ...over,
+});
 
 describe('rates are recomputed from the parts, never averaged', () => {
   test('the discount rate is group discounts over group gross', () => {
@@ -90,23 +97,99 @@ describe('a venue with no data must not count as a zero', () => {
   });
 });
 
-describe('the forward book across venues', () => {
+describe('the service strip across venues', () => {
   test('covers are summed per date', () => {
-    const a = venue({ upcoming: [{ date: '2026-10-03', covers: 20, closed: false }, { date: '2026-10-04', covers: 30, closed: false }] });
-    const b = venue({ upcoming: [{ date: '2026-10-03', covers: 5, closed: false }, { date: '2026-10-04', covers: 0, closed: true }] });
+    const a = venue({ service: [
+      { date: '2026-10-03', basis: 'book', covers: 20, closed: false },
+      { date: '2026-10-04', basis: 'book', covers: 30, closed: false },
+    ] });
+    const b = venue({ service: [
+      { date: '2026-10-03', basis: 'book', covers: 5, closed: false },
+      { date: '2026-10-04', basis: 'book', covers: 0, closed: true },
+    ] });
 
     const g = rollUp([a, b]);
-    assert.deepEqual(g.upcoming.map(u => [u.date, u.covers]), [['2026-10-03', 25], ['2026-10-04', 30]]);
+    assert.deepEqual(g.service.map(u => [u.date, u.covers]), [['2026-10-03', 25], ['2026-10-04', 30]]);
   });
 
   test('a group day is closed only when every venue is shut', () => {
     // Firangi closes every Sunday. The GROUP is not closed on a Sunday, and
     // marking it so would hide the two venues that traded.
-    const open = venue({ upcoming: [{ date: '2026-10-04', covers: 40, closed: false }] });
-    const shut = venue({ upcoming: [{ date: '2026-10-04', covers: 0, closed: true }] });
+    const open = venue({ service: [{ date: '2026-10-04', basis: 'book', covers: 40, closed: false }] });
+    const shut = venue({ service: [{ date: '2026-10-04', basis: 'book', covers: 0, closed: true }] });
 
-    assert.equal(rollUp([open, shut]).upcoming[0].closed, false);
-    assert.equal(rollUp([shut, shut]).upcoming[0].closed, true);
+    assert.equal(rollUp([open, shut]).service[0].closed, false);
+    assert.equal(rollUp([shut, shut]).service[0].closed, true);
+  });
+
+  test('summing into the group does not mutate a venue in place', () => {
+    /**
+     * The group row used to be built by adding into the first venue's own
+     * objects, which silently doubled that venue's figures in the same payload
+     * -- right in the group line, wrong in the venue the reader clicks next.
+     */
+    const a = venue({ service: [{ date: '2026-10-04', basis: 'book', covers: 40, closed: false }] });
+    const b = venue({ service: [{ date: '2026-10-04', basis: 'book', covers: 10, closed: false }] });
+    rollUp([a, b]);
+    assert.equal(a.service[0].covers, 40);
+  });
+
+  test("today's snapshot is summed part by part", () => {
+    const a = venue({ service: [{ date: '2026-10-04', basis: 'snapshot', covers: 90, closed: false,
+      snapshot: snapshot({ finished: 20, in_house: 10, to_come: 60, bookings_to_come: 7, lost: 4, unaccounted: 2 }) }] });
+    const b = venue({ service: [{ date: '2026-10-04', basis: 'snapshot', covers: 30, closed: false,
+      snapshot: snapshot({ finished: 5, in_house: 5, to_come: 20, bookings_to_come: 3, lost: 1, unaccounted: 0 }) }] });
+
+    const s = rollUp([a, b]).service[0].snapshot!;
+    assert.equal(s.finished, 25);
+    assert.equal(s.in_house, 15);
+    assert.equal(s.to_come, 80);
+    assert.equal(s.bookings_to_come, 10);
+    assert.equal(s.lost, 5);
+    assert.equal(s.unaccounted, 2);
+  });
+
+  test('the group claims the floor only when EVERY venue marks tables', () => {
+    /**
+     * One venue seating tables in SevenRooms and another not makes the group's
+     * in-house figure part observation and part diary. The reader has to be
+     * told the weaker of the two: a group line claiming the floor when a third
+     * of it is guesswork is the more confident error.
+     */
+    const tracked = venue({ service: [{ date: '2026-10-04', basis: 'snapshot', covers: 50, closed: false,
+      snapshot: snapshot({ in_house: 50, seating_tracked: true }) }] });
+    const diary = venue({ service: [{ date: '2026-10-04', basis: 'snapshot', covers: 50, closed: false,
+      snapshot: snapshot({ in_house: 50, seating_tracked: false }) }] });
+
+    assert.equal(rollUp([tracked, diary]).service[0].snapshot!.seating_tracked, false);
+    assert.equal(rollUp([tracked, tracked]).service[0].snapshot!.seating_tracked, true);
+  });
+
+  test('the group note is recomposed, never borrowed from one venue', () => {
+    // A venue's own sentence describes a third of the room while reading as a
+    // total.
+    const a = venue({ service_note: 'As of 20:00: 20 eaten, 10 in the room, 60 still booked.',
+      service: [{ date: '2026-10-04', basis: 'snapshot', covers: 90, closed: false,
+        snapshot: snapshot({ finished: 20, in_house: 10, to_come: 60 }) }] });
+    const b = venue({ service_note: 'As of 20:00: 5 eaten, 5 in the room, 20 still booked.',
+      service: [{ date: '2026-10-04', basis: 'snapshot', covers: 30, closed: false,
+        snapshot: snapshot({ finished: 5, in_house: 5, to_come: 20 }) }] });
+
+    assert.match(rollUp([a, b]).service_note, /25 eaten, 15 in the room, 80 still booked/);
+  });
+
+  test('group freshness is the OLDEST venue, not the newest', () => {
+    /**
+     * Taking the newest would let one healthy venue vouch for two whose ingest
+     * has stopped — which is the exact shape of a dashboard that looks live and
+     * is not.
+     */
+    const fresh = venue({ synced_at: '2026-10-04T11:55:00Z' });
+    const stale = venue({ synced_at: '2026-10-04T04:00:00Z' });
+    const g = rollUp([fresh, stale], new Date('2026-10-04T12:00:00Z'));
+    assert.equal(g.synced_at, '2026-10-04T04:00:00Z');
+    assert.equal(g.synced_stale, true);
+    assert.match(g.synced_label!, /last synced 8h ago/);
   });
 });
 

@@ -144,6 +144,29 @@
      Same rule as plotting a closed day as a gap rather than a zero bar. */
   .book .day.shut { opacity: 0.55; }
   .book .day .shut-label { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+  /* THE BASIS, ON EVERY CELL. A settled day, a point-in-time snapshot and a
+     forward booking are three different measurements, and a strip of bare
+     numbers invites the comparison that treats them as one. Past days are
+     dimmed so the eye reads left-to-right as done → now → promised. */
+  .book .day .basis { font-size: 9px; letter-spacing: 0.04em; color: var(--text-muted); margin-top: 2px; }
+  .book .day.past { opacity: 0.72; }
+  .book .day.now { border-color: var(--accent); background: rgba(232,147,58,0.07); }
+  .book .day.now .n { color: var(--accent); }
+  /* Tonight, split three ways. Not a table: three figures that sum to the
+     headline above them, which is a shape a reader can check at a glance. */
+  .nowbar { display: flex; gap: 6px; padding: 10px 14px 0; }
+  .nowbar div {
+    flex: 1 1 0; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 6px; text-align: center; background: var(--bg); min-width: 0;
+  }
+  .nowbar b { display: block; font-size: 18px; font-weight: 600; }
+  .nowbar span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  /* An estimate must not look like a measurement — but only the two that ARE
+     estimates. Where seating is not recorded, "eaten" and "in the room" are
+     read off the diary; "still to come" is the book and is exactly as solid as
+     it ever was. Greying all three would retract a figure that is fine. */
+  .nowbar div.est b { color: var(--text-muted); }
+  .stale { color: #e8933a; }
   .figure-note a { color: var(--accent); }
   /* One heading over the monthly panels. The page carries three periods and a
      reader on a phone will not track three — introducing the two monthly ones
@@ -538,7 +561,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
-    table + bookPanel(v, w) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
+    table + servicePanel(v, w) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -790,24 +813,81 @@ function chartPanel(v) {
 }
 
 /**
- * The forward book. Expected covers, never presented as achieved.
+ * Service: what happened, what is happening, and what is booked.
  *
- * Reservations are ingested about 60 days forward, so this is real data and not
- * a projection -- but today is part-done and the rest are bookings that have not
- * happened. The heading says "expected" for exactly that reason.
+ * Khai, 4 Oct 2026: "if it's past current date you will look for the
+ * uncompleted reservations, on the day you will take the snapshot at that point
+ * and before is the completed."
+ *
+ * THREE DIFFERENT MEASUREMENTS IN ONE ROW, which is only safe because each cell
+ * says which it is. A settled day is an actual; a future day is a promise that
+ * can still cancel; today is neither, and at 11am it is almost entirely book
+ * while at 11pm it is almost entirely actual -- looking identical throughout.
+ * A strip of bare numbers invites exactly the comparison that treats them as
+ * one measurement.
+ *
+ * TONIGHT IS SPLIT because that is the operational question. "96 covers today"
+ * is planning; "20 eaten, 10 in the room, 66 still to come, at 20:00" is a
+ * decision about whether to call in another pair of hands.
+ *
+ * SALES ARE NOT LIVE AND THE PANEL SAYS SO. Revel delivers overnight carrying
+ * the previous day, so today has covers and no revenue. That gap is what the
+ * POS swap closes, and until it does, an unexplained blank beside a live cover
+ * count reads as a collapse.
  */
-function bookPanel(v, w) {
-  if (!v.upcoming || !v.upcoming.length) return '';
-  const days = v.upcoming.slice(0, 7).map(u => {
+function servicePanel(v, w) {
+  if (!v.service || !v.service.length) return '';
+
+  const cells = v.service.map(u => {
     const dow = new Date(u.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'short', timeZone: 'UTC' });
-    const isToday = u.date === w.today;
-    return '<div class="day' + (isToday ? ' today' : '') + (u.closed ? ' shut' : '') + '">' +
-           '<div class="dow">' + esc(isToday ? 'Today' : dow) + '</div>' +
-           '<div class="n">' + (u.closed ? '<span class="shut-label">Closed</span>' : u.covers) + '</div></div>';
+    const cls = u.basis === 'snapshot' ? ' now' : u.basis === 'completed' ? ' past' : '';
+    // The basis in one word per cell. "Actual" and "booked" are the words an
+    // operator already uses; "so far" is the only honest label for a day that
+    // is half promise -- and the split beneath it says how much.
+    const basis = u.basis === 'completed' ? 'actual' : u.basis === 'snapshot' ? 'live' : 'booked';
+    return '<div class="day' + cls + (u.closed ? ' shut' : '') + '">' +
+           '<div class="dow">' + esc(u.basis === 'snapshot' ? 'Today' : dow) + '</div>' +
+           '<div class="n">' + (u.closed ? '<span class="shut-label">Closed</span>' : num(u.covers)) + '</div>' +
+           (u.closed ? '' : '<div class="basis">' + basis + '</div>') + '</div>';
   }).join('');
-  return '<div class="panel"><h2>Expected covers, next 7 days</h2>' +
-         '<div style="padding:0 14px 12px"><div class="book">' + days + '</div></div>' +
-         '<p class="figure-note">Booked covers not yet cancelled, from SevenRooms. Today is part-done, so its figure includes guests already seated.</p></div>';
+
+  const today = v.service.filter(function (u) { return u.basis === 'snapshot'; })[0];
+  let split = '';
+  if (today && today.snapshot && !today.closed) {
+    const s = today.snapshot;
+    /**
+     * A DIARY SPLIT IS GREYED, because it is not an observation. SevenRooms
+     * only knows a guest arrived if somebody marked them seated; where nothing
+     * has been marked, "in the room" means "their slot has passed", and a
+     * confident white number would be a claim nobody made.
+     */
+    const est = s.seating_tracked ? '' : ' class="est"';
+    split = '<div class="nowbar' + (s.seating_tracked ? '' : ' diary') + '">' +
+      '<div' + est + '><b>' + num(s.finished) + '</b><span>eaten</span></div>' +
+      '<div' + est + '><b>' + num(s.in_house) + '</b><span>in the room</span></div>' +
+      '<div><b>' + num(s.to_come) + '</b><span>still to come</span></div>' +
+      '</div>';
+  }
+
+  /**
+   * HOW OLD THIS IS, in the heading, because a snapshot is the one figure on
+   * the page that is wrong within an hour of being right. An hourly ingest that
+   * stopped on Tuesday renders exactly like one that ran a minute ago.
+   *
+   * MEASURED ON THE SERVER, against the server's clock, like every other figure
+   * here. Working it out in the browser would make the number depend on the
+   * phone's clock being right -- and a device an hour out would report an
+   * ingest as stale, or worse, as fresh.
+   */
+  let age = '';
+  if (v.synced_label) {
+    age = ' <span class="cov' + (v.synced_stale ? ' stale' : '') + '">' + esc(v.synced_label) + '</span>';
+  }
+
+  return '<div class="panel"><h2>Service' + age + '</h2>' +
+         split +
+         '<div style="padding:10px 14px 12px"><div class="book">' + cells + '</div></div>' +
+         '<p class="figure-note">' + esc(v.service_note || '') + '</p></div>';
 }
 
 /**

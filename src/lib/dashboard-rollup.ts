@@ -13,6 +13,7 @@
  */
 
 import { movement } from './dashboard-window.js';
+import { serviceNote, syncAge, type ServiceDay } from './service-day.js';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -67,7 +68,10 @@ export interface VenueWeek {
   }>;
 
   /**
-   * Expected covers for the rest of today and the next six days.
+   * Covers either side of today, EACH ON ITS OWN BASIS -- a past day settled,
+   * today a point-in-time snapshot, a future day the book. See service-day.ts
+   * for why those are three different measurements and must not be compared
+   * without saying which is which.
    *
    * `closed` matters more than it looks. Firangi Superstar shuts every
    * Sunday, and a forward book showing that Sunday as 0 reads as a venue
@@ -75,7 +79,18 @@ export interface VenueWeek {
    * catastrophic trading day, and a zero in a row of numbers is the same
    * mistake in a different shape.
    */
-  upcoming: Array<{ date: string; covers: number; closed: boolean }>;
+  service: ServiceDay[];
+  /**
+   * When the reservations behind today's snapshot were last written. Null when
+   * today has no bookings at all, so it is never presented as freshness that
+   * was measured.
+   */
+  synced_at: string | null;
+  /** That staleness in words, measured on the server's clock. See syncAge(). */
+  synced_label: string | null;
+  synced_stale: boolean;
+  /** The sentence under the strip, composed server-side like every figure. */
+  service_note: string;
 }
 
 /**
@@ -86,7 +101,7 @@ export interface VenueWeek {
  * weights a quiet Tuesday venue the same as a busy one and is not a figure
  * anybody can act on.
  */
-export function rollUp(rows: VenueWeek[]): VenueWeek {
+export function rollUp(rows: VenueWeek[], now: Date = new Date()): VenueWeek {
   const add = (f: (r: VenueWeek) => number | null) =>
     rows.reduce((n, r) => n + (f(r) ?? 0), 0);
 
@@ -121,16 +136,56 @@ export function rollUp(rows: VenueWeek[]): VenueWeek {
       byDate.set(d.date, e);
     }
   }
-  // A group day is only "closed" when EVERY venue is shut that weekday, which
-  // today is never -- but summing covers across a day one venue is shut must
-  // not mark the group closed.
-  const upcomingByDate = new Map<string, { covers: number; closed: boolean }>();
-  for (const r of rows) for (const u of r.upcoming) {
-    const e = upcomingByDate.get(u.date) ?? { covers: 0, closed: true };
+  /**
+   * A group day is only "closed" when EVERY venue is shut that weekday, which
+   * today is never -- but summing covers across a day one venue is shut must
+   * not mark the group closed.
+   *
+   * THE BASIS IS CARRIED, NEVER RECOMPUTED. Every venue in one payload shares
+   * one `today`, so a given date is on the same basis for all of them; taking
+   * the first venue's label is correct and recomputing it here would be a
+   * second place for the rule to drift.
+   */
+  const serviceByDate = new Map<string, ServiceDay>();
+  for (const r of rows) for (const u of r.service) {
+    const e = serviceByDate.get(u.date);
+    if (!e) {
+      // Cloned, including the snapshot, so summing into it cannot mutate a
+      // venue's own figures -- the group is an additional row, not a rewrite.
+      serviceByDate.set(u.date, {
+        ...u,
+        snapshot: u.snapshot ? { ...u.snapshot } : undefined,
+      });
+      continue;
+    }
     e.covers += u.covers;
     e.closed = e.closed && u.closed;
-    upcomingByDate.set(u.date, e);
+    if (e.snapshot && u.snapshot) {
+      e.snapshot.finished += u.snapshot.finished;
+      e.snapshot.in_house += u.snapshot.in_house;
+      e.snapshot.to_come += u.snapshot.to_come;
+      e.snapshot.bookings_to_come += u.snapshot.bookings_to_come;
+      e.snapshot.lost += u.snapshot.lost;
+      e.snapshot.unaccounted += u.snapshot.unaccounted;
+      /**
+       * TRACKED ONLY IF EVERY VENUE TRACKS. One venue marking tables and
+       * another not makes the group's in-house figure part observation and
+       * part diary, and the weaker of the two is what the reader must be told
+       * -- a group line claiming the floor when a third of it is guesswork is
+       * the more confident error.
+       */
+      e.snapshot.seating_tracked = e.snapshot.seating_tracked && u.snapshot.seating_tracked;
+    }
   }
+  const service = [...serviceByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  /**
+   * The OLDEST sync across the venues, because the group line is only as fresh
+   * as its stalest part. Taking the newest would let one healthy venue vouch
+   * for two whose ingest has stopped.
+   */
+  const oldestSync = rows.map(r => r.synced_at).filter((s): s is string => !!s).sort()[0] ?? null;
+  const age = syncAge(oldestSync, now);
 
   return {
     venue_id: 'group',
@@ -166,8 +221,16 @@ export function rollUp(rows: VenueWeek[]): VenueWeek {
         beverage_sales: round2(e.bev),
         covers: e.covers,
       })),
-    upcoming: [...upcomingByDate.entries()].sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, e]) => ({ date, covers: e.covers, closed: e.closed })),
+    service,
+    synced_at: oldestSync,
+    synced_label: age.label,
+    synced_stale: age.stale,
+    /**
+     * RECOMPOSED FROM THE MERGED SNAPSHOT, not borrowed from a venue. One
+     * venue's sentence describes one venue's room, and on the group line it
+     * would be three times too small while reading as a total.
+     */
+    service_note: serviceNote(service.find(d => d.basis === 'snapshot'), null),
   };
 }
 

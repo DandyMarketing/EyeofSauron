@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import type { ReservationMoment } from './service-day.js';
 
 /**
  * Covers come from SevenRooms, not Revel.
@@ -165,6 +166,56 @@ export async function getCovers(
   }
 
   return out;
+}
+
+/**
+ * ONE day's reservations at reservation grain, for the live service snapshot.
+ *
+ * Separate from `getCovers` on purpose. That one aggregates a range into daily
+ * totals and is used in a dozen places; this needs the seating times of
+ * individual bookings and only ever for today, so widening the shared reader
+ * would make every caller pay for a column nobody else reads.
+ *
+ * NO PERSONAL DATA CROSSES THIS BOUNDARY. Party size, status, slot and seating
+ * times — the reservations table holds no name, and this selects less than it
+ * holds.
+ */
+export async function getDayMoments(
+  venueId: string,
+  date: string,
+): Promise<{ moments: ReservationMoment[]; synced_at: string | null }> {
+  const { data, error } = await supabase
+    .from('reservations')
+    .select('party_size, status_simple, arrival_time, seated_at, left_at, ingested_at')
+    .eq('venue_id', venueId)
+    .eq('business_date', date);
+
+  // One date at one venue cannot approach PostgREST's 1000-row cap, so this
+  // does not page. Said rather than assumed: the same assumption is what lost
+  // the tail of getCovers before it was fixed.
+  if (error || !data) return { moments: [], synced_at: null };
+
+  let synced: string | null = null;
+  for (const r of data as any[]) {
+    if (r.ingested_at && (synced === null || r.ingested_at > synced)) synced = r.ingested_at;
+  }
+
+  return {
+    moments: (data as any[]).map(r => ({
+      party_size: Number(r.party_size ?? 0),
+      status_simple: r.status_simple ?? null,
+      arrival_time: r.arrival_time ?? null,
+      seated_at: r.seated_at ?? null,
+      left_at: r.left_at ?? null,
+    })),
+    /**
+     * THE MOST RECENT WRITE, which is what "live" actually means here. A
+     * snapshot is only as current as the last ingest, and an hourly cron that
+     * stopped three days ago produces a page that looks exactly as live as one
+     * that ran a minute ago.
+     */
+    synced_at: synced,
+  };
 }
 
 export interface CoversVariance {

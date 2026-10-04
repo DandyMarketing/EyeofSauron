@@ -653,13 +653,66 @@ test('the forward book counts EXPECTED covers, not completed ones', () => {
    * shape of wrong, because an empty book is a plausible thing for a dashboard
    * to be telling you and somebody would have acted on it.
    *
-   * CoversSummary.expected_covers carries a comment saying exactly this, and the
-   * panel was written against `covers` anyway, so the comment is not the control.
+   * Both figures are now supplied per day and `serviceDays` picks between them
+   * by where the date sits, so the test is that BOTH reach it — a strip built
+   * from `covers` alone is the original bug and one built from `expected`
+   * alone shows a past day's cancellations as covers that were served.
    */
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
-  const upcoming = lib.slice(lib.indexOf('const upcoming = Array.from'), lib.indexOf('const upcoming = Array.from') + 1400);
-  assert.match(upcoming, /\.expected_covers \?\? 0/, 'the forward book is back on completed covers');
-  assert.ok(!/\?\.covers \?\? 0/.test(upcoming), 'the forward book reads completed covers again');
+  const strip = lib.slice(lib.indexOf('const service = serviceDays('), lib.indexOf('const service = serviceDays(') + 900);
+  assert.match(strip, /expected: c\?\.expected_covers \?\? 0/, 'the book is back on completed covers');
+  assert.match(strip, /completed: c\?\.covers \?\? 0/, 'a settled day would show its bookings, not its covers');
+});
+
+test('the service strip labels each day with the basis its number is on', () => {
+  /**
+   * Khai, 4 Oct 2026: "if it's past current date you will look for the
+   * uncompleted reservations, on the day you will take the snapshot at that
+   * point and before is the completed."
+   *
+   * Three measurements in one row is only safe because each cell says which it
+   * is. Today is the dangerous one: at 11am it is almost entirely book and at
+   * 11pm almost entirely actual, and it looks identical throughout.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function servicePanel('), home.indexOf('function periodCostPanel('));
+
+  assert.match(fn, /u\.basis === 'completed' \? 'actual'/, 'a settled day is not labelled');
+  assert.match(fn, /'booked'/, 'a future day is not labelled');
+  assert.match(fn, /class="basis"/, 'the basis is computed but never drawn');
+
+  // The three-way split, which is the operational question the panel exists for.
+  assert.match(fn, /eaten/);
+  assert.match(fn, /in the room/);
+  assert.match(fn, /still to come/);
+
+  /**
+   * A DIARY SPLIT MUST NOT LOOK LIKE A MEASUREMENT. Where no table has been
+   * marked seated, "in the room" means "their slot has passed" — a schedule,
+   * not an observation — and it is greyed for exactly that reason.
+   */
+  assert.match(fn, /s\.seating_tracked \? '' : ' diary'/, 'an estimate renders like a measurement');
+  assert.match(home, /\.nowbar div\.est b \{/, 'the diary style is referenced but not defined');
+  assert.match(fn, /s\.seating_tracked \? '' : ' class="est"'/, 'the book is greyed along with the estimates');
+});
+
+test('the snapshot says how old it is, measured on the server', () => {
+  /**
+   * A snapshot is the one figure on this page that is wrong within an hour of
+   * being right, and an hourly ingest that died on Tuesday renders exactly like
+   * one that ran a minute ago.
+   *
+   * ON THE SERVER'S CLOCK. Computing the age in the browser makes it depend on
+   * the phone being set correctly — and a device an hour out would report a
+   * dead ingest as fresh, which is the failure this is for.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function servicePanel('), home.indexOf('function periodCostPanel('));
+  assert.match(fn, /v\.synced_label/, 'the page never shows how fresh the snapshot is');
+  assert.ok(!/Date\.now\(\)/.test(fn), 'the sync age is computed from the browser clock');
+
+  const lib = readFileSync('src/lib/service-day.ts', 'utf8');
+  assert.match(lib, /export function syncAge/);
 });
 
 test('a failed retention read costs the panel, never the page', () => {

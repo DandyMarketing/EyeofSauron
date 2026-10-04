@@ -22,7 +22,8 @@
 
 import { supabaseAdmin } from '../auth/session.js';
 import { salesFiguresOf, classSplitOf, foodAndBevSalesOf } from './sales.js';
-import { getCovers } from './covers.js';
+import { getCovers, getDayMoments } from './covers.js';
+import { serviceDays, serviceNote, syncAge } from './service-day.js';
 import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
@@ -38,6 +39,18 @@ export { rollUp };
 import { getClosedWeekdays } from '../ingest/revel.js';
 import { weekdayOf } from '../ingest/closures.js';
 
+
+/**
+ * How far the service strip reaches either side of today.
+ *
+ * Two nights back rather than none, because the comparison an operator makes
+ * out loud is "last night did 88, tonight we are on 96" -- and a strip that
+ * starts at today can only ever show promises. Five forward keeps the whole
+ * run to eight cells, which still scrolls on a phone without the week
+ * disappearing off the end.
+ */
+const SERVICE_BACK = 2;
+const SERVICE_FORWARD = 5;
 
 interface SalesRowFromDb {
   venue_id: string;
@@ -188,15 +201,33 @@ export async function buildDashboard(
    * awaiting them in sequence would make the slowest page in the app out of the
    * one people open most.
    */
-  const [currentRows, priorRows, coversCurrent, coversPrior, coversUpcoming, closedWeekdays] = await Promise.all([
+  const [currentRows, priorRows, coversCurrent, coversPrior, coversService, todayMoments, closedWeekdays] = await Promise.all([
     readOperations(ids, window.current.start, window.current.end),
     readOperations(ids, window.prior.start, window.prior.end),
     Promise.all(venues.map(v => getCovers(v.id, window.current.start, window.current.end))),
     Promise.all(venues.map(v => getCovers(v.id, window.prior.start, window.prior.end))),
-    // Today forward, so "tonight's book" is there without a second request.
-    Promise.all(venues.map(v => getCovers(v.id, window.today, addDays(window.today, 6)))),
+    // A couple of nights back through next week, so last night's actual and
+    // tonight's book are on one strip without a second request.
+    Promise.all(venues.map(v => getCovers(
+      v.id, addDays(window.today, -SERVICE_BACK), addDays(window.today, SERVICE_FORWARD),
+    ))),
+    /**
+     * TODAY AT RESERVATION GRAIN, which the daily roll-up above cannot give.
+     *
+     * Seating times are what separate "has eaten" from "is sitting here" from
+     * "has not arrived", and they live on individual bookings. One extra read
+     * per venue, for one date -- and only this panel pays for it.
+     */
+    Promise.all(venues.map(v => getDayMoments(v.id, window.today))),
     Promise.all(venues.map(v => getClosedWeekdays(v.id))),
   ]);
+
+  /**
+   * ONE INSTANT FOR THE WHOLE PAYLOAD. Reading the clock separately per venue
+   * would let three venues in one response describe three different moments,
+   * and at 20:59 two of them would say 20:59 and one 21:00.
+   */
+  const now = new Date();
 
   const out: VenueWeek[] = venues.map((v, i) => {
     const mine = currentRows.filter(r => r.venue_id === v.id);
@@ -263,36 +294,43 @@ export async function buildDashboard(
     });
 
     /**
-     * The next seven days, EVERY one of them, not only the ones with a booking.
+     * EVERY day in the strip, not only the ones with a booking.
      *
      * Building this from the covers map alone would silently drop any day with
      * no reservations -- so a quiet Tuesday would vanish from the row rather
      * than show a zero, and the week would look shorter than it is. The dates
      * are generated and the bookings looked up, never the other way round.
+     *
+     * TWO DAYS BACK AS WELL AS FORWARD, which is the change Khai asked for:
+     * "if it's past current date you will look for the uncompleted
+     * reservations, on the day you will take the snapshot at that point and
+     * before is the completed." A strip that begins at today can only ever show
+     * promises; last night's actual beside tonight's book is the comparison an
+     * operator makes out loud.
+     *
+     * EXPECTED, NOT COMPLETED, for anything not yet over. A future booking
+     * comes back from SevenRooms as status_simple 'Incomplete' and never
+     * 'Complete', so a count keyed on completion reports ZERO for every
+     * upcoming date -- which is what the live panel did. `serviceDays` picks
+     * the right one of the two per day, and labels which it used.
      */
     const shut = new Set(closedWeekdays[i]);
-    const upcoming = Array.from({ length: 7 }, (_, d) => {
-      const date = addDays(window.today, d);
-      return {
-        date,
-        /**
-         * EXPECTED covers, not completed ones.
-         *
-         * A future booking comes back from SevenRooms as status_simple
-         * 'Incomplete' and never 'Complete', so any count keyed on completion
-         * reports ZERO for every upcoming date. The comment on
-         * CoversSummary.expected_covers says precisely that, and I used
-         * `covers` anyway -- the live forward book showed 0 for all seven days
-         * at Neon Pigeon, which reads as nobody having booked all week.
-         *
-         * Today is the one date where the two differ for a reason worth
-         * knowing: `covers` is who has finished dining, `expected_covers` is the
-         * whole book. The book is what this panel is for.
-         */
-        covers: coversUpcoming[i].get(date)?.expected_covers ?? 0,
-        closed: shut.has(weekdayOf(date)),
-      };
-    });
+    const service = serviceDays(
+      Array.from({ length: SERVICE_BACK + 1 + SERVICE_FORWARD }, (_, d) => {
+        const date = addDays(window.today, d - SERVICE_BACK);
+        const c = coversService[i].get(date);
+        return {
+          date,
+          closed: shut.has(weekdayOf(date)),
+          completed: c?.covers ?? 0,
+          expected: c?.expected_covers ?? 0,
+          moments: date === window.today ? todayMoments[i].moments : undefined,
+        };
+      }),
+      window.today,
+      now,
+    );
+    const age = syncAge(todayMoments[i].synced_at, now);
 
     return {
       venue_id: v.id,
@@ -320,7 +358,26 @@ export async function buildDashboard(
         avg_spend_per_head: movement(sph, priorSph),
       },
       daily,
-      upcoming,
+      service,
+      /**
+       * HOW OLD THE LIVE PANEL ACTUALLY IS. A snapshot is only as current as
+       * the last ingest, and an hourly cron that died on Tuesday produces a
+       * page indistinguishable from one that synced a minute ago.
+       */
+      synced_at: todayMoments[i].synced_at,
+      synced_label: age.label,
+      synced_stale: age.stale,
+      /**
+       * The sentence under the strip, composed here like every other figure on
+       * this page. A page that writes its own prose is a page nobody can test.
+       *
+       * THE AGE IS LEFT OUT because `synced_label` already carries it, in the
+       * panel heading where it is seen first and goes amber when it matters.
+       * Said in both places it reads as two different facts. A text-only
+       * surface — Telegram, a chat answer — has no heading to put it in and
+       * passes the minutes, which is why serviceNote still takes them.
+       */
+      service_note: serviceNote(service.find(d => d.basis === 'snapshot'), null),
     };
   });
 
@@ -344,7 +401,7 @@ export async function buildDashboard(
   const costTrendByVenue = null;
   return {
     window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue,
-    venues: out, group: out.length > 1 ? rollUp(out) : null,
+    venues: out, group: out.length > 1 ? rollUp(out, now) : null,
   };
 }
 
