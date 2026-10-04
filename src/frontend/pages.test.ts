@@ -635,13 +635,41 @@ test('the guest mix is a pie, and every slice carries its count', () => {
   assert.ok(!/label: 'Walk-ins'/.test(fn), 'walk-ins are a pie slice, so the parts no longer sum to the whole');
 });
 
-test('a left-censored month is withheld, not shown low', () => {
+test('a month with too little history behind it is withheld, not shown low', () => {
   // Guests who did come back are invisible before the records start, so the
   // rate is understated — and the shortfall shrinks every month as history
   // fills, drawing a rise that is the database filling up.
   const home = readFileSync('public/index.html', 'utf8');
   assert.match(home, /if \(r\.withheld\)/);
-  assert.match(home, /would be understated/);
+  assert.match(home, /appear to improve every month as the records fill/);
+});
+
+test('the guest panel says which WINDOW "been here before" means', () => {
+  /**
+   * Khai, 4 Oct 2026: "perhaps it should be all time — people who had been
+   * guest in our life time." Under the 365-day rule a guest who first came in
+   * 2023 and ate here last month was counted as NEW TO THE GROUP, which is not
+   * a cautious reading of the data but a false statement about somebody we have
+   * a record of.
+   *
+   * The chart tools keep the 365-day window, deliberately, because a widening
+   * lookback makes a TREND climb for no business reason. So the same words now
+   * mean two windows on two surfaces, and the panel has to name its own — or
+   * somebody reads 26% here and 18% on a chart and trusts neither again.
+   *
+   * AND IT NAMES THE DATE. "Ever" can only reach the first booking ingested, so
+   * the horizon is printed rather than letting "before" sound absolute.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function retentionPanel('), home.indexOf('\nfunction advice'));
+  assert.match(fn, /Ever, not just the last year/, 'the panel does not say which window it means');
+  assert.match(fn, /r\.horizon && r\.horizon\.from/, 'the horizon date is never shown');
+
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /p_lookback: LIFETIME_LOOKBACK_DAYS/, 'the dashboard still asks for a fixed year');
+  // Per venue, because the earliest row across the group claims history behind
+  // a venue that joined later.
+  assert.match(lib, /\.eq\('venue_id', v\.id\)\.order\('business_date'/, 'one horizon is used for every venue');
 });
 
 test('the forward book counts EXPECTED covers, not completed ones', () => {

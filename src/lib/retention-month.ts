@@ -17,11 +17,31 @@
  * retention rate all the way into the ground. So every rate here is returned
  * with the counts that produced it and the page prints both.
  *
- * LEFT-CENSORING IS COMPUTED, NOT ASSUMED. The measure asks whether a guest
- * came within the previous 365 days. For a month whose lookback reaches back
- * past the start of the booking history, guests who did come are invisible and
- * the rate is understated -- so the month is WITHHELD rather than shown low.
- * Plotting them draws a rise that is the database filling up.
+ * THE DASHBOARD MEASURES A LIFETIME, THE TREND TOOLS MEASURE A YEAR, and that
+ * is deliberate rather than an inconsistency nobody noticed.
+ *
+ * Khai, 4 Oct 2026: "perhaps it should be all time -- people who had been guest
+ * in our life time." He is right about this panel. It answers ONE question
+ * about ONE month -- how much of my room is new -- and under a 365-day rule a
+ * guest who first came in 2023 and ate here last month was being counted as NEW
+ * TO THE GROUP. That is not a conservative reading of the data, it is a false
+ * statement about a person we have a record of.
+ *
+ * The 365-day rule exists for a different job and keeps it. Over a SERIES of
+ * months a lifetime lookback widens as the records grow, so the returning share
+ * climbs for reasons that are entirely the database filling up -- the Instagram
+ * follower-count trap, and the reason `create_chart` withholds months whose
+ * lookback is not covered. A line must hold its window still. A single month
+ * need not, and pays a real cost for doing so.
+ *
+ * So the two surfaces measure different things on purpose, and each says which
+ * -- because the failure mode here is somebody reading 25% on the dashboard and
+ * 18% on a chart and trusting neither again.
+ *
+ * "LIFETIME" MEANS SINCE OUR RECORDS BEGIN, and the panel prints that date. A
+ * guest whose only previous visit predates the ingest is still counted as new,
+ * and no amount of widening the window fixes it -- it is the one thing a longer
+ * lookback cannot buy.
  */
 
 export interface RetentionCounts {
@@ -110,6 +130,57 @@ export function leftCensored(
 }
 
 /**
+ * A lookback long enough that it is bounded by the records rather than by
+ * itself. A hundred years; the RPC takes days and does the subtraction in
+ * Postgres, which is happy with 1926.
+ *
+ * NOT `Infinity`, NOT a null meaning "no limit". The RPC's window is what makes
+ * its index usable -- migration 044 exists because an unbounded history scan
+ * timed out in production -- so the bound stays real and simply sits before
+ * anything we hold.
+ */
+export const LIFETIME_LOOKBACK_DAYS = 36_500;
+
+export interface HistoryHorizon {
+  /** The first booking date we hold, or null when there is none. */
+  from: string | null;
+  /** How many days of history sit before this month. */
+  days: number;
+  /**
+   * TRUE WHEN "LIFETIME" IS A YEAR OR LESS, in which case the phrase promises
+   * more than the data can deliver and the figure is understated by the same
+   * shrinking shortfall a fixed window would have had. Withheld rather than
+   * shown low, which is what the 365-day rule did here before.
+   */
+  too_thin: boolean;
+}
+
+/**
+ * How deep "ever" actually goes for a given month.
+ *
+ * Stated rather than implied, because a lifetime rate reads as complete and is
+ * not: it can only see back to the first booking we ingested. For these venues
+ * that is April 2022, so the phrase is nearly true -- but it is the venue's
+ * records that bound it, never the guest's life, and the panel says which.
+ */
+export function historyHorizon(monthStart: string, dataStartsAt: string | null): HistoryHorizon {
+  if (!dataStartsAt) return { from: null, days: 0, too_thin: true };
+  const days = Math.max(
+    0,
+    Math.round((Date.parse(`${monthStart}T00:00:00Z`) - Date.parse(`${dataStartsAt}T00:00:00Z`)) / 86_400_000),
+  );
+  return { from: dataStartsAt, days, too_thin: days < 365 };
+}
+
+/** 'April 2022', for a sentence. Null in, null out — never "the beginning". */
+export function horizonLabel(from: string | null): string | null {
+  if (!from) return null;
+  const d = new Date(`${from}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-SG', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+/**
  * The sentence to put in front of a manager, built rather than left to be
  * composed.
  *
@@ -119,10 +190,25 @@ export function leftCensored(
  * `in_plain_words` for the model for exactly this reason; this is the same
  * thing for a page.
  */
-export function inPlainWords(c: RetentionCounts, s: RetentionShares, label: string): string {
+export function inPlainWords(
+  c: RetentionCounts,
+  s: RetentionShares,
+  label: string,
+  horizonFrom?: string | null,
+): string {
   if (!c.booked_guests) return `No booked guests in ${label}, so there is no rate to quote.`;
+
+  /**
+   * THE WINDOW IS IN THE SENTENCE, because the same word means two things on
+   * two surfaces now. "Had eaten here before" with no qualifier is how somebody
+   * ends up comparing this figure with a 12-month one from a chart.
+   */
+  const since = horizonLabel(horizonFrom ?? null);
+  const window = since ? `at any point since our records begin in ${since}` : 'at any point in our records';
+
   return `Of the ${c.booked_guests.toLocaleString('en-SG')} guests who booked in ${label}, ` +
-         `${c.returning_here.toLocaleString('en-SG')} had eaten here before in the previous year ` +
+         `${c.returning_here.toLocaleString('en-SG')} had eaten here before ${window} ` +
          `(${s.repeat_pct}%), and ${c.crossed_from_sister.toLocaleString('en-SG')} had been to a sister venue but not this one. ` +
-         `${c.new_to_group.toLocaleString('en-SG')} were new to the group.`;
+         `${c.new_to_group.toLocaleString('en-SG')} were new to the group — meaning we have no record of them at any venue, ` +
+         `which is not quite the same as never having been.`;
 }

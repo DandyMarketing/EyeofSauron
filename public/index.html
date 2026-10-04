@@ -997,7 +997,7 @@ function retentionPanel(payload, v) {
      * which draws a rising line that is the database filling up.
      */
     return '<div class="panel"><h2>Guests</h2>' +
-      '<div class="empty">Withheld for this month: its 365-day lookback reaches back past the start of the booking records, so the rate would be understated and would appear to improve every month as history fills.</div></div>';
+      '<div class="empty">Withheld for this month: there is under a year of booking history behind it, so "has been here before" would miss guests who had, and the figure would appear to improve every month as the records fill.</div></div>';
   }
 
   /**
@@ -1053,8 +1053,21 @@ function retentionPanel(payload, v) {
       '<span class="slice-pct">' + (total > 0 ? pct(sl.n / total * 100) : '—') + '</span>' +
     '</div>').join('');
 
+  /**
+   * THE WINDOW IS ON THE PANEL, in the subheading, because "been here before"
+   * is now a LIFETIME on this page and twelve months in a retention chart.
+   * Khai asked for the lifetime measure and it is the right one for a single
+   * month's mix -- but two surfaces using the same words for different windows
+   * is how somebody sees 26% here, 18% there, and stops believing either.
+   */
+  const since = r.horizon && r.horizon.from
+    ? 'Ever, not just the last year \u2014 any guest we have a record of since ' +
+      esc(new Date(r.horizon.from + 'T00:00:00Z').toLocaleDateString('en-SG', { month: 'long', year: 'numeric', timeZone: 'UTC' })) + '.'
+    : 'Ever, not just the last year \u2014 any guest we have a record of.';
+
   return '<div class="panel"><h2>Guests</h2>' +
-    '<p class="figure-note" style="padding-bottom:4px">Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.</p>' +
+    '<p class="figure-note" style="padding-bottom:4px">' + since +
+    ' Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.</p>' +
     '<div class="pie-row">' +
       '<svg viewBox="0 0 104 104" class="pie" role="img" aria-label="Guest mix">' + wedges + '</svg>' +
       '<div class="pie-key">' +

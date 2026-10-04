@@ -27,8 +27,9 @@ import { serviceDays, serviceNote, syncAge } from './service-day.js';
 import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
-  lastCompleteMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
-  type RetentionCounts, type RetentionShares,
+  lastCompleteMonth, retentionShares, sumCounts, inPlainWords,
+  historyHorizon, LIFETIME_LOOKBACK_DAYS,
+  type RetentionCounts, type RetentionShares, type HistoryHorizon,
 } from './retention-month.js';
 import { costRatios, costCaveats, classifyCogs, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
@@ -108,10 +109,17 @@ export interface RetentionBlock {
   /** The sentence to put in front of a manager, with the counts in it. */
   plain: string;
   /**
-   * Set when the month's 365-day lookback reaches past the start of the
-   * records. The rate is understated and must not be shown as a measurement.
+   * Set when "lifetime" is a year of history or less, in which case the rate
+   * is understated by a shortfall that shrinks every month and must not be
+   * shown as a measurement.
    */
   withheld: boolean;
+  /**
+   * How far back "ever" actually reaches. A lifetime rate reads as complete and
+   * is not: it can see only as far as the first booking we ingested, so the
+   * panel prints that date rather than letting "before" sound absolute.
+   */
+  horizon: HistoryHorizon;
 }
 
 export interface CostBlock {
@@ -423,10 +431,27 @@ async function buildRetention(
   const month = lastCompleteMonth(today);
 
   try {
-    const [{ data, error }, { data: earliest }] = await Promise.all([
-      supabaseAdmin.rpc('guest_retention', { p_start: month.start, p_end: month.end, p_lookback: 365 }),
-      supabaseAdmin.from('reservations').select('business_date')
-        .order('business_date', { ascending: true }).limit(1),
+    /**
+     * A LIFETIME LOOKBACK, not 365 days. Khai, 4 Oct 2026: "perhaps it should
+     * be all time -- people who had been guest in our life time."
+     *
+     * Under the year rule a guest who first came in 2023 and ate here last
+     * month counted as NEW TO THE GROUP, which is not a cautious reading of the
+     * data but a false statement about somebody we have a record of. The year
+     * rule's reason -- that a widening window makes a TREND climb for no
+     * business reason -- applies to a line over months and not to one month's
+     * mix, which is all this panel shows. The chart tools keep 365 and say so.
+     *
+     * PER-VENUE HORIZONS. Each venue's records start when its own ingest did,
+     * and the earliest row across the group would overstate the depth for a
+     * venue that came later -- claiming history behind a figure that has none.
+     */
+    const [{ data, error }, ...firsts] = await Promise.all([
+      supabaseAdmin.rpc('guest_retention', {
+        p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
+      }),
+      ...venues.map(v => supabaseAdmin.from('reservations').select('business_date')
+        .eq('venue_id', v.id).order('business_date', { ascending: true }).limit(1)),
     ]);
 
     if (error) {
@@ -439,13 +464,11 @@ async function buildRetention(
     const rows = (data ?? []) as Array<RetentionCounts & { venue_id: string }>;
     if (rows.length === 0) return null;
 
-    const dataStartsAt = earliest?.[0]?.business_date ?? null;
-    const withheld = leftCensored(month.start, dataStartsAt);
-
     const out: Record<string, RetentionBlock> = {};
     const mine: RetentionCounts[] = [];
+    const horizons: HistoryHorizon[] = [];
 
-    for (const v of venues) {
+    for (const [i, v] of venues.entries()) {
       const r = rows.find(x => x.venue_id === v.id);
       const counts: RetentionCounts = r
         ? {
@@ -456,7 +479,22 @@ async function buildRetention(
         : { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
       mine.push(counts);
       const shares = retentionShares(counts);
-      out[v.slug] = { month, counts, shares, plain: inPlainWords(counts, shares, month.label), withheld };
+
+      const horizon = historyHorizon(month.start, (firsts[i] as any)?.data?.[0]?.business_date ?? null);
+      horizons.push(horizon);
+
+      out[v.slug] = {
+        month, counts, shares,
+        plain: inPlainWords(counts, shares, month.label, horizon.from),
+        /**
+         * WITHHELD ONLY WHEN "LIFETIME" IS A YEAR OR LESS. Below that the
+         * phrase promises more than the records hold and the figure carries the
+         * same shrinking shortfall the 365-day rule was withheld for; above it,
+         * the horizon is stated and the figure stands.
+         */
+        withheld: horizon.too_thin,
+        horizon,
+      };
     }
 
     if (venues.length > 1) {
@@ -473,7 +511,22 @@ async function buildRetention(
        */
       const counts = sumCounts(mine);
       const shares = retentionShares(counts);
-      out.group = { month, counts, shares, plain: inPlainWords(counts, shares, month.label), withheld };
+      /**
+       * THE SHALLOWEST VENUE BOUNDS THE GROUP, on the same argument as the
+       * oldest sync in the service roll-up: a group line is only as sound as
+       * its weakest part, and the deepest venue vouching for the rest is how a
+       * figure looks better than any of the things it is made of.
+       */
+      const groupHorizon = horizons.reduce<HistoryHorizon>(
+        (worst, h) => (h.days < worst.days ? h : worst),
+        horizons[0] ?? { from: null, days: 0, too_thin: true },
+      );
+      out.group = {
+        month, counts, shares,
+        plain: inPlainWords(counts, shares, month.label, groupHorizon.from),
+        withheld: groupHorizon.too_thin,
+        horizon: groupHorizon,
+      };
     }
 
     return out;

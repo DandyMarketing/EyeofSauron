@@ -12,6 +12,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   lastCompleteMonth, previousMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
+  historyHorizon, horizonLabel, LIFETIME_LOOKBACK_DAYS,
 } from './retention-month.js';
 
 describe('the month is the last one that FINISHED', () => {
@@ -126,4 +127,85 @@ test('the plain-English line carries the counts, not just the rate', () => {
 test('a month with nothing in it says so rather than producing a sentence of zeroes', () => {
   const empty = { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
   assert.match(inPlainWords(empty, retentionShares(empty), 'September 2026'), /No booked guests/);
+});
+
+describe('how deep "ever" actually goes', () => {
+  /**
+   * Khai, 4 Oct 2026: "perhaps it should be all time — people who had been
+   * guest in our life time."
+   *
+   * The dashboard now measures a lifetime, and a lifetime rate reads as
+   * complete when it is not: it can see back only as far as the first booking
+   * we ingested. A guest whose one previous visit predates the ingest is still
+   * counted as new, and widening the window is the one thing that cannot fix
+   * it. So the horizon is computed and printed.
+   */
+  test('the depth is measured from the first booking we hold', () => {
+    const h = historyHorizon('2026-09-01', '2022-04-01');
+    assert.equal(h.from, '2022-04-01');
+    assert.equal(h.days, 1614);
+    assert.equal(h.too_thin, false);
+  });
+
+  test('under a year of history is too thin to call a lifetime', () => {
+    /**
+     * The phrase promises more than the records hold, and the figure carries
+     * the same shrinking shortfall the 365-day rule was withheld for — it would
+     * climb every month as history filled and read as guests coming back more.
+     */
+    assert.equal(historyHorizon('2022-09-01', '2022-04-01').too_thin, true);
+    assert.equal(historyHorizon('2023-04-01', '2022-04-01').too_thin, false);
+  });
+
+  test('no history at all is thin, never deep', () => {
+    // An absence of evidence is not a clean bill — the same direction
+    // leftCensored takes.
+    const h = historyHorizon('2026-09-01', null);
+    assert.equal(h.too_thin, true);
+    assert.equal(h.days, 0);
+    assert.equal(h.from, null);
+  });
+
+  test('a venue whose records start AFTER the month has no history, not negative history', () => {
+    assert.equal(historyHorizon('2022-01-01', '2022-04-01').days, 0);
+  });
+
+  test('the horizon is named as a month, and null stays null', () => {
+    assert.equal(horizonLabel('2022-04-01'), 'April 2022');
+    assert.equal(horizonLabel(null), null);
+    // Never "the beginning" or today's date standing in for a date we lack.
+    assert.equal(horizonLabel('not-a-date'), null);
+  });
+
+  test('the lookback is bounded, not infinite', () => {
+    /**
+     * Migration 044 exists because an unbounded history scan timed out in
+     * production. The window stays real and simply sits before anything we
+     * hold, so the index is still usable.
+     */
+    assert.ok(Number.isFinite(LIFETIME_LOOKBACK_DAYS));
+    assert.ok(LIFETIME_LOOKBACK_DAYS > 365 * 20);
+  });
+});
+
+describe('the sentence names its own window', () => {
+  const counts = { booked_guests: 200, returning_here: 50, crossed_from_sister: 30, new_to_group: 120, walk_in_guests: 0 };
+
+  test('it says since when, because a chart says twelve months and this does not', () => {
+    const line = inPlainWords(counts, retentionShares(counts), 'September 2026', '2022-04-01');
+    assert.match(line, /at any point since our records begin in April 2022/);
+  });
+
+  test('with no horizon it does not invent one', () => {
+    const line = inPlainWords(counts, retentionShares(counts), 'September 2026', null);
+    assert.match(line, /at any point in our records/);
+    assert.ok(!/since our records begin in/.test(line));
+  });
+
+  test('"new" is qualified, because it means unrecorded and not unvisited', () => {
+    // The one thing a longer lookback cannot buy: a guest whose only previous
+    // visit predates the ingest is indistinguishable from a first-timer.
+    const line = inPlainWords(counts, retentionShares(counts), 'September 2026', '2022-04-01');
+    assert.match(line, /not quite the same as never having been/);
+  });
 });
