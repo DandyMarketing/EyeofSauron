@@ -113,3 +113,195 @@ export function movement(current: number | null, prior: number | null): {
     direction: pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat',
   };
 }
+
+/**
+ * The periods the dashboard can show, and why there are four.
+ *
+ * WEEK TO DATE IS THE DEFAULT AND IT IS USELESS ON A TUESDAY. Khai, 4 Oct 2026:
+ * "we usually go through our previous week on Tuesday, this rolling would not
+ * give an image of last week on Tuesday." Two days of trade is not a week, and
+ * a page that can only ever show the week in progress cannot support the one
+ * meeting that actually happens.
+ *
+ * So the period is SELECTABLE, and early in the week the selection defaults to
+ * the completed week -- see `defaultPeriod()`. A changing default is normally a
+ * way to confuse somebody, and the thing that makes it safe here is that the
+ * selector is on screen and the window label spells the dates out. The reader
+ * is never guessing which period they are looking at.
+ *
+ * EVERY PERIOD COMPARES LIKE FOR LIKE. That is the whole reason this is one
+ * function rather than four: a week to date against a whole previous week shows
+ * a fall every day except Sunday, and a month to date against a whole previous
+ * month does the same thing on a bigger scale and for longer.
+ */
+export type PeriodKind = 'wtd' | 'last_week' | 'mtd' | 'last_month';
+
+export const PERIOD_LABELS: Record<PeriodKind, string> = {
+  wtd: 'Week to date',
+  last_week: 'Last week',
+  mtd: 'Month to date',
+  last_month: 'Last month',
+};
+
+export function isPeriodKind(v: unknown): v is PeriodKind {
+  return v === 'wtd' || v === 'last_week' || v === 'mtd' || v === 'last_month';
+}
+
+/**
+ * Which period to open on, given the day of the week.
+ *
+ * Monday and Tuesday open on the COMPLETED week, because that is when the
+ * business reviews it and because week-to-date on a Tuesday is two days. From
+ * Wednesday the week in progress has enough in it to be worth watching, so it
+ * takes over. The rest of the week is the rhythm the operator already has.
+ */
+export function defaultPeriod(today: string = sgtToday()): PeriodKind {
+  const dow = daysSinceMonday(today);     // Monday = 0
+  return dow <= 1 ? 'last_week' : 'wtd';
+}
+
+function monthStart(date: string): string {
+  return date.slice(0, 8) + '01';
+}
+
+function addMonths(date: string, n: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  // Clamp: 31 March minus a month is 28 or 29 February, not 2 or 3 March.
+  const lastOfTarget = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastOfTarget));
+  return iso(d);
+}
+
+/** How many Saturdays and Sundays a date range contains. */
+export function weekendDays(start: string, end: string): number {
+  let n = 0;
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    const dow = daysSinceMonday(d);
+    if (dow === 5 || dow === 6) n++;
+  }
+  return n;
+}
+
+export interface PeriodWindow extends DashboardWindow {
+  kind: PeriodKind;
+  label: string;
+  /**
+   * Things true of this comparison that the figures cannot show.
+   *
+   * A month to date against the same dates last month can hold a different
+   * number of weekends, and in this business a weekend day is worth
+   * substantially more than a Tuesday -- so a "fall" can be one fewer Saturday.
+   * Stated rather than left for somebody to notice.
+   */
+  warnings: string[];
+}
+
+export function periodWindow(kind: PeriodKind, today: string = sgtToday()): PeriodWindow {
+  const base = { today, kind, label: PERIOD_LABELS[kind] };
+
+  if (kind === 'wtd' || kind === 'last_week') {
+    const w = dashboardWindow(today);
+    if (kind === 'wtd') return { ...w, ...base, warnings: [] };
+
+    // The completed week, and the one before it. Both are full Monday-to-Sunday
+    // weeks, so there is no partial-period caveat at all.
+    const end = addDays(w.current.start, -1);          // the Sunday just gone
+    const start = addDays(end, -6);
+    return {
+      ...base,
+      current: { start, end },
+      prior: { start: addDays(start, -7), end: addDays(end, -7) },
+      days: 7,
+      thin: false,
+      warnings: [],
+    };
+  }
+
+  if (kind === 'mtd') {
+    const start = monthStart(today);
+    const priorStart = addMonths(start, -1);
+    const priorEnd = addMonths(today, -1);
+    const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+
+    const warnings: string[] = [];
+
+    /**
+     * THE SPANS CAN DIFFER, AND ONLY AT A MONTH END.
+     *
+     * 31 March minus a month is 28 February, because February has no 31st. So
+     * month to date on the 31st compares 31 days of trade against 28 -- about
+     * 10% more trading, which lands as growth and is the calendar. It cannot be
+     * fixed by truncating the current month, because the reader asked for month
+     * to date and hiding three days of it is the worse answer. So it is stated.
+     */
+    const priorDays = Math.round(
+      (Date.parse(`${priorEnd}T00:00:00Z`) - Date.parse(`${priorStart}T00:00:00Z`)) / 86400_000) + 1;
+    const curDays = Math.round(
+      (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+    if (curDays !== priorDays) {
+      warnings.push(
+        `${curDays} days against ${priorDays}: the previous month is shorter, so it has no matching date. ` +
+        'The extra day(s) of trade land as growth and are the calendar, not the business.',
+      );
+    }
+
+    const nowWeekend = weekendDays(start, today);
+    const thenWeekend = weekendDays(priorStart, priorEnd);
+    if (nowWeekend !== thenWeekend) {
+      warnings.push(
+        `This span has ${nowWeekend} weekend day(s) against ${thenWeekend} in the comparison. ` +
+        'A weekend day is worth considerably more than a Tuesday here, so part of any movement is the calendar rather than the trade.',
+      );
+    }
+
+    return {
+      ...base,
+      current: { start, end: today },
+      prior: { start: priorStart, end: priorEnd },
+      days,
+      thin: days <= 2,
+      warnings,
+    };
+  }
+
+  // last_month: the month that has finished, against the one before it.
+  const thisMonth = monthStart(today);
+  const end = addDays(thisMonth, -1);
+  const start = monthStart(end);
+  const priorEnd = addDays(start, -1);
+  const priorStart = monthStart(priorEnd);
+
+  const warnings: string[] = [];
+  const nowWeekend = weekendDays(start, end);
+  const thenWeekend = weekendDays(priorStart, priorEnd);
+  const curLen = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+  const priorLen = Math.round((Date.parse(`${priorEnd}T00:00:00Z`) - Date.parse(`${priorStart}T00:00:00Z`)) / 86400_000) + 1;
+
+  if (curLen !== priorLen) {
+    // A whole month against a whole month is the right comparison and they are
+    // genuinely different lengths. February against January is 28 against 31 --
+    // a 10% difference in trading days before anybody sells anything.
+    warnings.push(
+      `${curLen} days against ${priorLen}: calendar months are different lengths, which is about ` +
+      `${Math.abs(Math.round((curLen / priorLen - 1) * 100))}% of trading days before any trading happens.`,
+    );
+  }
+  if (nowWeekend !== thenWeekend) {
+    warnings.push(
+      `${start.slice(0, 7)} has ${nowWeekend} weekend days against ${thenWeekend} in the month before. ` +
+      'A weekend day is worth considerably more than a Tuesday here, so part of any movement is the calendar.',
+    );
+  }
+
+  return {
+    ...base,
+    current: { start, end },
+    prior: { start: priorStart, end: priorEnd },
+    days: Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1,
+    thin: false,
+    warnings,
+  };
+}

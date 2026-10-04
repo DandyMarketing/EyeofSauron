@@ -10,7 +10,10 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { dashboardWindow, daysSinceMonday, movement, sgtToday } from './dashboard-window.js';
+import {
+  dashboardWindow, daysSinceMonday, movement, sgtToday,
+  periodWindow, defaultPeriod, isPeriodKind, weekendDays,
+} from './dashboard-window.js';
 
 describe('the window is like-for-like by weekday', () => {
   test('on a Saturday it is Mon-Sat against Mon-Sat', () => {
@@ -112,4 +115,145 @@ describe('movement', () => {
     assert.equal(movement(5000, 0).direction, 'unknown');
     assert.equal(movement(5000, 0).pct, null);
   });
+});
+
+/**
+ * The four periods, and the comparison each one is paired with.
+ *
+ * Every one of them can be got wrong the same way: a part-period against a
+ * whole one. Week to date against a whole previous week shows a fall every day
+ * except Sunday; month to date against a whole previous month does it on a
+ * bigger scale and for three weeks at a time.
+ */
+describe('period windows', () => {
+  test('last week is the completed Mon-Sun, against the one before', () => {
+    // Asked on Saturday 3 Oct. The completed week is 21-27 Sep.
+    const w = periodWindow('last_week', '2026-10-03');
+    assert.deepEqual(w.current, { start: '2026-09-21', end: '2026-09-27' });
+    assert.deepEqual(w.prior, { start: '2026-09-14', end: '2026-09-20' });
+    assert.equal(w.days, 7);
+    assert.equal(w.thin, false);
+  });
+
+  test('last week on a Monday is the week that ended yesterday', () => {
+    /**
+     * The case the business actually runs on. Khai reviews the previous week on
+     * a Tuesday, and on Monday or Tuesday "week to date" is one or two days.
+     */
+    const mon = periodWindow('last_week', '2026-10-05');     // a Monday
+    assert.deepEqual(mon.current, { start: '2026-09-28', end: '2026-10-04' });
+    const tue = periodWindow('last_week', '2026-10-06');
+    assert.deepEqual(tue.current, mon.current, 'Tuesday must review the same week as Monday');
+  });
+
+  test('month to date compares the same dates of the previous month', () => {
+    const w = periodWindow('mtd', '2026-10-12');
+    assert.deepEqual(w.current, { start: '2026-10-01', end: '2026-10-12' });
+    assert.deepEqual(w.prior, { start: '2026-09-01', end: '2026-09-12' });
+    assert.equal(w.days, 12);
+  });
+
+  test('month to date on the 31st does not land in the next month', () => {
+    // 31 March minus a month is 28 February, not 3 March. A naive setMonth
+    // rolls over and compares the wrong fortnight.
+    const w = periodWindow('mtd', '2026-03-31');
+    assert.equal(w.prior.end, '2026-02-28');
+    assert.equal(w.prior.start, '2026-02-01');
+  });
+
+  test('last month is the completed month against the one before', () => {
+    const w = periodWindow('last_month', '2026-10-04');
+    assert.deepEqual(w.current, { start: '2026-09-01', end: '2026-09-30' });
+    assert.deepEqual(w.prior, { start: '2026-08-01', end: '2026-08-31' });
+    assert.equal(w.days, 30);
+  });
+
+  test('a different weekend count is WARNED about, not buried', () => {
+    /**
+     * Months are not the same length and do not hold the same number of
+     * weekends. In this business a Saturday is worth considerably more than a
+     * Tuesday, so a month that is "down" can simply have one fewer Saturday —
+     * and nothing in the figures says so.
+     */
+    const w = periodWindow('last_month', '2026-10-04');
+    const sep = weekendDays('2026-09-01', '2026-09-30');
+    const aug = weekendDays('2026-08-01', '2026-08-31');
+    if (sep !== aug) {
+      assert.ok(w.warnings.some(x => /weekend days/.test(x)), w.warnings.join(' | '));
+    }
+  });
+
+  test('a complete week against a complete week needs no caveat', () => {
+    assert.deepEqual(periodWindow('last_week', '2026-10-03').warnings, []);
+    assert.deepEqual(periodWindow('wtd', '2026-10-03').warnings, []);
+  });
+
+  test('every period compares equal spans', () => {
+    const span = (a: string, b: string) =>
+      (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400_000;
+    for (const kind of ['wtd', 'last_week', 'mtd', 'last_month'] as const) {
+      for (const day of ['2026-10-01', '2026-10-05', '2026-10-12', '2026-03-31', '2027-01-01']) {
+        const w = periodWindow(kind, day);
+        /**
+         * Months are genuinely different lengths, so last_month and a
+         * month-to-date landing on a date the previous month does not have
+         * CANNOT be equal-span. The requirement there is that it SAYS so —
+         * asserted below rather than waived here.
+         */
+        if (kind === 'last_month') continue;
+        const equal = span(w.current.start, w.current.end) === span(w.prior.start, w.prior.end);
+        if (!equal) {
+          assert.ok(kind === 'mtd', `${kind} on ${day} compares unequal spans`);
+          assert.ok(w.warnings.some(x => /days against/.test(x)),
+            `${kind} on ${day} compares unequal spans and says nothing: ${JSON.stringify(w.warnings)}`);
+          continue;
+        }
+        assert.ok(equal, `${kind} on ${day}: ${JSON.stringify(w)}`);
+      }
+    }
+  });
+});
+
+describe('which period the page opens on', () => {
+  test('Monday and Tuesday open on the completed week', () => {
+    // "we usually go through our previous week on Tuesday" — and week to date
+    // on a Tuesday is two days of trade.
+    assert.equal(defaultPeriod('2026-10-05'), 'last_week');   // Monday
+    assert.equal(defaultPeriod('2026-10-06'), 'last_week');   // Tuesday
+  });
+
+  test('from Wednesday the week in progress takes over', () => {
+    assert.equal(defaultPeriod('2026-10-07'), 'wtd');
+    assert.equal(defaultPeriod('2026-10-04'), 'wtd');         // Sunday
+  });
+});
+
+test('an unknown period string is rejected rather than defaulted', () => {
+  // It arrives from a query parameter, so it is user input. Falling back
+  // silently would show one period under another one's label.
+  assert.equal(isPeriodKind('wtd'), true);
+  assert.equal(isPeriodKind('last_week'), true);
+  assert.equal(isPeriodKind('year'), false);
+  assert.equal(isPeriodKind(undefined), false);
+});
+
+test('a month-end comparison against a shorter month says so in days', () => {
+  /**
+   * 31 March minus a month is 28 February, because February has no 31st. So
+   * month to date on the 31st compares 31 days of trade against 28 — about 10%
+   * more trading, which lands as growth and is purely the calendar.
+   *
+   * It cannot be fixed by truncating the current month: the reader asked for
+   * month to date and hiding three days of it is the worse answer. So it is
+   * stated, every time.
+   */
+  const w = periodWindow('mtd', '2026-03-31');
+  assert.equal(w.prior.end, '2026-02-28');
+  assert.ok(w.warnings.some(x => /31 days against 28/.test(x)), w.warnings.join(' | '));
+});
+
+test('February against January is flagged as a length difference', () => {
+  const w = periodWindow('last_month', '2026-03-10');
+  assert.deepEqual(w.current, { start: '2026-02-01', end: '2026-02-28' });
+  assert.ok(w.warnings.some(x => /28 days against 31/.test(x)), w.warnings.join(' | '));
 });

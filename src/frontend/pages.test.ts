@@ -592,3 +592,55 @@ test('a failed retention read costs the panel, never the page', () => {
   assert.ok(lib.includes('return null;'), 'buildRetention no longer degrades to null on failure');
   assert.match(lib, /console\.warn\(`\[dashboard\] retention/, 'a retention failure is silent');
 });
+
+/**
+ * The period selector, and the reason the default moves.
+ *
+ * Khai, 4 Oct 2026: "we usually go through our previous week on Tuesday, this
+ * rolling would not give an image of last week on Tuesday, is there a way to
+ * fix that but still keep the rolling wtd."
+ *
+ * Week to date on a Tuesday is two days of trade, so a page that can only ever
+ * show the week in progress cannot support the one review meeting that actually
+ * happens. The server opens on the completed week on Monday and Tuesday and on
+ * the week in progress from Wednesday.
+ */
+test('the dashboard offers four periods and lights the active one', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  for (const kind of ['wtd', 'last_week', 'mtd', 'last_month']) {
+    assert.ok(home.includes(`'${kind}'`), `the ${kind} period is not offered`);
+  }
+  assert.ok(home.includes('function periodChips('), 'there is no period selector');
+  assert.match(home, /p\[0\] === period \? ' on' : ''/, 'the active period is not marked');
+});
+
+test('the period comes back from the SERVER, not assumed by the page', () => {
+  /**
+   * The default moves with the day of the week, so a page that assumed "wtd"
+   * would light the wrong chip on a Monday and label a completed week as the
+   * week in progress. It reads window.kind out of the response instead.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /period = payload\.window\.kind;/, 'the page assumes a period rather than reading the one served');
+  assert.match(home, /esc\(w\.label\)/, 'the heading does not follow the period');
+});
+
+test('an unknown period is rejected by the API rather than defaulted', () => {
+  // It arrives as a query parameter, so it is user input. Falling back silently
+  // would render one period under another one's label — the single thing this
+  // page has had to be fixed for twice.
+  const server = readFileSync('src/server.ts', 'utf8');
+  assert.match(server, /!isPeriodKind\(requested\)/);
+  assert.match(server, /bad_period/);
+});
+
+test('a comparison the figures cannot explain is shown, not buried', () => {
+  /**
+   * A span with one fewer Saturday, or a month end with no matching date in the
+   * month before. Both land as a movement and neither is the business — 31 days
+   * against 28 is about 10% more trading before anybody sells anything.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /w\.warnings && w\.warnings\.length/, 'period warnings are never rendered');
+  assert.match(home, /\.window-warn\s*\{/, 'there is no style for a period warning, so it reads as body text');
+});

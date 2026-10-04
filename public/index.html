@@ -66,6 +66,15 @@
   .loading { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
 
   /* --- venue switcher ------------------------------------------------- */
+  .periods { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .period-chip {
+    padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+  }
+  .period-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
+  /* A caveat the figures cannot show — one fewer Saturday, or a month end with
+     no matching date. Both land as a movement and neither is the business. */
+  .window-warn { color: var(--accent); font-size: 12px; line-height: 1.5; margin-top: 4px; }
   .venues { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .venue-chip {
     padding: 6px 12px; border-radius: 999px; font-size: 13px; cursor: pointer;
@@ -211,6 +220,7 @@
 let token = null;
 let payload = null;
 let selected = null;
+let period = null;   // null until the server tells us what it opened on
 
 (async function init() {
   // Both at once. The config is two public strings and the client is 60 KB;
@@ -271,8 +281,9 @@ let selected = null;
   render(data, recData);
 })();
 
-function fetchDashboard() {
-  return fetch('/api/dashboard', { headers: { Authorization: 'Bearer ' + token } })
+function fetchDashboard(kind) {
+  const q = kind ? '?period=' + encodeURIComponent(kind) : '';
+  return fetch('/api/dashboard' + q, { headers: { Authorization: 'Bearer ' + token } })
     .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
     .catch(e => ({ ok: false, status: 0, body: { message: e.message } }));
 }
@@ -330,6 +341,7 @@ function render(res, recData) {
   }
 
   payload = res.body;
+  period = payload.window.kind;
   // An owner lands on the group; anybody with one venue lands on it.
   selected = payload.group ? 'group' : payload.venues[0].slug;
   draw(recData);
@@ -352,11 +364,24 @@ function draw(recData) {
    * the arrow trustworthy -- against a whole previous week it would show a fall
    * every day except Sunday.
    */
+  const comparison = w.kind === 'last_week' ? 'against the week before'
+    : w.kind === 'last_month' ? 'against the month before'
+    : w.kind === 'mtd' ? 'against the same ' + w.days + ' days of last month'
+    : 'against the same ' + w.days + ' days last week';
+
   const windowLine =
-    '<div class="window">Week to date · <strong>' + fmtRange(w.current.start, w.current.end) + '</strong> · ' +
+    '<div class="window">' + esc(w.label) + ' · <strong>' + fmtRange(w.current.start, w.current.end) + '</strong> · ' +
     (w.thin
-      ? '<span class="thin">one day against one day — too thin to read as a trend</span>'
-      : w.days + ' days against the same ' + w.days + ' days last week') +
+      ? '<span class="thin">too few days to read as a trend</span>'
+      : w.days + ' days ' + comparison) +
+    /**
+     * The caveats the figures cannot show: a span with one fewer Saturday, or a
+     * month end with no matching date in the month before. Both land as a
+     * movement and neither is the business.
+     */
+    (w.warnings && w.warnings.length
+      ? '<div class="window-warn">' + w.warnings.map(x => esc(x)).join('<br>') + '</div>'
+      : '') +
     '</div>';
 
   const tiles =
@@ -394,7 +419,7 @@ function draw(recData) {
   ];
 
   const table =
-    '<div class="panel"><h2>Week to date</h2><table><tbody>' +
+    '<div class="panel"><h2>' + esc(w.label) + '</h2><table><tbody>' +
     rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
     '</tbody></table>' +
     '<p class="figure-note">Gross = food + beverage, service charge excluded · ' +
@@ -403,11 +428,13 @@ function draw(recData) {
     'Spend per head = food &amp; beverage ÷ covers · Average check = revenue per bill</p></div>';
 
   document.getElementById('app').innerHTML =
-    chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
+    periodChips() + chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
     monthlySection(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
+  document.querySelectorAll('.period-chip').forEach(b =>
+    b.addEventListener('click', () => switchPeriod(b.dataset.period, recData)));
 
   const ask = document.getElementById('ask-input');
   const go = () => {
@@ -416,6 +443,47 @@ function draw(recData) {
   };
   document.getElementById('ask-go').addEventListener('click', go);
   ask.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+}
+
+/**
+ * The period selector.
+ *
+ * WHY THE DEFAULT MOVES. The business reviews the previous week on a Tuesday,
+ * and week-to-date on a Tuesday is two days of trade -- a page that can only
+ * show the week in progress cannot support the one meeting that happens. So the
+ * server opens on the completed week on Monday and Tuesday and on the week in
+ * progress from Wednesday.
+ *
+ * A changing default is normally a way to confuse somebody. What makes it safe
+ * is that this selector is on screen with the active period lit, and the line
+ * under it spells out the dates. Nobody has to guess which period they are
+ * looking at, which is the only thing that ever went wrong here.
+ */
+const PERIODS = [
+  ['wtd', 'Week to date'],
+  ['last_week', 'Last week'],
+  ['mtd', 'Month to date'],
+  ['last_month', 'Last month'],
+];
+
+function periodChips() {
+  return '<div class="periods">' + PERIODS.map(p =>
+    '<button class="period-chip' + (p[0] === period ? ' on' : '') + '" data-period="' + p[0] + '">' +
+    p[1] + '</button>').join('') + '</div>';
+}
+
+async function switchPeriod(kind, recData) {
+  if (kind === period) return;
+  period = kind;
+  // Marked immediately. A chip that waits on a round trip gets pressed twice,
+  // and the second press is the one nobody meant.
+  document.querySelectorAll('.period-chip').forEach(b =>
+    b.classList.toggle('on', b.dataset.period === kind));
+
+  const res = await fetchDashboard(kind);
+  if (!res.ok) return;
+  payload = res.body;
+  draw(recData);
 }
 
 function tile(label, value, deltaHtml) {

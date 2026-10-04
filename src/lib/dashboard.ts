@@ -23,7 +23,7 @@
 import { supabaseAdmin } from '../auth/session.js';
 import { salesFiguresOf, classSplitOf } from './sales.js';
 import { getCovers } from './covers.js';
-import { dashboardWindow, movement, type DashboardWindow } from './dashboard-window.js';
+import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
   lastCompleteMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
@@ -108,7 +108,7 @@ export interface CostBlock {
 }
 
 export interface DashboardPayload {
-  window: DashboardWindow;
+  window: PeriodWindow;
   /**
    * Cost of sales for the last COMPLETE month, beside the retention block and
    * for the same reason: the P&L's finest grain is a month, so there is no
@@ -131,12 +131,13 @@ export interface DashboardPayload {
 export async function buildDashboard(
   venues: Array<{ id: string; name: string; slug: string }>,
   today?: string,
+  period?: PeriodKind,
 ): Promise<DashboardPayload> {
   if (venues.length === 0) {
     throw new Error('dashboard: no venues in scope — refusing rather than reading every venue');
   }
 
-  const window = dashboardWindow(today);
+  const window = periodWindow(period ?? defaultPeriod(today), today);
   const ids = venues.map(v => v.id);
 
   /**

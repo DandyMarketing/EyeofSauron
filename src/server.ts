@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { buildDashboard } from './lib/dashboard.js';
+import { isPeriodKind } from './lib/dashboard-window.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
@@ -1269,8 +1270,19 @@ app.get('/api/dashboard', async (c) => {
     return c.json({ error: 'no_venues', message: 'Your account is not assigned to a venue yet. Ask an owner to add you.' }, 403);
   }
 
+  /**
+   * The period arrives from a query parameter, so it is user input and is
+   * VALIDATED rather than defaulted. Falling back silently would render one
+   * period under another one's label, which is the single thing this page has
+   * had to be fixed for twice.
+   */
+  const requested = c.req.query('period');
+  if (requested !== undefined && !isPeriodKind(requested)) {
+    return c.json({ error: 'bad_period', message: `Unknown period "${requested}".` }, 400);
+  }
+
   try {
-    const payload = await buildDashboard(scoped);
+    const payload = await buildDashboard(scoped, undefined, requested);
     return c.json(payload);
   } catch (e: any) {
     console.error(`[dashboard] ${e?.message ?? e}`);
