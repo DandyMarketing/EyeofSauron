@@ -47,6 +47,24 @@ describe('classifying a cost-of-sales account', () => {
     assert.equal(classifyCogs('COGS - Food & Beverage'), null);
   });
 
+  test('ALCOHOL is beverage, which it was not and cost $8,668', () => {
+    /**
+     * Neon Pigeon's ledger carries `COGS - Alcohol`. It matched nothing, so
+     * $8,668 of drink cost sat under "not food or beverage" and September's
+     * beverage cost read 9.6% rather than something near 40% -- a figure low
+     * enough to be quoted as an achievement.
+     *
+     * Found by eye on a live dashboard, which is the only reason it was found at
+     * all: an excluded account is visible, but nobody reads an exclusion row
+     * when the headline percentage looks good.
+     */
+    assert.equal(classifyCogs('COGS - Alcohol'), 'beverage');
+    assert.equal(classifyCogs('Liquor Purchases'), 'beverage');
+    assert.equal(classifyCogs('COGS - Wine'), 'beverage');
+    assert.equal(classifyCogs('Beer & Cider'), 'beverage');
+    assert.equal(classifyCogs('Cost of Sales - Spirits'), 'beverage');
+  });
+
   test('a cost of sales line that is neither is left alone', () => {
     assert.equal(classifyCogs('Packaging'), null);
     assert.equal(classifyCogs('Delivery Commission'), null);
@@ -166,4 +184,39 @@ test('a multi-month span says it is blended, not averaged', () => {
   const r = costRatios([line('COGS - Food', 1)], { food_sales: 10, beverage_sales: 10 });
   assert.ok(costCaveats(r, 3).some(c => /blended ratio/.test(c)));
   assert.ok(!costCaveats(r, 1).some(c => /blended ratio/.test(c)));
+});
+
+describe('a ratio that is not a ratio', () => {
+  /**
+   * Neon Pigeon's July 2026 came back at 301% food cost. It was plotted on a
+   * chart, described in a sentence as a trend, and nothing anywhere said that a
+   * restaurant does not spend three dollars on food for every dollar it sells.
+   * The arithmetic was right and the figure measures nothing.
+   *
+   * It is a SALES-side symptom far more often than a cost-side one -- a month
+   * where the POS feed did not land for part of the period leaves a denominator
+   * that is a fraction of the real one -- so the caveat points at the sales
+   * before it points at the kitchen.
+   */
+  test('a food cost above 70% says so, and says to check the sales side', () => {
+    const r = costRatios([line('COGS - Food', 30100)], { food_sales: 10000, beverage_sales: 10000 });
+    const c = costCaveats(r, 1);
+    assert.ok(c.some(x => /not a cost ratio a kitchen produces/.test(x)), c.join(' | '));
+    assert.ok(c.some(x => /Check the sales side/.test(x)));
+  });
+
+  test('beverage is checked too, and named as beverage', () => {
+    const r = costRatios([line('COGS - Beverages', 9000)], { food_sales: 10000, beverage_sales: 10000 });
+    assert.ok(costCaveats(r, 1).some(x => /^Beverage cost comes out at 90%/.test(x)));
+  });
+
+  test('an ordinary cost ratio is not flagged', () => {
+    // 32% food and 25% beverage is a normal month, and a page that warns about
+    // every figure trains people to read past the warnings.
+    const r = costRatios(
+      [line('COGS - Food', 3200), line('COGS - Beverages', 2500)],
+      { food_sales: 10000, beverage_sales: 10000 },
+    );
+    assert.ok(!costCaveats(r, 1).some(x => /not a cost ratio a kitchen produces/.test(x)));
+  });
 });

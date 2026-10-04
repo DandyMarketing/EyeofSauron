@@ -275,7 +275,21 @@ export async function buildDashboard(
       const date = addDays(window.today, d);
       return {
         date,
-        covers: coversUpcoming[i].get(date)?.covers ?? 0,
+        /**
+         * EXPECTED covers, not completed ones.
+         *
+         * A future booking comes back from SevenRooms as status_simple
+         * 'Incomplete' and never 'Complete', so any count keyed on completion
+         * reports ZERO for every upcoming date. The comment on
+         * CoversSummary.expected_covers says precisely that, and I used
+         * `covers` anyway -- the live forward book showed 0 for all seven days
+         * at Neon Pigeon, which reads as nobody having booked all week.
+         *
+         * Today is the one date where the two differ for a reason worth
+         * knowing: `covers` is who has finished dining, `expected_covers` is the
+         * whole book. The book is what this panel is for.
+         */
+        covers: coversUpcoming[i].get(date)?.expected_covers ?? 0,
         closed: shut.has(weekdayOf(date)),
       };
     });
@@ -311,12 +325,23 @@ export async function buildDashboard(
   });
 
   // Independent of each other and of everything above; neither blocks the page.
-  const [retention, costs, periodCosts, costTrendByVenue] = await Promise.all([
+  const [retention, costs, periodCosts] = await Promise.all([
     buildRetention(venues, window.today),
     buildCosts(venues, window.today),
     buildPeriodCosts(venues, window.current.start, window.current.end, window.today),
-    buildCostTrend(venues, window.today),
   ]);
+  /**
+   * THE SIX-MONTH COST LINE IS OFF, and `buildCostTrend` is kept rather than
+   * deleted. Khai, 4 Oct 2026: "Cost of sales chart section not necessary no
+   * need the same treatment for now."
+   *
+   * Switched off HERE rather than only in the page, because it is the most
+   * expensive thing on this request -- six months of P&L and six months of
+   * product mix for every venue in scope -- and a payload field nobody draws is
+   * latency an operator on mobile data pays for nothing. `cost-trend.ts`, its
+   * tests and the builder all remain, so turning it back on is this one line.
+   */
+  const costTrendByVenue = null;
   return {
     window, retention, costs, period_costs: periodCosts, cost_trend: costTrendByVenue,
     venues: out, group: out.length > 1 ? rollUp(out) : null,

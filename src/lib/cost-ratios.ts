@@ -87,7 +87,19 @@ export function classifyCogs(canonicalAccount: string): 'food' | 'beverage' | nu
 
   // Only lines that ARE cost of sales. A sales account with the same word in it
   // never reaches here, because the caller filters on section first.
-  const isBeverage = /\b(beverage|beverages|drink|drinks|liquor|wine|beer|spirits|bar)\b/.test(n);
+  /**
+   * ALCOHOL belongs here, and its absence was a live defect.
+   *
+   * Neon Pigeon's ledger carries `COGS - Alcohol`, which this did not match --
+   * so $8,668 of drink cost sat under "not food or beverage" and the September
+   * beverage cost read 9.6% instead of something near 40%. Visible rather than
+   * silent, which is the only reason it was caught at a glance, but wrong.
+   *
+   * The list is still deliberately narrow. A rule loose enough to catch
+   * anything drink-shaped also catches the next account nobody has looked at,
+   * and a wrong bucket is invisible where `unclassified` is not.
+   */
+  const isBeverage = /\b(beverage|beverages|drink|drinks|alcohol|liquor|wine|wines|beer|beers|spirits|cocktail|cocktails|bar)\b/.test(n);
   const isFood = /\b(food|kitchen|produce|meat|seafood|sushi|dry goods)\b/.test(n);
 
   // An account naming both is ambiguous and must not be guessed at. "COGS -
@@ -178,6 +190,36 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
 
   if (r.food.pct === null || r.beverage.pct === null) {
     out.push('One of the two has no sales in the period, so its percentage is unavailable rather than zero.');
+  }
+
+  /**
+   * A COST RATIO OVER 100% IS NOT A COST RATIO.
+   *
+   * Neon Pigeon's July 2026 came back at 301% food cost, which was plotted on a
+   * chart and described as a trend. A restaurant does not spend three dollars on
+   * food for every dollar it sells; the figure is arithmetically correct and is
+   * not a measurement of anything. Three causes, and the reader needs to know
+   * which rather than being handed the number:
+   *
+   *   - a stock BUILD: an opening order or a bulk purchase booked in a month
+   *     whose sales have not happened yet;
+   *   - MISSING SALES: a month where Revel did not land for part of the period,
+   *     so the denominator is a fraction of the real one;
+   *   - a misclassified account inflating the numerator.
+   *
+   * Flagged at 70% rather than 100%, because a food cost above seventy is
+   * already outside anything a kitchen produces and the earlier the reader is
+   * told, the less likely they are to act on it.
+   */
+  for (const [label, side] of [['Food', r.food], ['Beverage', r.beverage]] as const) {
+    if (side.pct !== null && side.pct > 70) {
+      out.push(
+        `${label} cost comes out at ${side.pct}%, which is not a cost ratio a kitchen produces. ` +
+        'It usually means a stock build booked against sales that have not happened yet, or a month where ' +
+        'the POS feed did not land for part of the period so the denominator is short. Check the sales side ' +
+        'before reading this as a cost problem.',
+      );
+    }
   }
 
   if (monthsCovered > 1) {

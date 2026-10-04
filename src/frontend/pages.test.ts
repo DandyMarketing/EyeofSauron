@@ -591,18 +591,48 @@ test('a missing P&L says missing, never zero', () => {
   assert.match(home, /It is missing, not zero/);
 });
 
-test('every retention rate is shown beside the count that produced it', () => {
+test('the guest mix is a pie, and every slice carries its count', () => {
   /**
-   * Repeat share FALLS when a venue attracts a lot of new guests, because they
-   * enlarge the bottom of the fraction. A venue that has stopped winning anyone
-   * new posts a rising retention rate all the way down. A bare percentage is
-   * read backwards.
+   * Khai, 4 Oct 2026: "Guest retention can be represented as a pie chart." It is
+   * the one shape a pie is actually right for — new, returning and crossed-from-
+   * a-sister-venue are mutually exclusive and sum to the booked guests — and the
+   * question being asked ("how much of my room is new") is a proportion before
+   * it is a number.
+   *
+   * THE COUNTS SURVIVED THE REDRAW, which is the property this protects. Repeat
+   * share FALLS when a venue attracts a lot of new guests, because they enlarge
+   * the bottom of the fraction; a venue that has stopped winning anyone new
+   * posts a rising retention rate all the way down. A pie of bare percentages
+   * is read backwards even more easily than a table of them, so the total and
+   * each slice's own count are on the page.
    */
   const home = readFileSync('public/index.html', 'utf8');
-  assert.match(home, /num\(r\.counts\.booked_guests\)/, 'the denominator is not on the page');
-  assert.match(home, /num\(r\.counts\.returning_here\) \+ ' — ' \+ pct\(r\.shares\.repeat_pct\)/,
-    'the repeat share is printed without its count');
-  assert.match(home, /read it next to the booked-guest count/);
+  const fn = home.slice(home.indexOf('function retentionPanel('), home.indexOf('\nfunction advice'));
+
+  assert.match(fn, /class="pie"/, 'the guest mix is not drawn as a pie');
+  assert.match(fn, /New to the group/, 'the new-guest slice is gone');
+  assert.match(fn, /Been here before/, 'the returning slice is gone');
+  assert.match(fn, /From a sister venue/, 'the cross-venue slice is gone');
+
+  // The denominator, and each slice's count beside its percentage.
+  assert.match(fn, /num\(total\)/, 'the booked-guest total is not on the page');
+  assert.match(fn, /num\(sl\.n\)/, 'the slices are percentages with no counts');
+  assert.match(fn, /read it next to the booked-guest count/);
+
+  /**
+   * A slice of exactly the whole cannot be drawn as an arc — start and end
+   * coincide and the path collapses. A venue with no returning guests at all
+   * would render an empty circle, on live data, silently.
+   */
+  assert.match(fn, /frac >= 0\.9999/, 'a single full slice would draw as nothing');
+
+  /**
+   * WALK-INS ARE NOT A SLICE. They carry no booking so they cannot be matched to
+   * a guest; including them would stop the parts summing to the whole, which is
+   * the only thing a pie promises. They stay as a count beside it.
+   */
+  assert.match(fn, /Walk-ins/, 'walk-ins vanished with the table');
+  assert.ok(!/label: 'Walk-ins'/.test(fn), 'walk-ins are a pie slice, so the parts no longer sum to the whole');
 });
 
 test('a left-censored month is withheld, not shown low', () => {
@@ -612,6 +642,24 @@ test('a left-censored month is withheld, not shown low', () => {
   const home = readFileSync('public/index.html', 'utf8');
   assert.match(home, /if \(r\.withheld\)/);
   assert.match(home, /would be understated/);
+});
+
+test('the forward book counts EXPECTED covers, not completed ones', () => {
+  /**
+   * A future booking comes back from SevenRooms as status_simple 'Incomplete'
+   * and never 'Complete', so any count keyed on completion reports ZERO for
+   * every upcoming date. The live panel showed `TODAY 49, MON 0, TUE 0, WED 0`
+   * at Neon Pigeon, which reads as nobody having booked all week — the worst
+   * shape of wrong, because an empty book is a plausible thing for a dashboard
+   * to be telling you and somebody would have acted on it.
+   *
+   * CoversSummary.expected_covers carries a comment saying exactly this, and the
+   * panel was written against `covers` anyway, so the comment is not the control.
+   */
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  const upcoming = lib.slice(lib.indexOf('const upcoming = Array.from'), lib.indexOf('const upcoming = Array.from') + 1400);
+  assert.match(upcoming, /\.expected_covers \?\? 0/, 'the forward book is back on completed covers');
+  assert.ok(!/\?\.covers \?\? 0/.test(upcoming), 'the forward book reads completed covers again');
 });
 
 test('a failed retention read costs the panel, never the page', () => {
@@ -892,49 +940,27 @@ test('the legend carries the period mix, not just the colours', () => {
 });
 
 /**
- * Food cost as a LINE, because one month of it is noise.
+ * The six-month cost LINE is off, and the cost of computing it is off with it.
  *
- * A cost-of-sales line in a P&L is PURCHASES in the period, not consumption, so
- * one large delivery near a month end lands against sales it has not produced
- * yet. One month can read 40% and the next 31% with nothing wrong in either —
- * which makes a single number on a dashboard actively misleading, because it
- * looks like a measurement. Over six months the delivery noise mostly cancels
- * and what is left is drift, which is the biggest controllable number in the
- * business.
+ * Khai, 4 Oct 2026: "Cost of sales chart section not necessary no need the same
+ * treatment for now." It is the most expensive thing the dashboard request could
+ * ask for — six months of P&L and six months of product mix per venue — so a
+ * payload field nobody draws is latency an operator on mobile data pays for
+ * nothing. That is what this asserts: not merely that the panel is gone, but
+ * that the queries behind it are not still running.
+ *
+ * `cost-trend.ts`, its tests and `buildCostTrend` all stay, because "for now"
+ * is not "never" and the three wrong pictures they protect against (a missing
+ * month drawn as 0%, a gap joined across, an axis anchored at zero) are still
+ * the right answers whenever it comes back.
  */
-test('the dashboard draws the cost trend, not just this month', () => {
+test('the cost trend is not computed while nothing draws it', () => {
   const home = readFileSync('public/index.html', 'utf8');
-  assert.ok(home.includes('function costTrendPanel('), 'there is no cost trend panel');
-  assert.match(home, /payload\.cost_trend/, 'the page never reads the trend');
-  assert.ok(
-    home.indexOf('costTrendPanel(payload, v)') > 0,
-    'the trend panel is defined but never rendered',
-  );
-});
+  assert.ok(!home.includes('costTrendPanel('), 'the cost trend panel is back on the page');
 
-test('a month with no closed P&L breaks the line rather than joining across it', () => {
-  /**
-   * Two separate wrong pictures. Plotting a missing month as 0% draws a
-   * collapse in the food cost; joining the points either side draws a straight
-   * line through a month nobody measured. Both look like findings.
-   *
-   * One polyline per unbroken RUN is what makes the gap real — a single
-   * polyline with a hole in it connects straight across.
-   */
-  const home = readFileSync('public/index.html', 'utf8');
-  const fn = home.slice(home.indexOf('function costTrendPanel('), home.indexOf('function costPanel('));
-
-  assert.match(fn, /if \(!p\.available \|\| val === null/, 'an unavailable month is plotted like any other');
-  assert.match(fn, /const flush = \(\) =>/, 'the series is drawn as one path, so a gap is joined across');
-  assert.match(fn, /if \(run\.length > 1\)/, 'a run of one point would still draw a line');
-});
-
-test('the cost axis is drawn from the data, and says what range it covers', () => {
-  // A food cost moving between 30% and 40% is the whole story; anchoring the
-  // axis at zero flattens ten points of drift into a line that looks flat,
-  // which is the opposite of what the panel is for. So the labels state it.
-  const home = readFileSync('public/index.html', 'utf8');
-  const fn = home.slice(home.indexOf('function costTrendPanel('), home.indexOf('function costPanel('));
-  assert.match(fn, /Math\.floor\(Math\.min\.apply\(null, values\) - 2\)/, 'the axis no longer fits the data');
-  assert.match(fn, /\[lo, hi\]\.forEach/, 'the range is not labelled, so the scale is invisible');
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.ok(!/await Promise\.all\(\[[^\]]*buildCostTrend/s.test(lib),
+    'buildCostTrend still runs on every dashboard request');
+  // Kept, not deleted — re-enabling must stay a one-line change.
+  assert.match(lib, /async function buildCostTrend/, 'the builder was deleted rather than switched off');
 });
