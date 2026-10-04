@@ -395,7 +395,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
-    advicePanel(recData, v, w.today) + askBox(v);
+    retentionPanel(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -545,6 +545,57 @@ function advicePanel(recData, v, today) {
       '</div>').join('') +
     stale + withheld +
     '<p class="figure-note"><a href="/briefing.html">Open the full briefing</a> to rate these or read the evidence behind them.</p>' +
+    '</div>';
+}
+
+/**
+ * Guest retention. A MONTHLY figure on a weekly page, and it says so.
+ *
+ * It cannot be weekly. A week holds too few returning guests for the rate to
+ * mean anything -- create_chart forces both retention measures to monthly
+ * whatever it is asked for, for exactly this reason. The underlying function
+ * will happily compute a week, which is the trap: it returns a number, the
+ * number is right, and it is not a measurement.
+ *
+ * EVERY RATE CARRIES ITS COUNTS. Repeat share FALLS when a venue attracts a lot
+ * of new guests, because new guests enlarge the bottom of the fraction. A great
+ * month for new business pushes it down, and a venue that has stopped winning
+ * anybody new posts a rising retention rate all the way down. "Retention 25%"
+ * alone is a figure a manager reads backwards.
+ */
+function retentionPanel(payload, v) {
+  const r = payload.retention && payload.retention[v.slug];
+  if (!r) {
+    return '<div class="panel"><h2>Guests</h2>' +
+      '<div class="empty">No retention figures yet. They need SevenRooms reservations with a guest key, and they are computed monthly.</div></div>';
+  }
+
+  if (r.withheld) {
+    /**
+     * WITHHELD, NOT SHOWN LOW. The measure asks whether a guest came within the
+     * previous 365 days; for a month whose lookback reaches past the start of
+     * the records, guests who did come are invisible. The rate is understated
+     * and the understatement shrinks every month as history accumulates --
+     * which draws a rising line that is the database filling up.
+     */
+    return '<div class="panel"><h2>Guests · ' + esc(r.month.label) + '</h2>' +
+      '<div class="empty">Withheld for this month: its 365-day lookback reaches back past the start of the booking records, so the rate would be understated and would appear to improve every month as history fills.</div></div>';
+  }
+
+  const rows = [
+    ['Booked guests', num(r.counts.booked_guests)],
+    ['Been here before', num(r.counts.returning_here) + ' — ' + pct(r.shares.repeat_pct)],
+    ['Been to a sister venue', num(r.counts.crossed_from_sister)],
+    ['New to the group', num(r.counts.new_to_group) + ' — ' + pct(r.shares.new_pct)],
+    ['Walk-ins', num(r.counts.walk_in_guests)],
+  ];
+
+  return '<div class="panel"><h2>Guests · ' + esc(r.month.label) + '</h2>' +
+    '<p class="figure-note" style="padding-bottom:4px">Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything. ' +
+    'Walk-ins are counted separately because they carry no booking and so cannot be matched to a guest.</p>' +
+    '<table><tbody>' + rows.map(x => '<tr><td>' + x[0] + '</td><td>' + x[1] + '</td></tr>').join('') + '</tbody></table>' +
+    '<p class="figure-note">' + esc(r.plain) +
+    ' Repeat share falls when a venue wins a lot of new guests, so read it next to the booked-guest count rather than on its own.</p>' +
     '</div>';
 }
 

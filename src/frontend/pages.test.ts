@@ -512,3 +512,51 @@ test('spend per head appears wherever average check does, and above it', () => {
   // And in the headline tiles, where there is no room for both to be equal.
   assert.match(home, /tile\('Spend per head'/, 'spend per head is no longer a headline tile');
 });
+
+/**
+ * Retention is on the dashboard, and it is a MONTHLY figure on a weekly page.
+ *
+ * It cannot be weekly: a week holds too few returning guests for the rate to
+ * mean anything, which is why create_chart forces both retention measures to
+ * monthly whatever it is asked for. The underlying function will happily
+ * compute a week — that is the trap. It returns a number, the number is
+ * arithmetically right, and it is not a measurement.
+ */
+test('the retention panel names its month rather than implying the week', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.ok(home.includes('function retentionPanel('), 'the dashboard has no retention panel');
+  assert.match(home, /Guests · ' \+ esc\(r\.month\.label\)/, 'the panel does not name the month it covers');
+  assert.match(home, /Monthly, not weekly/, 'nothing tells the reader this is not the week above it');
+});
+
+test('every retention rate is shown beside the count that produced it', () => {
+  /**
+   * Repeat share FALLS when a venue attracts a lot of new guests, because they
+   * enlarge the bottom of the fraction. A venue that has stopped winning anyone
+   * new posts a rising retention rate all the way down. A bare percentage is
+   * read backwards.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /num\(r\.counts\.booked_guests\)/, 'the denominator is not on the page');
+  assert.match(home, /num\(r\.counts\.returning_here\) \+ ' — ' \+ pct\(r\.shares\.repeat_pct\)/,
+    'the repeat share is printed without its count');
+  assert.match(home, /read it next to the booked-guest count/);
+});
+
+test('a left-censored month is withheld, not shown low', () => {
+  // Guests who did come back are invisible before the records start, so the
+  // rate is understated — and the shortfall shrinks every month as history
+  // fills, drawing a rise that is the database filling up.
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /if \(r\.withheld\)/);
+  assert.match(home, /would be understated/);
+});
+
+test('a failed retention read costs the panel, never the page', () => {
+  // The RPC has timed out in production before (22 Sep 2026). A dashboard that
+  // will not load because one panel could not be computed is the worse outcome.
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /async function buildRetention/);
+  assert.ok(lib.includes('return null;'), 'buildRetention no longer degrades to null on failure');
+  assert.match(lib, /console\.warn\(`\[dashboard\] retention/, 'a retention failure is silent');
+});

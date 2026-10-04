@@ -25,6 +25,10 @@ import { salesFiguresOf, classSplitOf } from './sales.js';
 import { getCovers } from './covers.js';
 import { dashboardWindow, movement, type DashboardWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
+import {
+  lastCompleteMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
+  type RetentionCounts, type RetentionShares,
+} from './retention-month.js';
 export type { VenueWeek };
 export { rollUp };
 import { getClosedWeekdays } from '../ingest/revel.js';
@@ -79,8 +83,29 @@ function closed(row: SalesRowFromDb): boolean {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+export interface RetentionBlock {
+  /** The month measured. Never the current week — see retention-month.ts. */
+  month: { start: string; end: string; label: string };
+  counts: RetentionCounts;
+  shares: RetentionShares;
+  /** The sentence to put in front of a manager, with the counts in it. */
+  plain: string;
+  /**
+   * Set when the month's 365-day lookback reaches past the start of the
+   * records. The rate is understated and must not be shown as a measurement.
+   */
+  withheld: boolean;
+}
+
 export interface DashboardPayload {
   window: DashboardWindow;
+  /**
+   * MONTHLY, and labelled as such. Null when SevenRooms has nothing to measure.
+   * It sits on a week-to-date page because a week holds too few returning
+   * guests for the rate to mean anything — the same reason create_chart forces
+   * both retention measures to monthly whatever it is asked for.
+   */
+  retention: Record<string, RetentionBlock> | null;
   venues: VenueWeek[];
   /** Present only when more than one venue is in scope. */
   group: VenueWeek | null;
@@ -219,9 +244,87 @@ export async function buildDashboard(
     };
   });
 
-  return { window, venues: out, group: out.length > 1 ? rollUp(out) : null };
+  const retention = await buildRetention(venues, window.today);
+  return { window, retention, venues: out, group: out.length > 1 ? rollUp(out) : null };
 }
 
+
+
+/**
+ * Retention for the last COMPLETE month, keyed by venue slug plus "group".
+ *
+ * A FAILURE HERE COSTS THE PANEL, NEVER THE PAGE. The function is a database
+ * RPC that has timed out in production before (22 Sep 2026), and a dashboard
+ * that will not load because one panel could not be computed is a worse outcome
+ * than a dashboard without that panel. Same rule as the terms gate and
+ * warnSchema: a degraded page beats a dead one.
+ */
+async function buildRetention(
+  venues: Array<{ id: string; name: string; slug: string }>,
+  today: string,
+): Promise<Record<string, RetentionBlock> | null> {
+  const month = lastCompleteMonth(today);
+
+  try {
+    const [{ data, error }, { data: earliest }] = await Promise.all([
+      supabaseAdmin.rpc('guest_retention', { p_start: month.start, p_end: month.end, p_lookback: 365 }),
+      supabaseAdmin.from('reservations').select('business_date')
+        .order('business_date', { ascending: true }).limit(1),
+    ]);
+
+    if (error) {
+      // Named, not swallowed. An unapplied migration otherwise looks exactly
+      // like a month in which nobody ever came back.
+      console.warn(`[dashboard] retention unavailable: ${error.message}`);
+      return null;
+    }
+
+    const rows = (data ?? []) as Array<RetentionCounts & { venue_id: string }>;
+    if (rows.length === 0) return null;
+
+    const dataStartsAt = earliest?.[0]?.business_date ?? null;
+    const withheld = leftCensored(month.start, dataStartsAt);
+
+    const out: Record<string, RetentionBlock> = {};
+    const mine: RetentionCounts[] = [];
+
+    for (const v of venues) {
+      const r = rows.find(x => x.venue_id === v.id);
+      const counts: RetentionCounts = r
+        ? {
+            booked_guests: Number(r.booked_guests), returning_here: Number(r.returning_here),
+            crossed_from_sister: Number(r.crossed_from_sister), new_to_group: Number(r.new_to_group),
+            walk_in_guests: Number(r.walk_in_guests),
+          }
+        : { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
+      mine.push(counts);
+      const shares = retentionShares(counts);
+      out[v.slug] = { month, counts, shares, plain: inPlainWords(counts, shares, month.label), withheld };
+    }
+
+    if (venues.length > 1) {
+      /**
+       * SUMMED, then the rate recomputed -- never an average of the venue
+       * rates, which would weight a quiet venue the same as a busy one.
+       *
+       * Note this is not the same as the group retention the FUNCTION reports:
+       * a guest who ate at two venues in the month is one guest at each and the
+       * venue rows deliberately do not sum to a group row. This is the group's
+       * venues added up, which is the right figure for "how did the group do"
+       * and the wrong one for "how many distinct people", so the page says
+       * "across the venues" rather than implying a headcount.
+       */
+      const counts = sumCounts(mine);
+      const shares = retentionShares(counts);
+      out.group = { month, counts, shares, plain: inPlainWords(counts, shares, month.label), withheld };
+    }
+
+    return out;
+  } catch (e: any) {
+    console.warn(`[dashboard] retention failed: ${e?.message ?? e}`);
+    return null;
+  }
+}
 
 function addDays(date: string, n: number): string {
   const d = new Date(`${date}T00:00:00Z`);
