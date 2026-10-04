@@ -26,7 +26,7 @@ function venue(over: Partial<VenueWeek> = {}): VenueWeek {
       covers: { delta: 5, pct: 5.3, direction: 'up' },
       avg_spend_per_head: { delta: 0.2, pct: 2, direction: 'up' },
     },
-    daily: [{ date: '2026-09-28', net_sales: 1045, covers: 100 }],
+    daily: [{ date: '2026-09-28', net_sales: 1045, gross_sales: 1000, food_sales: 600, beverage_sales: 400, covers: 100 }],
     upcoming: [{ date: '2026-10-03', covers: 20, closed: false }],
     ...over,
   };
@@ -111,16 +111,29 @@ describe('the forward book across venues', () => {
 });
 
 describe('the daily line', () => {
-  test('sums each date across venues', () => {
-    const a = venue({ daily: [{ date: '2026-09-28', net_sales: 100, covers: 10 }] });
-    const b = venue({ daily: [{ date: '2026-09-28', net_sales: 50, covers: 5 }] });
-    assert.deepEqual(rollUp([a, b]).daily, [{ date: '2026-09-28', net_sales: 150, covers: 15 }]);
+  test('sums each date across venues, including the split', () => {
+    // The split is summed too, or a group chart would draw bars with no mix in
+    // them while every venue chart has one.
+    const a = venue({ daily: [{ date: '2026-09-28', net_sales: 100, gross_sales: 90, food_sales: 60, beverage_sales: 30, covers: 10 }] });
+    const b = venue({ daily: [{ date: '2026-09-28', net_sales: 50, gross_sales: 45, food_sales: 20, beverage_sales: 25, covers: 5 }] });
+    assert.deepEqual(rollUp([a, b]).daily, [
+      { date: '2026-09-28', net_sales: 150, gross_sales: 135, food_sales: 80, beverage_sales: 55, covers: 15 },
+    ]);
+  });
+
+  test('the summed segments still add up to the summed total', () => {
+    // The property the stacked chart depends on: a bar whose parts do not sum
+    // to its own label is worse than no stack at all.
+    const a = venue({ daily: [{ date: '2026-09-28', net_sales: 100, gross_sales: 90, food_sales: 60, beverage_sales: 30, covers: 10 }] });
+    const b = venue({ daily: [{ date: '2026-09-28', net_sales: 50, gross_sales: 45, food_sales: 20, beverage_sales: 25, covers: 5 }] });
+    const d = rollUp([a, b]).daily[0];
+    assert.equal(d.food_sales + d.beverage_sales, d.gross_sales);
   });
 
   test('a day one venue was closed still carries the other venue', () => {
     // The closed venue contributes null, which must not blank the group's day.
-    const open = venue({ daily: [{ date: '2026-09-28', net_sales: 100, covers: 10 }] });
-    const shut = venue({ daily: [{ date: '2026-09-28', net_sales: null, covers: null }] });
+    const open = venue({ daily: [{ date: '2026-09-28', net_sales: 100, gross_sales: 90, food_sales: 60, beverage_sales: 30, covers: 10 }] });
+    const shut = venue({ daily: [{ date: '2026-09-28', net_sales: null, gross_sales: null, food_sales: null, beverage_sales: null, covers: null }] });
     const g = rollUp([open, shut]);
     assert.equal(g.daily[0].net_sales, 100);
     assert.equal(g.daily[0].covers, 10);

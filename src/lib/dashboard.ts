@@ -21,7 +21,7 @@
  */
 
 import { supabaseAdmin } from '../auth/session.js';
-import { salesFiguresOf, classSplitOf } from './sales.js';
+import { salesFiguresOf, classSplitOf, foodAndBevSalesOf } from './sales.js';
 import { getCovers } from './covers.js';
 import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
@@ -236,14 +236,21 @@ export async function buildDashboard(
     const sph = covers && covers > 0 ? round2(cur.food_bev_sales / covers) : null;
     const priorSph = priorCovers && priorCovers > 0 ? round2(pri.food_bev_sales / priorCovers) : null;
 
-    const daily = mine.map(r => ({
-      date: r.business_date,
+    const daily = mine.map(r => {
       // A closed day is a GAP, never a zero. Plotted as zero it reads as a
       // collapse; the chart layer already works this way and the dashboard
       // must not disagree with it.
-      net_sales: closed(r) ? null : round2(salesFiguresOf(r as any).net_sales),
-      covers: coversCurrent[i].get(r.business_date)?.covers ?? null,
-    }));
+      const shut = closed(r);
+      const split = shut ? null : classSplitOf(r as any);
+      return {
+        date: r.business_date,
+        net_sales: shut ? null : round2(salesFiguresOf(r as any).net_sales),
+        gross_sales: shut ? null : round2(foodAndBevSalesOf(r as any)),
+        food_sales: split ? split.food_sales : null,
+        beverage_sales: split ? split.beverage_sales : null,
+        covers: coversCurrent[i].get(r.business_date)?.covers ?? null,
+      };
+    });
 
     /**
      * The next seven days, EVERY one of them, not only the ones with a booking.

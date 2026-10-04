@@ -106,6 +106,9 @@
   .chart { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
   .chart h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
   .chart svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); margin: -4px 0 6px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
 
   /* --- detail table ----------------------------------------------------- */
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -510,29 +513,34 @@ function tile(label, value, deltaHtml) {
  * dashboard must not disagree with it.
  */
 /**
- * The week's daily line, drawn by hand, WITH ITS NUMBERS ON IT.
+ * One chart: the daily shape AND the food/beverage mix.
  *
- * Khai, 4 Oct 2026: "pointless having a chart with no numbers on it." Right —
- * the first version drew seven bars and labelled nothing, so a reader could see
- * that Wednesday beat Thursday and could not tell you what either was worth.
- * That is decoration. An operator looking at a quiet Thursday needs the figure,
- * because the decision is about money and not about a shape.
+ * Khai, 4 Oct 2026: "Chart needs relevant numbers to tell the story it can show
+ * the daily breakdown on the chart the mix all in 1." Two charts would be two
+ * scrolls on a phone, and the question an operator is actually asking is a
+ * single one -- was Friday big, and was it big on drink.
  *
- * NO CHART LIBRARY. Nothing on any page loads from a third party, and a chart of
- * seven bars is a few dozen lines of SVG against a cold origin's DNS, TCP and
- * TLS on the critical path. The app already renders its own SVG in
- * src/ai/chart-svg.ts for the same reason.
+ * THE BARS SUM TO FOOD PLUS BEVERAGE, NOT TO NET SALES. The mix is defined on
+ * food and beverage, so a stack of those two must be labelled with their total;
+ * labelling it net sales would put a number above a bar that its own segments
+ * do not add up to, which is worse than no stack at all. Net sales carries the
+ * service charge and is net of discounts, so it is a different quantity and it
+ * is the one in the tiles above. The note under the chart says which is which.
+ *
+ * ORANGE AND TEAL, not orange and green. The page already uses green for a rise
+ * and red for a fall; a green segment beside those would read as a judgement on
+ * the food. Teal is also the standard partner to orange for anyone who cannot
+ * separate red from green.
  *
  * TWO LAYOUTS, BECAUSE A MONTH IS NOT A WEEK. Month to date is up to 31 bars:
- * a value above each one overlaps into mush and seven weekday letters become
- * thirty-one. So past ten bars it switches to gridlines with values on the axis
- * and dates every seventh day. The switch is on the DATA, not on the period
+ * a value above each one is mush. Past ten bars it switches to gridlines
+ * carrying the scale and dates every seventh day, so a dense chart still has
+ * numbers -- just not one per bar. The switch is on the DATA, not the period
  * name, so a part-week and a part-month both land in the right layout.
- *
- * A CLOSED DAY IS A GAP, NOT A ZERO BAR. A zero draws as a collapse, and
- * Firangi closes every Sunday — the chart layer already has this rule and the
- * dashboard must not disagree with it.
  */
+const FOOD_FILL = '#e8933a';
+const BEV_FILL = '#3fa9a0';
+
 function chartPanel(v) {
   const days = v.daily;
   if (!days.length) return '';
@@ -542,21 +550,18 @@ function chartPanel(v) {
   const padX = 16, padTop = dense ? 10 : 16, padBottom = 18;
   const plot = H - padTop - padBottom;
 
-  const values = days.map(d => d.net_sales).filter(x => x !== null);
-  const max = Math.max(...values, 1);
+  const totals = days.map(d => d.gross_sales).filter(x => x !== null);
+  const max = Math.max(...totals, 1);
   const bw = (W - padX * 2) / days.length;
 
-  /** Compact money for a chart label: 5,120 -> 5.1k. Space is the constraint. */
+  /** Compact money for a bar label: 5,120 -> 5.1k. Space is the constraint. */
   const k = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n));
 
   let svg = '';
 
   if (dense) {
-    /**
-     * GRIDLINES CARRY THE SCALE when per-bar labels will not fit. Without them
-     * a thirty-one bar chart has no numbers at all, which is the complaint
-     * this function was rewritten for — just at a different density.
-     */
+    // Gridlines carry the scale where per-bar labels cannot fit. Without them a
+    // 31-bar chart has no numbers at all, which is the whole complaint again.
     [0, 0.5, 1].forEach(f => {
       const y = padTop + plot - f * plot;
       svg += '<line x1="' + padX + '" y1="' + y + '" x2="' + (W - padX) + '" y2="' + y +
@@ -571,47 +576,80 @@ function chartPanel(v) {
     const w = bw * 0.64;
     const mid = x + w / 2;
 
-    if (d.net_sales === null) {
-      // Said in words. A zero bar on a closed day reads as a collapse.
+    if (d.gross_sales === null) {
+      // Said in words. A zero bar on a closed day reads as a collapse, and
+      // Firangi closes every Sunday.
       svg += '<text x="' + mid + '" y="' + (padTop + plot - 3) + '" text-anchor="middle" ' +
              'font-size="' + (dense ? 6 : 8) + '" fill="#8888a0">' + (dense ? '–' : 'closed') + '</text>';
     } else {
-      const h = Math.max(1, (d.net_sales / max) * plot);
-      const y = padTop + plot - h;
-      svg += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
-             '" rx="1.5" fill="#e8933a" opacity="0.85"></rect>';
-      // The number, above its own bar, where there is room for it.
+      const h = Math.max(1, (d.gross_sales / max) * plot);
+      const foodH = d.gross_sales > 0 ? h * ((d.food_sales ?? 0) / d.gross_sales) : 0;
+      const top = padTop + plot - h;
+
+      // Beverage on top, food beneath it: food is the larger half at every
+      // venue here, so the moving segment is the one the eye can follow.
+      svg += '<rect x="' + x + '" y="' + top + '" width="' + w + '" height="' + Math.max(0, h - foodH) +
+             '" fill="' + BEV_FILL + '" opacity="0.9"></rect>';
+      svg += '<rect x="' + x + '" y="' + (top + (h - foodH)) + '" width="' + w + '" height="' + foodH +
+             '" fill="' + FOOD_FILL + '" opacity="0.9"></rect>';
+
       if (!dense) {
-        svg += '<text x="' + mid + '" y="' + (y - 4) + '" text-anchor="middle" ' +
-               'font-size="9" fill="#e4e4ef">' + k(d.net_sales) + '</text>';
+        svg += '<text x="' + mid + '" y="' + (top - 4) + '" text-anchor="middle" ' +
+               'font-size="9" fill="#e4e4ef">' + k(d.gross_sales) + '</text>';
       }
     }
 
-    /**
-     * X LABELS THIN OUT RATHER THAN OVERLAP. Thirty-one weekday letters are
-     * unreadable, so a dense chart labels every seventh day with its date —
-     * which is also the only way to see where the weeks begin.
-     */
-    const show = !dense || i % 7 === 0 || i === days.length - 1;
-    if (show) {
+    // X labels thin out rather than overlap: 31 weekday letters are unreadable,
+    // so a dense chart labels every seventh day, which is also where the weeks
+    // begin.
+    if (!dense || i % 7 === 0 || i === days.length - 1) {
       const date = new Date(d.date + 'T00:00:00Z');
-      const label = dense
-        ? String(date.getUTCDate())
-        : date.toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' });
       svg += '<text x="' + mid + '" y="' + (H - 5) + '" text-anchor="middle" ' +
-             'font-size="' + (dense ? 8 : 10) + '" fill="#8888a0">' + esc(label) + '</text>';
+             'font-size="' + (dense ? 8 : 10) + '" fill="#8888a0">' +
+             esc(dense ? String(date.getUTCDate())
+                       : date.toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' })) +
+             '</text>';
     }
   });
 
-  const best = days.reduce((a, d) => (d.net_sales !== null && (!a || d.net_sales > a.net_sales) ? d : a), null);
+  /**
+   * The story, in one sentence, from the same rows the bars are drawn from.
+   *
+   * The chart shows that the mix moves; this says WHERE it moved most, which is
+   * the thing somebody would otherwise have to work out by squinting at seven
+   * stacks. Both figures are real and neither is computed in the browser beyond
+   * picking a maximum.
+   */
+  const traded = days.filter(d => d.gross_sales !== null && d.gross_sales > 0);
+  const best = traded.reduce((a, d) => (!a || d.gross_sales > a.gross_sales ? d : a), null);
+  const bevTop = traded.reduce((a, d) => {
+    const share = (d.beverage_sales ?? 0) / d.gross_sales;
+    return !a || share > (a.beverage_sales ?? 0) / a.gross_sales ? d : a;
+  }, null);
 
-  return '<div class="chart"><h2>Net sales by day</h2>' +
-         '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Net sales by day">' + svg + '</svg>' +
-         (best
-           ? '<p class="figure-note" style="padding:6px 0 0">Best day ' +
-             esc(new Date(best.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' })) +
-             ' at ' + money(best.net_sales) + '. Figures are net sales.</p>'
-           : '') +
+  const dayName = d => new Date(d.date + 'T00:00:00Z')
+    .toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+  let story = '';
+  if (best) {
+    story = 'Biggest day ' + esc(dayName(best)) + ' at ' + money(best.gross_sales) + '.';
+    if (bevTop && bevTop.gross_sales > 0) {
+      story += ' Beverage ran highest on ' + esc(dayName(bevTop)) + ' at ' +
+               pct((bevTop.beverage_sales / bevTop.gross_sales) * 100) + ' of sales.';
+    }
+  }
+
+  const legend =
+    '<div class="legend">' +
+      '<span><i style="background:' + FOOD_FILL + '"></i>Food</span>' +
+      '<span><i style="background:' + BEV_FILL + '"></i>Beverage</span>' +
+    '</div>';
+
+  return '<div class="chart"><h2>Sales by day, food and beverage</h2>' + legend +
+         '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Food and beverage sales by day">' + svg + '</svg>' +
+         '<p class="figure-note" style="padding:6px 0 0">' + story +
+         ' Bars are food + beverage, before discounts and excluding service charge \u2014 the basis the mix is measured on. ' +
+         'Net sales in the tiles above is a different figure: it carries the service charge and is net of discounts.</p>' +
          '</div>';
 }
 

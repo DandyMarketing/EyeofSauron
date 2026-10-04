@@ -48,8 +48,23 @@ export interface VenueWeek {
     avg_spend_per_head: ReturnType<typeof movement>;
   };
 
-  /** One point per day of the current week, for the line. Closed days are null. */
-  daily: Array<{ date: string; net_sales: number | null; covers: number | null }>;
+  /**
+   * One point per day. Closed days are null, never zero.
+   *
+   * Carries the SPLIT as well as the total, so one chart can show the daily
+   * shape and the food/beverage mix together. The mix is defined on food plus
+   * beverage, so `gross_sales` is that figure and the two parts sum to it
+   * exactly -- a stack whose segments do not add up to its own label is worse
+   * than no stack at all.
+   */
+  daily: Array<{
+    date: string;
+    net_sales: number | null;
+    gross_sales: number | null;
+    food_sales: number | null;
+    beverage_sales: number | null;
+    covers: number | null;
+  }>;
 
   /**
    * Expected covers for the rest of today and the next six days.
@@ -94,11 +109,14 @@ export function rollUp(rows: VenueWeek[]): VenueWeek {
     : null;
 
   // One point per date across every venue.
-  const byDate = new Map<string, { net: number; covers: number | null }>();
+  const byDate = new Map<string, { net: number; gross: number; food: number; bev: number; covers: number | null }>();
   for (const r of rows) {
     for (const d of r.daily) {
-      const e = byDate.get(d.date) ?? { net: 0, covers: null };
+      const e = byDate.get(d.date) ?? { net: 0, gross: 0, food: 0, bev: 0, covers: null };
       e.net += d.net_sales ?? 0;
+      e.gross += d.gross_sales ?? 0;
+      e.food += d.food_sales ?? 0;
+      e.bev += d.beverage_sales ?? 0;
       if (d.covers !== null) e.covers = (e.covers ?? 0) + d.covers;
       byDate.set(d.date, e);
     }
@@ -140,7 +158,14 @@ export function rollUp(rows: VenueWeek[]): VenueWeek {
       avg_spend_per_head: movement(sph, priorSph),
     },
     daily: [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, e]) => ({ date, net_sales: round2(e.net), covers: e.covers })),
+      .map(([date, e]) => ({
+        date,
+        net_sales: round2(e.net),
+        gross_sales: round2(e.gross),
+        food_sales: round2(e.food),
+        beverage_sales: round2(e.bev),
+        covers: e.covers,
+      })),
     upcoming: [...upcomingByDate.entries()].sort(([a], [b]) => a.localeCompare(b))
       .map(([date, e]) => ({ date, covers: e.covers, closed: e.closed })),
   };

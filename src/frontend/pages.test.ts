@@ -695,10 +695,11 @@ test('the daily chart puts its figures on the bars', () => {
   const home = readFileSync('public/index.html', 'utf8');
   const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
 
-  assert.match(fn, /k\(d\.net_sales\)/, 'the bars carry no value label');
+  assert.match(fn, /k\(d\.gross_sales\)/, 'the bars carry no value label');
   assert.match(fn, /const k = n => n >= 1000/, 'there is no compact money format for a bar label');
-  // And the one figure worth stating in words.
-  assert.match(fn, /Best day /);
+  // And the story, in words, from the same rows the bars are drawn from.
+  assert.match(fn, /Biggest day /);
+  assert.match(fn, /Beverage ran highest on /);
 });
 
 test('a long period switches layout instead of overlapping', () => {
@@ -724,6 +725,39 @@ test('a closed day is never drawn as a zero bar', () => {
   // layer already has this rule and the dashboard must not disagree with it.
   const home = readFileSync('public/index.html', 'utf8');
   const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
-  assert.match(fn, /if \(d\.net_sales === null\)/);
+  assert.match(fn, /if \(d\.gross_sales === null\)/);
   assert.match(fn, /'closed'/);
+});
+
+test('the chart shows the mix in the same bars as the daily shape', () => {
+  /**
+   * Khai: "Chart needs relevant numbers to tell the story it can show the daily
+   * breakdown on the chart the mix all in 1." Two charts would be two scrolls on
+   * a phone, and the question is a single one — was Friday big, and was it big
+   * on drink.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+
+  assert.match(fn, /FOOD_FILL/, 'the bars are not split by class');
+  assert.match(fn, /BEV_FILL/);
+  assert.match(fn, /d\.food_sales/, 'the food segment is not drawn from the food figure');
+  assert.match(home, /\.legend\s*\{/, 'there is no legend, so the two colours mean nothing');
+});
+
+test('the stack sums to its own label, not to net sales', () => {
+  /**
+   * The mix is defined on food + beverage. Labelling a stack of those two with
+   * NET sales would put a number above a bar that its own segments do not add
+   * up to — net carries the service charge and is net of discounts. That is
+   * worse than no stack at all, and it is the kind of thing nobody would catch
+   * by eye because both figures are real.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function chartPanel('), home.indexOf('function bookPanel('));
+
+  assert.match(fn, /const totals = days\.map\(d => d\.gross_sales\)/, 'the scale is not the stacked total');
+  assert.match(fn, /\(d\.gross_sales \/ max\)/, 'the bar height is not drawn from the stacked total');
+  // And the page has to say the tiles are a different quantity.
+  assert.match(fn, /Net sales in the tiles above is a different figure/);
 });
