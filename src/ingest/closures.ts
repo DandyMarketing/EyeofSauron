@@ -1,3 +1,4 @@
+import { weekdayIndex } from '../lib/weekdays.js';
 /**
  * Telling a closed venue apart from a failed ingestion.
  *
@@ -13,13 +14,16 @@
  * give ingestion the one fact it was missing: which days this venue trades.
  */
 
-/** Monday = 0 ... Sunday = 6, matching DOW_LABELS in src/ai/charts.ts. */
+/**
+ * Monday = 0 ... Sunday = 6.
+ *
+ * Delegated to src/lib/weekdays.ts, which is the single definition. It used to
+ * compute this itself, which was correct and was also a third copy of the same
+ * two lines -- and a fourth copy, in post-patterns.ts, had quietly gone
+ * Sunday-first.
+ */
 export function weekdayOf(businessDate: string): number {
-  // Parsed as UTC. `new Date('2026-08-09')` alone reads back in local time,
-  // which shifts the weekday for any server west of GMT -- the same bug
-  // bucketOf() had to avoid.
-  const d = new Date(`${businessDate}T00:00:00Z`);
-  return (d.getUTCDay() + 6) % 7;
+  return weekdayIndex(businessDate);
 }
 
 /**

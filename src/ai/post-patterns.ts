@@ -12,6 +12,8 @@
  * to lean on.
  */
 
+import { weekdayName } from '../lib/weekdays.js';
+
 
 /**
  * A flag's bucket, or nothing at all.
@@ -93,8 +95,16 @@ export interface PatternResult {
  */
 export const MIN_MEANINGFUL_SAMPLE = 5;
 
-/** Sunday-first, matching Postgres and the weekday charts already built. */
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/**
+ * MONDAY-FIRST, from the one definition in src/lib/weekdays.ts.
+ *
+ * This was a Sunday-first array of its own, under a comment saying it matched
+ * "the weekday charts already built" -- which index from a Monday-first array.
+ * Nothing broke, because this module ranks weekdays by median performance
+ * rather than by weekday, so the order never showed. It would have surfaced as
+ * an off-by-one the first time anybody sorted by the index or lined a post
+ * weekday up against a sales weekday.
+ */
 
 /**
  * Time bands chosen for a restaurant rather than for a marketing calendar.
@@ -174,7 +184,7 @@ function groupsFor(post: PostLike, dimension: Dimension): string[] {
       return flagBucket(post.shows_process, 'shows it being made', 'shows the finished thing');
     case 'weekday': {
       const d = new Date(`${post.business_date}T00:00:00Z`);
-      return Number.isNaN(d.getTime()) ? [] : [WEEKDAYS[d.getUTCDay()]];
+      return Number.isNaN(d.getTime()) ? [] : [weekdayName(post.business_date)];
     }
     case 'time_of_day':
       return post.posted_hour === null ? [] : [timeBand(post.posted_hour)];

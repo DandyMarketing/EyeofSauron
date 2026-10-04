@@ -36,7 +36,8 @@ export type Metric =
 export type Granularity = 'day' | 'week' | 'month' | 'day_of_week';
 
 /** Monday-first, because a trading week reads Mon..Sun, not Sun..Sat. */
-const DOW_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+// The one definition, Monday-first. See src/lib/weekdays.ts for why.
+import { DOW_LABELS } from '../lib/weekdays.js';
 
 /**
  * Metrics that are running totals rather than ratios.
