@@ -74,6 +74,11 @@
   .period-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
   /* A caveat the figures cannot show — one fewer Saturday, or a month end with
      no matching date. Both land as a movement and neither is the business. */
+  /* A bill-derived figure whose coverage is too low to mean anything. Said in
+     words, never printed as a small percentage — an under-covered beverage cost
+     of 2% looks like the best bar in Singapore. */
+  .unusable { color: var(--text-muted); font-style: italic; }
+  .cov { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
   .window-warn { color: var(--accent); font-size: 12px; line-height: 1.5; margin-top: 4px; }
   .venues { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .venue-chip {
@@ -429,7 +434,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     periodChips() + chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
-    monthlySection(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
+    periodCostPanel(payload, v, w) + monthlySection(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -654,6 +659,45 @@ function advicePanel(recData, v, today) {
  * cost quoted while several thousand dollars of cost of sales sits unexplained
  * is the most misleading figure on this page, so it is a row rather than a note.
  */
+/**
+ * Cost of sales for the period on screen, from supplier bills.
+ *
+ * SITS ABOVE THE LEDGER PANEL, NOT INSTEAD OF IT. Bills carry a date so this
+ * follows whatever window is selected, which the monthly P&L cannot do -- but a
+ * bill is PURCHASING, not consumption, and at a weekly grain one large delivery
+ * lands entirely in the week it was invoiced against sales spread over the next
+ * three. The ledger figure is slower and settled. Showing both, with the
+ * coverage percentage, is what lets a reader tell which to believe.
+ *
+ * AN UNDER-COVERED FIGURE IS NOT SHOWN AS A NUMBER. Bills explain food
+ * purchases at roughly 100% and beverage at ZERO -- drink is bought on a card
+ * or coded to inventory and journalled out later, so it never touches a bill.
+ * Printed anyway, a beverage cost of 2% looks like the best bar in Singapore.
+ */
+function periodCostPanel(payload, v, w) {
+  const c = payload.period_costs && payload.period_costs[v.slug];
+  if (!c) return '';
+
+  const row = (label, s) => {
+    if (!s.usable) {
+      return '<tr><td>' + label + '</td><td class="unusable">' +
+        (s.coverage_pct === null ? 'coverage unknown' : 'only ' + pct(s.coverage_pct) + ' on bills') +
+        '</td></tr>';
+    }
+    return '<tr><td>' + label + '</td><td>' + money(s.cogs) +
+      (s.pct === null ? ' — no sales' : ' — ' + pct(s.pct)) +
+      ' <span class="cov">' + pct(s.coverage_pct) + ' covered</span></td></tr>';
+  };
+
+  return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
+    '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
+    '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
+    'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +
+    'A line shown as "only X% on bills" is mostly absence: drink is often bought on a card or coded to inventory, so it never reaches an invoice.</p>' +
+    (c.caveats.length ? '<p class="figure-note">' + c.caveats.map(x => esc(x)).join('<br><br>') + '</p>' : '') +
+    '</div>';
+}
+
 function costPanel(payload, v) {
   const c = payload.costs && payload.costs[v.slug];
   if (!c) return '';

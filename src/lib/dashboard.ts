@@ -29,7 +29,8 @@ import {
   lastCompleteMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
   type RetentionCounts, type RetentionShares,
 } from './retention-month.js';
-import { costRatios, costCaveats, type CostRatios, type PLRow } from './cost-ratios.js';
+import { costRatios, costCaveats, classifyCogs, type CostRatios, type PLRow } from './cost-ratios.js';
+import { weeklyCogs, coverageFor, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
@@ -109,6 +110,17 @@ export interface CostBlock {
 
 export interface DashboardPayload {
   window: PeriodWindow;
+  /**
+   * Food and beverage cost for the SELECTED period, from supplier bills.
+   *
+   * Bills carry a date, so unlike the P&L this follows whatever window is on
+   * screen -- which is the correction Khai made: "a weekly cogs is based on the
+   * same week sales, invoices are uploaded at their best daily." Null when the
+   * venue has no bills ingested. It sits BESIDE the ledger figure rather than
+   * replacing it: bills are earlier and noisier, the ledger is slower and
+   * settled, and the coverage percentage is what says which to believe.
+   */
+  period_costs: Record<string, WeeklyCogs> | null;
   /**
    * Cost of sales for the last COMPLETE month, beside the retention block and
    * for the same reason: the P&L's finest grain is a month, so there is no
@@ -263,11 +275,12 @@ export async function buildDashboard(
   });
 
   // Independent of each other and of everything above; neither blocks the page.
-  const [retention, costs] = await Promise.all([
+  const [retention, costs, periodCosts] = await Promise.all([
     buildRetention(venues, window.today),
     buildCosts(venues, window.today),
+    buildPeriodCosts(venues, window.current.start, window.current.end, window.today),
   ]);
-  return { window, retention, costs, venues: out, group: out.length > 1 ? rollUp(out) : null };
+  return { window, retention, costs, period_costs: periodCosts, venues: out, group: out.length > 1 ? rollUp(out) : null };
 }
 
 
@@ -428,6 +441,104 @@ async function buildCosts(
     return anyAvailable ? out : null;
   } catch (e: any) {
     console.warn(`[dashboard] cost of sales failed: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
+
+/**
+ * Food and beverage cost for the SELECTED window, from supplier bills.
+ *
+ * WHY THIS EXISTS BESIDE THE LEDGER ONE. The P&L closes monthly, so a food cost
+ * from it is six weeks behind by the time anybody could act on it. Bills carry
+ * a date and arrive daily, so they give the same measurement at whatever grain
+ * is on screen -- at the cost of being purchasing rather than consumption, and
+ * of only covering what actually came through a bill.
+ *
+ * COVERAGE IS MEASURED ON THE LAST COMPLETE MONTH, never on the window being
+ * reported. A part-month has bills not yet entered and a ledger not yet closed;
+ * measuring coverage there compares two different kinds of incomplete.
+ */
+async function buildPeriodCosts(
+  venues: Array<{ id: string; name: string; slug: string }>,
+  start: string,
+  end: string,
+  today: string,
+): Promise<Record<string, WeeklyCogs> | null> {
+  const month = lastCompleteMonth(today);
+
+  try {
+    let any = false;
+    const out: Record<string, WeeklyCogs> = {};
+
+    await Promise.all(venues.map(async v => {
+      const [{ data: pl }, { data: windowLines }, { data: monthLines }, { data: ops }, accountMap] = await Promise.all([
+        // The P&L is read for TWO things: the account_id -> name map, and the
+        // ledger totals coverage is measured against.
+        supabaseAdmin.from('profit_and_loss')
+          .select('account_id, account_name, section, amount, is_summary')
+          .eq('venue_id', v.id)
+          .gte('period_start', month.start)
+          .lte('period_end', month.end),
+        supabaseAdmin.from('supplier_bill_lines')
+          .select('account_id, line_amount, supplier_bills!inner(bill_date)')
+          .eq('venue_id', v.id)
+          .gte('supplier_bills.bill_date', start)
+          .lte('supplier_bills.bill_date', end),
+        supabaseAdmin.from('supplier_bill_lines')
+          .select('account_id, line_amount, supplier_bills!inner(bill_date)')
+          .eq('venue_id', v.id)
+          .gte('supplier_bills.bill_date', month.start)
+          .lte('supplier_bills.bill_date', month.end),
+        supabaseAdmin.from('daily_operations')
+          .select('gross_sales, sales_by_class')
+          .eq('venue_id', v.id)
+          .gte('business_date', start)
+          .lte('business_date', end),
+        fetchAccountMap(v.id),
+      ]);
+
+      if (!windowLines || windowLines.length === 0) return;
+      any = true;
+
+      /**
+       * account_id -> canonical name. The join that makes this possible at all:
+       * profit_and_loss.account_id holds the same Xero UUID as a bill line, so a
+       * bill reaches its P&L account without a chart-of-accounts lookup.
+       */
+      const names: AccountNames = new Map();
+      const ledger = { food: 0, beverage: 0 };
+      for (const r of pl ?? []) {
+        if (!r.account_id) continue;
+        const canonical = resolveAccount(r.account_name, accountMap).canonical_account;
+        names.set(r.account_id, canonical);
+        if (r.is_summary || !/cost of sales/i.test(r.section ?? '')) continue;
+        const kind = classifyCogs(canonical);
+        if (kind === 'food') ledger.food += Number(r.amount);
+        else if (kind === 'beverage') ledger.beverage += Number(r.amount);
+      }
+
+      const toLines = (rows: any[]): BillLine[] =>
+        rows.map(r => ({ account_id: r.account_id, line_amount: Number(r.line_amount), bill_date: '' }));
+
+      let food = 0, bev = 0;
+      for (const o of ops ?? []) {
+        const split = classSplitOf(o as any);
+        food += split.food_sales;
+        bev += split.beverage_sales;
+      }
+
+      out[v.slug] = weeklyCogs(
+        toLines(windowLines),
+        names,
+        { food_sales: food, beverage_sales: bev },
+        coverageFor(toLines(monthLines ?? []), names, ledger),
+      );
+    }));
+
+    return any ? out : null;
+  } catch (e: any) {
+    console.warn(`[dashboard] period costs failed: ${e?.message ?? e}`);
     return null;
   }
 }

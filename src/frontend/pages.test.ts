@@ -644,3 +644,40 @@ test('a comparison the figures cannot explain is shown, not buried', () => {
   assert.match(home, /w\.warnings && w\.warnings\.length/, 'period warnings are never rendered');
   assert.match(home, /\.window-warn\s*\{/, 'there is no style for a period warning, so it reads as body text');
 });
+
+/**
+ * Cost of sales at the period's own grain, from supplier bills.
+ *
+ * Khai, correcting me: "a weekly cogs is based on the same week sales, invoices
+ * are uploaded at their best daily." I had said a cost percentage could only be
+ * monthly because the P&L's finest grain is a month. Bills carry a DATE, so the
+ * purchases side always had daily resolution — the monthly limit belonged to
+ * one source, not to the measurement.
+ */
+test('the dashboard shows a bill-derived cost for the selected period', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.ok(home.includes('function periodCostPanel('), 'there is no period cost panel');
+  assert.match(home, /payload\.period_costs/, 'the page never reads the bill-derived figures');
+  // Beside the ledger one, not instead of it: bills are earlier and noisier,
+  // the ledger is slower and settled.
+  assert.ok(
+    home.indexOf('periodCostPanel(payload, v, w)') < home.indexOf('monthlySection(payload, v)'),
+    'the bill-derived panel should sit above the monthly ledger one, not replace it',
+  );
+});
+
+test('an under-covered cost figure is never printed as a percentage', () => {
+  /**
+   * Measured at Neon Pigeon for June 2026: bills explain food purchases at
+   * roughly 100% and COGS Beverages at ZERO — drink is bought on a card or
+   * coded to inventory and journalled out later, so it never touches a bill.
+   * Printed anyway, a beverage cost of 0.9% looks like the best bar in
+   * Singapore. That is the most flattering way this product could lie.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /if \(!s\.usable\)/, 'an unusable figure is rendered the same as a usable one');
+  assert.match(home, /only ' \+ pct\(s\.coverage_pct\) \+ ' on bills/, 'the coverage is not stated in place of the number');
+  assert.match(home, /\.unusable\s*\{/, 'there is no style distinguishing an unusable figure');
+  // And the coverage is beside every figure that IS shown.
+  assert.match(home, /' covered<\/span>/);
+});
