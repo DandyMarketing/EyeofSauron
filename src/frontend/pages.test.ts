@@ -435,16 +435,43 @@ test('every page offers the dashboard, and none still calls / the chat', () => {
  * that closed and act during the week in progress.
  */
 test('the dashboard names the period its advice covers', () => {
+  /**
+   * The advice is now ONE LINE at the top that opens in place, not a panel in
+   * the scroll — weekly content was taking daily screen space. The period still
+   * has to be on it: the engine reviews a week that has CLOSED while the
+   * figures below are whatever period is selected, and without the dates the
+   * two read as a contradiction.
+   */
   const home = readFileSync('public/index.html', 'utf8');
 
   assert.ok(
     !/This week.s advice/.test(home),
-    'the advice panel claims to be about this week — the engine reviews the week that CLOSED',
+    'the advice claims to be about this week — the engine reviews the week that CLOSED',
   );
-  assert.match(home, /Advice from the week just reviewed/);
-  // The actual dates, not just a word: "a completed week" with no period is
-  // still something a reader has to take on trust.
-  assert.ok(home.includes('fmtRange(start, latest)'), 'the panel no longer prints the period it covers');
+  assert.ok(home.includes('function adviceLine('), 'the advice is not a collapsible line');
+  assert.match(home, /advice-when/, 'the summary line does not carry the period');
+  assert.ok(home.includes('fmtRange(start, latest)'), 'the advice no longer prints the period it covers');
+  assert.match(home, /you review the closed week and act during this one/);
+});
+
+test('the advice sits above the figures and the ask bar is pinned', () => {
+  /**
+   * Khai: "the briefing and advice from previous week needs to live
+   * differently it's distracting and that ask function at the bottom is more
+   * useful." The advice is weekly content in a daily surface, so it collapses;
+   * the ask box is the only unbounded thing on the page and it was last, after
+   * five panels.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const render = home.slice(home.indexOf("document.getElementById('app').innerHTML ="), home.indexOf('function tile('));
+
+  assert.ok(
+    render.indexOf('adviceLine(') < render.indexOf('periodChips('),
+    'the advice should lead — the brief says the recommendations are the product',
+  );
+  assert.ok(home.includes('function askBar('), 'the ask box is not a pinned bar');
+  assert.match(home, /\.askbar\s*\{[^}]*position: fixed/s, 'the ask bar is not fixed to the viewport');
+  assert.match(home, /main \{ padding-bottom: \d+px; \}/, 'nothing reserves room for the bar, so it covers the last panel');
 });
 
 test('the dashboard never mixes two periods of advice under one heading', () => {
@@ -472,7 +499,10 @@ test('stale advice is reported rather than dressed up as current', () => {
   // it was doing nothing".
   const home = readFileSync('public/index.html', 'utf8');
   assert.match(home, /ageDays > 10/);
-  assert.match(home, /The weekly run has not produced anything newer/);
+  assert.match(home, /The weekly run has produced nothing newer than this in/);
+  // And it is visible from the collapsed line, or nobody opens it to find out.
+  assert.match(home, /' · out of date'/);
+  assert.match(home, /\.advice\.stale\s*\{/);
 });
 
 test('the engine is told not to call the reviewed week "this week"', () => {

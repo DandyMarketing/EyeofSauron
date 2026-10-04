@@ -171,19 +171,66 @@
   .rec-body li { margin: 4px 0; }
   .rec-body a { color: var(--accent); }
 
-  /* --- ask box ------------------------------------------------------------ */
-  .ask { display: flex; gap: 8px; margin-bottom: 24px; }
-  .ask input {
-    flex: 1; min-width: 0; padding: 11px 14px; font-size: 15px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+
+  .empty { color: var(--text-muted); font-size: 13px; padding: 14px; }
+
+  /* --- the advice, as one line that opens in place ---------------------- */
+  /* WEEKLY content in a DAILY surface. As a full panel it meant scrolling past
+     the same three items all week to reach the numbers. One line keeps it
+     present -- the brief is explicit that the recommendations are the product --
+     without letting it take the screen. */
+  .advice {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 10px; margin-bottom: 14px;
   }
-  .ask input:focus { outline: none; border-color: var(--accent); }
-  .ask button {
+  .advice.stale { border-left-color: var(--error); }
+  .advice > summary {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 2px 10px; padding: 9px 14px; cursor: pointer; list-style: none; font-size: 13px;
+  }
+  .advice > summary::-webkit-details-marker { display: none; }
+  .advice > summary::after {
+    content: '›'; grid-column: 2; grid-row: 1 / span 2;
+    color: var(--text-muted); font-size: 18px; line-height: 1;
+  }
+  .advice[open] > summary::after { content: '⌄'; }
+  .advice-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .advice-count {
+    background: var(--accent); color: #1a1008; font-weight: 700; font-size: 11px;
+    border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
+  }
+  .advice-when { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+  /* Two lines at most. A long headline is a reason to open it, not to let the
+     collapsed line grow back into the panel this replaced. */
+  .advice-head {
+    color: var(--text); font-weight: 600; min-width: 0; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .advice[open] .advice-head { -webkit-line-clamp: unset; }
+  .advice-body { border-top: 1px solid var(--border); }
+
+  /* --- the ask bar, pinned ------------------------------------------------ */
+  /* The only unbounded thing on the page, and it was last after five panels.
+     Fixed to the VIEWPORT rather than the document, so it rides above the
+     keyboard on Android and moves with it on iOS. */
+  .askbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .askbar-inner { display: flex; gap: 8px; max-width: 760px; margin: 0 auto; }
+  .askbar input {
+    flex: 1; min-width: 0; padding: 11px 14px; font-size: 16px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+  }
+  .askbar input:focus { outline: none; border-color: var(--accent); }
+  .askbar button {
     padding: 11px 16px; font-size: 14px; border: none; border-radius: 10px;
     background: var(--accent); color: #1a1008; font-weight: 600; cursor: pointer;
   }
+  /* Room for the bar, so it never covers the last panel. */
+  main { padding-bottom: 86px; }
 
-  .empty { color: var(--text-muted); font-size: 13px; padding: 14px; }
 
   .post-thumb { max-width: 100%; border-radius: 8px; vertical-align: middle; margin: 4px 6px 4px 0; }
   .post-thumb.expired { max-width: 0; max-height: 0; margin: 0; opacity: 0; }
@@ -436,8 +483,8 @@ function draw(recData) {
     'Spend per head = food &amp; beverage ÷ covers · Average check = revenue per bill</p></div>';
 
   document.getElementById('app').innerHTML =
-    periodChips() + chips + windowLine + tiles + chartPanel(v) + table + bookPanel(v, w) +
-    periodCostPanel(payload, v, w) + monthlySection(payload, v) + advicePanel(recData, v, w.today) + askBox(v);
+    adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
+    table + bookPanel(v, w) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -675,105 +722,6 @@ function bookPanel(v, w) {
 }
 
 /**
- * The advice, and the period it is actually about.
- *
- * IT IS NOT ABOUT THIS WEEK, AND SAYING SO IS THE WHOLE POINT. The engine runs
- * on `lastCompleteWeek()` -- a Monday-to-Sunday that has already closed --
- * because a Tuesday dip is a Tuesday and only a quiet WEEK is news. The figures
- * above are week to date. Putting the two under a heading reading "this week's
- * advice" states something false and invites a reader to check the advice
- * against the numbers beside it, which will not reconcile because they are
- * different weeks.
- *
- * They are not in conflict once labelled. You review the week that closed and
- * act during the week in progress -- that IS the operating rhythm, and it only
- * reads as a contradiction when the period is left off.
- *
- * ONE PERIOD ONLY. /api/recommendations returns up to 60 rows ordered by
- * generated_at across EVERY period, so taking the top three could quietly mix
- * last week's advice with the week before's -- two periods under one heading,
- * which is the same defect one layer up. The latest period wins and the rest
- * are left for the briefing.
- *
- * AND A STALE ENGINE IS REPORTED RATHER THAN DRESSED UP. A complete week ends
- * between one and seven days before any given day, so a period older than ten
- * means the weekly run has not fired. Showing fortnight-old advice under a
- * fresh-looking heading is the failure this codebase keeps finding: it worked,
- * it looked fine, it was doing nothing.
- */
-function advicePanel(recData, v, today) {
-  const recs = (recData && recData.recommendations) || [];
-  const mine = (v.slug === 'group' ? recs : recs.filter(r => r.venue_id === v.venue_id))
-    .filter(r => r.status !== 'dismissed');
-
-  const withheld = recData && recData.withheld_for_role
-    ? '<p class="figure-note">' + recData.withheld_for_role + ' recommendation(s) are not shown for your role.</p>'
-    : '';
-
-  if (!mine.length) {
-    return '<div class="panel"><h2>Advice</h2>' +
-           '<div class="empty">Nothing outstanding. An engine that always has something to say is one nobody believes \u2014 a quiet week is a valid result.</div>' +
-           withheld + '</div>';
-  }
-
-  // The most recently REVIEWED period, not the most recently generated row.
-  const latest = mine.reduce((a, r) => (r.period_end > a ? r.period_end : a), '');
-  const shown = mine.filter(r => r.period_end === latest).slice(0, 3);
-  const start = shown.reduce((a, r) => (!a || r.period_start < a ? r.period_start : a), '');
-
-  const ageDays = Math.round(
-    (Date.parse(today + 'T00:00:00Z') - Date.parse(latest + 'T00:00:00Z')) / 86400000);
-
-  const stale = ageDays > 10
-    ? '<p class="figure-note" style="color:var(--accent)">The weekly run has not produced anything newer than this in ' +
-      ageDays + ' days. Treat it as out of date and check the engine.</p>'
-    : '';
-
-  return '<div class="panel"><h2>Advice from the week just reviewed</h2>' +
-    '<p class="figure-note" style="padding-bottom:4px">Covering <strong>' + fmtRange(start, latest) +
-    '</strong> \u2014 a completed week, which is the only unit worth advising on. ' +
-    'The figures above are this week so far, so the two will not tie: you review the closed week and act during this one.</p>' +
-    shown.map(r =>
-      '<div class="rec">' +
-        '<div class="rec-venue">' + esc(r.venue) + (r.status === 'acted_on' ? ' \u00b7 acted on' : '') + '</div>' +
-        '<div class="rec-headline">' + esc(r.headline) + '</div>' +
-        '<div class="rec-body">' + renderMarkdown(r.body || '') + '</div>' +
-      '</div>').join('') +
-    stale + withheld +
-    '<p class="figure-note"><a href="/briefing.html">Open the full briefing</a> to rate these or read the evidence behind them.</p>' +
-    '</div>';
-}
-
-/**
- * Guest retention. A MONTHLY figure on a weekly page, and it says so.
- *
- * It cannot be weekly. A week holds too few returning guests for the rate to
- * mean anything -- create_chart forces both retention measures to monthly
- * whatever it is asked for, for exactly this reason. The underlying function
- * will happily compute a week, which is the trap: it returns a number, the
- * number is right, and it is not a measurement.
- *
- * EVERY RATE CARRIES ITS COUNTS. Repeat share FALLS when a venue attracts a lot
- * of new guests, because new guests enlarge the bottom of the fraction. A great
- * month for new business pushes it down, and a venue that has stopped winning
- * anybody new posts a rising retention rate all the way down. "Retention 25%"
- * alone is a figure a manager reads backwards.
- */
-/**
- * Cost of sales, beside retention and for the same reason: it is MONTHLY.
- *
- * The P&L's finest grain is a month, so there is no week-to-date food cost.
- * Putting it under the week's figures without the period on it would invite
- * exactly the arithmetic that does not work -- September's cost against this
- * week's sales.
- *
- * THE UNCLASSIFIED LINE IS NOT A FOOTNOTE. Cost-of-sales accounts that are
- * neither food nor beverage by name are excluded from both percentages, and an
- * account nobody has mapped looks identical to packaging from the ratio. A food
- * cost quoted while several thousand dollars of cost of sales sits unexplained
- * is the most misleading figure on this page, so it is a row rather than a note.
- */
-/**
  * Cost of sales for the period on screen, from supplier bills.
  *
  * SITS ABOVE THE LEDGER PANEL, NOT INSTEAD OF IT. Bills carry a date so this
@@ -900,12 +848,127 @@ function retentionPanel(payload, v) {
     '</div>';
 }
 
-function askBox(v) {
+/**
+ * The advice, as ONE LINE at the top that expands in place.
+ *
+ * Khai, 4 Oct 2026: "the briefing and advice from previous week needs to live
+ * differently it's distracting." The reason is structural rather than
+ * cosmetic -- it is WEEKLY content in a DAILY surface. You read it once; you
+ * open the dashboard every day. As a full panel it meant scrolling past the
+ * same three items all week to reach the numbers, going stale in place. Naming
+ * the period, which this used to do in a heading, made it honest without making
+ * it any less in the way.
+ *
+ * So it collapses to a summary carrying the count, the period and the top
+ * headline, and opens in place rather than navigating away -- a phone between
+ * services is the wrong moment to lose your scroll position. It sits at the TOP
+ * because the brief is explicit that the recommendations are the product and
+ * the analytics are table stakes; one line is the smallest honest way to say
+ * that without taking the screen.
+ *
+ * <details> rather than a click handler: no JavaScript, keyboard accessible,
+ * and the open state cannot get out of step with anything.
+ *
+ * IT IS NOT ABOUT THIS WEEK, AND IT SAYS SO. The engine runs on
+ * lastCompleteWeek(), a Monday-to-Sunday that has already closed, because a
+ * Tuesday dip is a Tuesday and only a quiet WEEK is news. The figures below are
+ * whatever period is selected. You review the closed week and act during the
+ * one in progress; it only reads as a contradiction when the period is missing.
+ *
+ * ONE PERIOD ONLY. /api/recommendations returns up to 60 rows ordered by
+ * generated_at across EVERY period, so taking the top three could quietly put
+ * last week's advice beside the week before's -- invisible, because each item is
+ * individually correct.
+ *
+ * WHEN THERE IS NOTHING, THIS RENDERS NOTHING. A line reading "no advice" every
+ * day for a week is the noise this change was made to remove. A quiet week is
+ * reported on the briefing page, where it is the subject rather than a footnote,
+ * and a stale ENGINE is caught by the age check below rather than by an empty
+ * dashboard looking the same as a calm one.
+ */
+function adviceLine(recData, v, today) {
+  const recs = (recData && recData.recommendations) || [];
+  const mine = (v.slug === 'group' ? recs : recs.filter(r => r.venue_id === v.venue_id))
+    .filter(r => r.status !== 'dismissed');
+  if (!mine.length) return '';
+
+  // The most recently REVIEWED period, not the most recently generated row.
+  const latest = mine.reduce((a, r) => (r.period_end > a ? r.period_end : a), '');
+  const shown = mine.filter(r => r.period_end === latest).slice(0, 3);
+  const start = shown.reduce((a, r) => (!a || r.period_start < a ? r.period_start : a), '');
+
+  const ageDays = Math.round(
+    (Date.parse(today + 'T00:00:00Z') - Date.parse(latest + 'T00:00:00Z')) / 86400000);
+
+  /**
+   * A complete week ends between one and seven days before any given day, so a
+   * period older than ten means the weekly run has not fired. Showing
+   * fortnight-old advice under a fresh-looking line is "it worked, it looked
+   * fine, it was doing nothing".
+   */
+  const stale = ageDays > 10;
+
+  /**
+   * The period sits NEXT TO the count, not after the headline.
+   *
+   * A headline wraps to two lines on a phone and pushed the dates onto a third,
+   * which made a one-line summary three deep -- most of what the full panel
+   * cost. The dates are the thing that stops this reading as advice about the
+   * week on screen, so they stay; they just stop being last.
+   */
+  const summary =
+    '<summary>' +
+      '<span class="advice-top">' +
+        '<span class="advice-count">' + shown.length + '</span>' +
+        '<span class="advice-when">' + esc(fmtRange(start, latest)) + (stale ? ' · out of date' : '') + '</span>' +
+      '</span>' +
+      '<span class="advice-head">' + esc(shown[0].headline) + '</span>' +
+    '</summary>';
+
+  const body = shown.map(r =>
+    '<div class="rec">' +
+      '<div class="rec-venue">' + esc(r.venue) + (r.status === 'acted_on' ? ' · acted on' : '') + '</div>' +
+      '<div class="rec-headline">' + esc(r.headline) + '</div>' +
+      '<div class="rec-body">' + renderMarkdown(r.body || '') + '</div>' +
+    '</div>').join('');
+
+  const foot =
+    '<p class="figure-note">Covering <strong>' + esc(fmtRange(start, latest)) + '</strong> — a completed week, ' +
+    'which is the only unit worth advising on. The figures below are the period you have selected, so the two will not tie: ' +
+    'you review the closed week and act during this one. ' +
+    '<a href="/briefing.html">Open the full briefing</a> to rate these or read the evidence.</p>' +
+    (stale
+      ? '<p class="figure-note" style="color:var(--accent)">The weekly run has produced nothing newer than this in ' +
+        ageDays + ' days. Treat it as out of date and check the engine.</p>'
+      : '') +
+    (recData && recData.withheld_for_role
+      ? '<p class="figure-note">' + recData.withheld_for_role + ' recommendation(s) are not shown for your role.</p>'
+      : '');
+
+  return '<details class="advice' + (stale ? ' stale' : '') + '">' + summary +
+         '<div class="advice-body">' + body + foot + '</div></details>';
+}
+
+/**
+ * The ask box, PINNED to the bottom of the screen.
+ *
+ * It is the only unbounded thing on this page -- the numbers answer the
+ * standing questions and this answers the rest -- and it was last, after a
+ * scroll through five panels. Pinned, it is one tap away at any scroll
+ * position, which is what it is worth.
+ *
+ * The page carries matching bottom padding so the bar never covers the last
+ * panel. On Android the viewport resizes when the keyboard opens and the bar
+ * rides above it; on iOS Safari the keyboard overlays and the bar goes with it.
+ * Both land in the right place because the bar is fixed to the viewport rather
+ * than to the document.
+ */
+function askBar(v) {
   const name = v.slug === 'group' ? 'the group' : v.venue;
-  return '<div class="ask">' +
+  return '<div class="askbar"><div class="askbar-inner">' +
     '<input id="ask-input" type="text" placeholder="Ask about ' + esc(name) + '…" ' +
     'autocomplete="off" autocapitalize="sentences">' +
-    '<button id="ask-go">Ask</button></div>';
+    '<button id="ask-go" aria-label="Ask">Ask</button></div></div>';
 }
 
 function fmtRange(a, b) {
