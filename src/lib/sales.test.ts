@@ -197,9 +197,29 @@ describe('salesFiguresOf — Neon Pigeon, 29 September 2026', () => {
     assert.ok(Math.abs(implied - f.net_sales) <= 0.01, `${implied} vs ${f.net_sales}`);
   });
 
-  test('discounts are item plus order', () => {
+  test('discounts are item plus order, with the rate beside them', () => {
+    const f = salesFiguresOf(row);
     // The file's DISCOUNTS > Total line reads 221.50.
-    assert.equal(salesFiguresOf(row).total_discounts, 221.5);
+    assert.equal(f.total_discounts, 221.5);
+    // Against gross, which is food + beverage: 221.50 / 3639.
+    assert.equal(f.discount_rate_pct, 6.09);
+  });
+
+  test('the service charge bridges gross and net, and is shown', () => {
+    // Without it on the page, a reader told that net exceeds gross has no way
+    // to see why. gross - discounts + service charge must land on net.
+    const f = salesFiguresOf(row);
+    assert.equal(
+      Number((f.gross_sales - f.total_discounts + f.service_charge!).toFixed(2)),
+      f.net_sales,
+    );
+  });
+
+  test('a day with no sales reports a null discount rate, not zero', () => {
+    // 0% discounting is a statement about a trading day. A closed day did not
+    // discount anything because nothing was sold, which is a different fact.
+    const f = salesFiguresOf({ gross_sales: 0, item_discounts: 0, order_discounts: 0, net_sales: 0 });
+    assert.equal(f.discount_rate_pct, null);
   });
 
   test('a Monday-board row still has a gross figure', () => {

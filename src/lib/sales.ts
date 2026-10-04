@@ -157,16 +157,26 @@ export function discountedSalesOf(row: SalesRow): number {
  * this and cannot reintroduce the divergence by forgetting a call.
  */
 export interface SalesFigures {
-  /** Food + beverage + service charge. The business's gross. */
+  /** Food + beverage, service charge EXCLUDED. The business's gross. */
   gross_sales: number;
-  /** Food + beverage alone. The basis for every cost and per-head figure. */
+  /** The same figure, under the name every cost and per-head ratio divides by. */
   food_bev_sales: number;
-  /** Gross less discounts. Revel's own "Total Sales". */
+  /** Gross less discounts PLUS the 10% service charge, so it exceeds gross. */
   net_sales: number;
   /** Implied, not stored. Null when there is no Revel figure to imply it from. */
   service_charge: number | null;
   /** Item + order. Coupons are excluded — see the note at the top of this file. */
   total_discounts: number;
+  /**
+   * Discounts as a share of gross. Null when there were no sales to discount.
+   *
+   * Computed here rather than left to the model, on the same rule as the food
+   * and beverage split: every number comes from a query tool, and a percentage
+   * is a number. The dollar figure alone does not travel between venues or
+   * across a quiet week — $221 of discounting is a different story on a $3,600
+   * day than on a $12,000 one.
+   */
+  discount_rate_pct: number | null;
 }
 
 /**
@@ -263,6 +273,7 @@ export const FIGURE_DEFINITIONS = {
   net_sales: 'Gross less discounts, plus the 10% service charge — so it is larger than gross. What "sales" means when nobody says which',
   service_charge: 'The 10% charged on the discounted amount. Inside net sales, NOT inside gross — never add it to net',
   total_discounts: 'Item discounts + order discounts. Coupons are reported separately by Revel and are not included',
+  discount_rate_pct: 'Discounts as a share of gross sales',
   food_sales: 'Food alone, before discounts and service charge',
   beverage_sales: 'Beverage alone, before discounts and service charge',
   food_pct: 'Food as a share of food & beverage sales. Beverage is the rest, so the two sum to 100',
@@ -278,5 +289,8 @@ export function salesFiguresOf(row: SalesRow): SalesFigures {
     net_sales: netSalesOf(row),
     service_charge: serviceChargeOf(row),
     total_discounts: totalDiscountsOf(row),
+    discount_rate_pct: grossSalesOf(row) > 0
+      ? round2(totalDiscountsOf(row) / grossSalesOf(row) * 100)
+      : null,
   };
 }

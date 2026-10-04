@@ -1391,6 +1391,11 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       beverage_pct: totals.food_bev_sales > 0
         ? Number((totals.beverage_sales / totals.food_bev_sales * 100).toFixed(2))
         : null,
+      // Over the whole period, not an average of daily rates: a quiet day's
+      // rate would otherwise weigh the same as a busy one's.
+      discount_rate_pct: totals.gross_sales > 0
+        ? Number(((totals.item_discounts + totals.order_discounts) / totals.gross_sales * 100).toFixed(2))
+        : null,
       covers_by_meal_period: coversByShift,
       avg_check_overall: avgCheck,
       avg_spend_per_head: avgSpendPerHead,

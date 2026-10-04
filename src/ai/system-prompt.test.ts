@@ -138,9 +138,10 @@ test('a trading summary must carry gross and the food/beverage split', () => {
    * do about a quiet week where a bare sales total does not.
    */
   assert.match(SYSTEM_PROMPT_BASE, /WHAT A "HOW DID WE DO" ANSWER MUST CONTAIN/);
-  assert.match(SYSTEM_PROMPT_BASE, /food\/beverage split in both\s+dollars and per cent/);
+  assert.match(SYSTEM_PROMPT_BASE, /The food\/beverage split, in dollars AND per cent/);
+  assert.match(SYSTEM_PROMPT_BASE, /Gross sales, and net sales/);
   // And it must come from the tool, because a percentage is a number too.
-  assert.match(SYSTEM_PROMPT_BASE, /never work the percentage out\s+yourself/);
+  assert.match(SYSTEM_PROMPT_BASE, /Never work a percentage out yourself/);
 });
 
 test('the prompt forbids two unlabelled spend-per-head figures in one answer', () => {
@@ -163,4 +164,34 @@ test('the explain_revenue_change description has the direction right', () => {
     'the backwards claim is back: net ÷ covers is the LARGER of the two, by about 9%',
   );
   assert.match(tools, /THE DRIVER ONE IS THE LARGER/);
+});
+
+test('a trading summary must show discounts and the service charge too', () => {
+  /**
+   * Khai, 4 Oct 2026: "you should plant also the discount on display in the
+   * table as well as the service charge."
+   *
+   * Both were already returned and neither was being shown. Discounting is the
+   * one cost the floor controls hour by hour, and the service charge is the
+   * bridge between gross and net — without it on the page, a reader who has
+   * just been told net exceeds gross has no way to see why.
+   */
+  assert.match(SYSTEM_PROMPT_BASE, /Discounts, in dollars AND as a per cent of gross/);
+  assert.match(SYSTEM_PROMPT_BASE, /- Service charge/);
+  assert.match(SYSTEM_PROMPT_BASE, /discount_rate_pct/);
+  assert.match(SYSTEM_PROMPT_BASE, /Never work a percentage out yourself/);
+});
+
+test('every figure the summary demands is one the tools actually return', () => {
+  // A prompt that names a field the response does not carry invites the model
+  // to work it out, which is the one thing it must not do with a number.
+  for (const field of [
+    'gross_sales', 'net_sales', 'food_sales', 'beverage_sales', 'food_pct',
+    'total_discounts', 'discount_rate_pct', 'service_charge',
+  ] as const) {
+    assert.ok(
+      FIGURE_DEFINITIONS[field as keyof typeof FIGURE_DEFINITIONS],
+      `the prompt asks for ${field} but there is no definition for it`,
+    );
+  }
 });
