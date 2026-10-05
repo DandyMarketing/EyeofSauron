@@ -22,9 +22,10 @@
 -- Read each one's past through the (client, date) index from migration 028.
 --
 -- THE ANSWER IS UNCHANGED, and that was checked rather than asserted: the
--- old and new functions were run side by side on 142,896 synthetic
--- reservations, for several months, at a one-year and a lifetime lookback,
--- and every row of output compared. Same signature, same four mutually
+-- old and new functions were run side by side on 148,230 synthetic
+-- reservations back to April 2022, for five periods at 30-day, one-year and
+-- lifetime lookbacks, and every row of output compared: no differences.
+-- Lifetime went from ~130 ms to ~40 ms. Same signature, same four mutually
 -- exclusive columns, same walk-in exclusion. Every caller -- the dashboard,
 -- create_chart's 365-day line, the query tools -- is unaffected except in
 -- speed.
