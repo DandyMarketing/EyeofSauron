@@ -137,7 +137,11 @@ export function weeklyCogs(
     } else if (!s.usable) {
       out.caveats.push(
         `${label}: bills explain only ${s.coverage_pct}% of this account in the ledger, so a weekly figure from them is ` +
-        'mostly absence. Drink is often bought on a card or coded to inventory and journalled out later, which never touches a bill. ' +
+        // Said of whichever side it is. It used to blame drink bought on a
+        // card, and was printed under FOOD once food coverage fell too
+        // (Neon Pigeon, September 2026: 66.9%) -- an explanation of the
+        // wrong account, which is worse than none.
+        'mostly absence: anything paid by card or bank transfer, or coded to inventory and journalled out later, never touches a bill. ' +
         'Do not quote this percentage — use the monthly ledger figure.',
       );
     }

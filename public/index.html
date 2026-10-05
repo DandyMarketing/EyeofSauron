@@ -1142,7 +1142,7 @@ function periodCostPanel(payload, v, w) {
     '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
     '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
     'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +
-    'A line shown as "only X% on bills" is mostly absence: drink is often bought on a card or coded to inventory, so it never reaches an invoice.</p>' +
+    'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches an invoice.</p>' +
     (c.caveats.length ? '<p class="figure-note">' + c.caveats.map(x => esc(x)).join('<br><br>') + '</p>' : '') +
     '</div>';
 }

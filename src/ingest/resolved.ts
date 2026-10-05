@@ -35,6 +35,12 @@
 
 export interface LoggedRun {
   venue_id?: string | null;
+  /**
+   * The report key from the filename, e.g. `neon-pigeon_neon-pigeon`. A PARSE
+   * failure has only this: it is logged before the key is resolved to a venue
+   * id, because that lookup can itself fail on the failure path.
+   */
+  venue_key?: string | null;
   report_type?: string | null;
   business_date?: string | null;
   created_at: string;
@@ -55,7 +61,22 @@ export interface Resolution {
  */
 export function resolutionFor(failure: LoggedRun, successes: LoggedRun[]): Resolution | null {
   const after = (s: LoggedRun) => s.created_at > failure.created_at;
-  const sameVenue = (s: LoggedRun) => (s.venue_id ?? null) === (failure.venue_id ?? null);
+  /**
+   * THE VENUE, BY WHICHEVER IDENTITY THE FAILURE HAS.
+   *
+   * A file that cannot be read is logged with its report KEY and no venue id;
+   * every success is logged with both. Comparing ids alone compared a blank
+   * with an id, so a parse failure could never be marked resolved however
+   * many times the day was loaded successfully afterwards -- Neon Pigeon's 29
+   * Sep 2026 sat at "Needs fixing" for a week that way. Ids when the failure
+   * has one, the report key when it does not, and never "both blank" as a
+   * match, which would let any unidentified success resolve any failure.
+   */
+  const sameVenue = (s: LoggedRun) => {
+    if (failure.venue_id) return s.venue_id === failure.venue_id;
+    if (failure.venue_key) return !!s.venue_key && s.venue_key === failure.venue_key;
+    return (s.venue_id ?? null) === null && (s.venue_key ?? null) === null;
+  };
   const sameType = (s: LoggedRun) => (s.report_type ?? null) === (failure.report_type ?? null);
 
   const candidates = successes

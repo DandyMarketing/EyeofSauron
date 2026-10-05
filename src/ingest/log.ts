@@ -125,7 +125,7 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   const [{ data: errors }, { data: successes }] = await Promise.all([
     supabase
       .from('ingestion_log')
-      .select('venue_id, report_type, business_date, filename, status, error_message, created_at')
+      .select('venue_id, venue_key, report_type, business_date, filename, status, error_message, created_at')
       // 'closed' is a normal outcome for a venue that does not trade that day.
       .not('status', 'in', '(success,closed)')
       .gte('created_at', cutoff.toISOString())
@@ -133,7 +133,7 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
       .limit(10),
     supabase
       .from('ingestion_log')
-      .select('venue_id, report_type, business_date, created_at')
+      .select('venue_id, venue_key, report_type, business_date, created_at')
       .eq('status', 'success')
       .gte('created_at', cutoff.toISOString()),
   ]);

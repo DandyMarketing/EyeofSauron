@@ -150,3 +150,17 @@ describe('coverageFor', () => {
     assert.equal(c.food, 0);
   });
 });
+
+test('the low-coverage warning explains the account it is printed under', () => {
+  /**
+   * It read "Drink is often bought on a card" for whichever side was short, and
+   * appeared under FOOD once food coverage dropped (Neon Pigeon, September
+   * 2026: 66.9%) — an explanation of the wrong account.
+   */
+  const r = weeklyCogs([bill('acc-food', 3200), bill('acc-bev', 1100)], names,
+    { food_sales: 10000, beverage_sales: 5000 }, { food: 66.9, beverage: 95 });
+  const food = r.caveats.find(c => c.startsWith('Food:'))!;
+  assert.ok(food, 'low food coverage carries no warning');
+  assert.ok(!/drink/i.test(food), `the food warning talks about drink: ${food}`);
+  assert.match(food, /paid by card or bank transfer/);
+});

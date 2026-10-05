@@ -91,3 +91,30 @@ test('the count the badge uses matches what the panel marks', () => {
   assert.equal(countUnresolved([], successes), 0);
   assert.equal(countUnresolved(failures, []), 2);
 });
+
+test('a PARSE failure, logged with only the report key, is resolved by that key', () => {
+  /**
+   * Neon Pigeon, 29 Sep 2026. The file could not be read, so the failure was
+   * logged with the filename's report key and no venue id — resolving the key
+   * is a database lookup, and this is the failure path. Every success carries
+   * both. Matching on venue id alone compared a blank with an id, and the day
+   * sat at "Needs fixing" for a week whatever happened to it afterwards.
+   */
+  const failure = {
+    venue_id: null, venue_key: 'neon-pigeon_neon-pigeon', report_type: 'operations',
+    business_date: '2026-09-29', created_at: '2026-10-04T00:46:00Z',
+  };
+  const success = {
+    venue_id: 'v-np', venue_key: 'neon-pigeon_neon-pigeon', report_type: 'operations',
+    business_date: '2026-09-29', created_at: '2026-10-04T09:00:00Z',
+  };
+  assert.ok(resolutionFor(failure, [success]), 'a successful reload of the same day did not resolve it');
+
+  // Another venue's success of the same date must not resolve it.
+  const other = { ...success, venue_id: 'v-fp', venue_key: 'fatprince_fatprince' };
+  assert.equal(resolutionFor(failure, [other]), null);
+
+  // Nor must a success that carries no identity at all.
+  const anonymous = { ...success, venue_id: null, venue_key: null };
+  assert.equal(resolutionFor(failure, [anonymous]), null);
+});

@@ -2290,12 +2290,12 @@ app.get('/admin/api/summary', async (c) => {
       const [{ data: failures }, { data: successes }] = await Promise.all([
         supabaseAdmin
           .from('ingestion_log')
-          .select('venue_id, report_type, business_date, created_at')
+          .select('venue_id, venue_key, report_type, business_date, created_at')
           .not('status', 'in', '(success,closed)')
           .gte('created_at', sinceISO),
         supabaseAdmin
           .from('ingestion_log')
-          .select('venue_id, report_type, business_date, created_at')
+          .select('venue_id, venue_key, report_type, business_date, created_at')
           .eq('status', 'success')
           .gte('created_at', sinceISO),
       ]);
