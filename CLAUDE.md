@@ -731,7 +731,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 52 migrations, 25 query tools, 11 ingest sources, 1,376 tests.
+started.** 52 migrations, 25 query tools, 11 ingest sources, 1,377 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse

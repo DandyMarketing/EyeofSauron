@@ -6,6 +6,7 @@ import { buildDashboard, invalidateAfterSalesIngest, type DashboardTimings } fro
 import { HourlyCache } from './lib/hourly-cache.js';
 
 const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
+const recommendationsCache = new HourlyCache<any[]>();
 import { isPeriodKind } from './lib/dashboard-window.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
@@ -1339,23 +1340,48 @@ app.get('/api/recommendations', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  let query = supabaseAdmin
-    .from('recommendations')
-    .select('id, venue_id, period_start, period_end, headline, body, domain, confidence, charts, evidence, generated_at, model, status, rating, feedback, venues(name)')
-    .order('generated_at', { ascending: false })
-    .order('confidence', { ascending: false })
-    .limit(60);
+  const venueIds = user.isOwner ? null : user.venues.map(v => v.venue_id);
+  // An empty list must mean NO venues, never "no restriction" — the same
+  // trap the system prompt's venue paragraph had to be written around.
+  if (venueIds && venueIds.length === 0) return c.json({ recommendations: [] });
 
-  if (!user.isOwner) {
-    const venueIds = user.venues.map(v => v.venue_id);
-    // An empty list must mean NO venues, never "no restriction" — the same
-    // trap the system prompt's venue paragraph had to be written around.
-    if (venueIds.length === 0) return c.json({ recommendations: [] });
-    query = query.in('venue_id', venueIds);
+  /**
+   * CACHED IN TEN-MINUTE STEPS, keyed by WHICH VENUES -- never by person.
+   *
+   * After the dashboard's own speed fixes this became the slowest request on
+   * the page (470-660 ms in the 5 Oct 2026 production log), for a briefing that
+   * changes once a week. The rows are cached per venue scope, exactly the query
+   * that ran before including its 60-row limit, so a manager's list is the same
+   * list; the ROLE filter below still runs on every request, because two people
+   * with the same venues may be allowed different rows.
+   *
+   * Two writers. A rating or status change comes through this server and
+   * clears the cache, so "done" shows the moment it is pressed. The weekly run
+   * is a separate script that cannot reach this process's memory, which is why
+   * the step is ten minutes and not an hour: a new briefing appears within
+   * about ten minutes of being written.
+   */
+  let data: any[];
+  try {
+    data = await recommendationsCache.get(
+      venueIds ? [...venueIds].sort().join(',') : 'all',
+      new Date().toISOString().slice(0, 15),          // YYYY-MM-DDTHH:M -- a ten-minute step
+      async () => {
+        let query = supabaseAdmin
+          .from('recommendations')
+          .select('id, venue_id, period_start, period_end, headline, body, domain, confidence, charts, evidence, generated_at, model, status, rating, feedback, venues(name)')
+          .order('generated_at', { ascending: false })
+          .order('confidence', { ascending: false })
+          .limit(60);
+        if (venueIds) query = query.in('venue_id', venueIds);
+        const { data: rows, error } = await query;
+        if (error) throw new Error(error.message);
+        return rows ?? [];
+      },
+    ).value;
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? 'Could not read recommendations' }, 400);
   }
-
-  const { data, error } = await query;
-  if (error) return c.json({ error: error.message }, 400);
 
   /**
    * The WHAT dimension applied to advice.
@@ -1367,8 +1393,8 @@ app.get('/api/recommendations', async (c) => {
    * The percentage version is what a manager is meant to work with and passes.
    */
   const role = effectiveRole(user);
-  const permitted = (data ?? []).filter((r: any) => mayRead(role, sensitivityOf(r)));
-  const withheld = (data ?? []).length - permitted.length;
+  const permitted = data.filter((r: any) => mayRead(role, sensitivityOf(r)));
+  const withheld = data.length - permitted.length;
 
   return c.json({
     withheld_for_role: withheld > 0 ? withheld : undefined,
@@ -1430,6 +1456,9 @@ app.post('/api/recommendations/:id/rate', async (c) => {
     .eq('id', c.req.param('id'));
 
   if (error) return c.json({ error: error.message }, 400);
+  // The list is cached; a "done" that did not show until the next refresh
+  // would read as the button not working.
+  recommendationsCache.clear();
   return c.json({ ok: true });
 });
 

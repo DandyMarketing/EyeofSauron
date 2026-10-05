@@ -1244,3 +1244,25 @@ test('migration 052 reads history for the period\'s guests, not for all time', (
   // Same signature, so every caller keeps working unchanged.
   assert.match(sql, /create or replace function public\.guest_retention\(\s*p_start\s+date,\s*p_end\s+date,\s*p_lookback int default 365\s*\)/);
 });
+
+test('the briefing list is cached by venue scope, and a rating clears it', () => {
+  /**
+   * The slowest request left on the dashboard (470-660 ms, 5 Oct 2026) was a
+   * briefing that changes weekly. Cached per VENUE SCOPE with the role filter
+   * still applied per request; cleared by the rating route, so "done" shows at
+   * once; refreshed in ten-minute steps, so the weekly run — a separate process
+   * — appears within about ten minutes.
+   */
+  const server = readFileSync('src/server.ts', 'utf8');
+  const route = server.slice(server.indexOf("app.get('/api/recommendations'"), server.indexOf("app.post('/api/recommendations/:id/rate'"));
+  assert.match(route, /recommendationsCache\.get\(/);
+  assert.match(route, /venueIds \? \[\.\.\.venueIds\]\.sort\(\)\.join\(','\) : 'all'/, 'the cache is keyed by something other than venue scope');
+  assert.match(route, /\.slice\(0, 15\)/, 'the refresh step is no longer ten minutes');
+  // The role filter runs on the cached rows, every request.
+  assert.match(route, /data\.filter\(\(r: any\) => mayRead\(role, sensitivityOf\(r\)\)\)/);
+  // An empty venue list is still NO venues, never all of them.
+  assert.match(route, /if \(venueIds && venueIds\.length === 0\) return c\.json\(\{ recommendations: \[\] \}\)/);
+
+  const rate = server.slice(server.indexOf("app.post('/api/recommendations/:id/rate'"), server.indexOf("app.post('/api/recommendations/:id/rate'") + 3000);
+  assert.match(rate, /recommendationsCache\.clear\(\)/, 'a rating will not show until the cache refreshes');
+});
