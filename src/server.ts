@@ -186,6 +186,13 @@ app.get('/version', async (c) => {
     service: 'eyeofsauron',
     commit: process.env.RAILWAY_GIT_COMMIT_SHA ?? 'unknown',
     branch: process.env.RAILWAY_GIT_BRANCH ?? 'unknown',
+    /**
+     * WHERE THIS COPY IS RUNNING. The database is in Tokyo (ap-northeast-1,
+     * confirmed 5 Oct 2026), so every query pays the distance from here to
+     * there -- and the workspace's "preferred region" setting only governs NEW
+     * services, so it cannot answer this. Railway sets the variable per replica.
+     */
+    region: process.env.RAILWAY_REPLICA_REGION ?? 'unknown',
     deployed_at: process.env.RAILWAY_DEPLOYMENT_ID ? undefined : 'local',
     tools: queryTools.map(t => t.name),
   });

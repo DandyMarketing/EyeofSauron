@@ -446,7 +446,7 @@ ever operates two outlets.
 ## Tech stack & key decisions
 
 - **Railway** — compute (backend, web app, self-hosted n8n). Holds static secrets as **sealed variables**.
-- **Supabase** — Postgres warehouse + Auth + **Row-Level Security**. Start on hosted free tier, SEA region.
+- **Supabase** — Postgres warehouse + Auth + **Row-Level Security**. Hosted free tier. **The project is in TOKYO (`ap-northeast-1`), not Singapore** — confirmed from the project settings on 5 Oct 2026; this line said "SEA region" until then. Every query from a Singapore server pays the Tokyo round trip, which is why a one-row lookup measured 110–700 ms in production (BUILD_LOG 5.13). Supabase cannot move a project's region in place; moving to Singapore means a new project and a data migration, and would also keep guest data in Singapore for PDPA. Railway's running region is reported at `/version`.
 - **Claude / Opus (Anthropic API)** — the chatbot + Insight & Recommendation Engine.
 - **n8n** — ingestion orchestration (Gmail triggers, scheduling, retries). Self-host on Railway.
 - **GitHub** — repo; Railway deploys from it.
@@ -731,7 +731,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 52 migrations, 25 query tools, 11 ingest sources, 1,373 tests.
+started.** 52 migrations, 25 query tools, 11 ingest sources, 1,376 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse

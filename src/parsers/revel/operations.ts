@@ -199,11 +199,58 @@ export function paymentsReconcile(
   };
 }
 
+/**
+ * THE LIST NAMES METHODS; THE ARITHMETIC DECIDES WHEN A LISTED NAME IS A BRAND.
+ *
+ * Neon Pigeon, 4 Oct 2026: Revel listed a card brand called `Other` under
+ * `Credit` -- MasterCard 794.94, Other 502.38, UnionPay 202.63, Visa 1,637.47,
+ * summing exactly to Credit's 3,137.42. `Other` is ALSO a payment method name,
+ * so the list promoted it and $502.38 was counted twice: methods summed to
+ * $4,696.13 against a Grand Total of $4,193.75. The NETS failure in the
+ * opposite direction -- and since a name can be both, no list can settle it.
+ *
+ * The report can: a method's brands sum to the method. A listed name is read
+ * as a brand only when PROVEN to be one -- the rows under a method add up to
+ * its total exactly, and include at least one ordinary brand name. Anything
+ * short of that proof falls back to the list, exactly as before, so this can
+ * only ever correct a promotion, never invent one. Two traps the first attempt
+ * fell into and the tests now hold:
+ *
+ *   - a ZERO row "fits" under anything, so `NETS 0.00` after Debit was filed as
+ *     a Debit brand. A zero cannot be proven either way and stays on the list.
+ *   - a method with no brands at all (Debit, here) leaves its whole total
+ *     open, and a running-balance rule would let it swallow the next method.
+ *     Requiring an exact sum that includes a real brand closes that.
+ */
+const ALLOCATION_TOLERANCE = 0.02;
+
+function provenBrands(rows: Array<{ type: string; total: number }>): Set<number> {
+  const proven = new Set<number>();
+  for (let i = 0; i < rows.length; i++) {
+    const { type, total } = rows[i];
+    if (!TOP_LEVEL_PAYMENTS.has(type) || type === 'Grand Total' || proven.has(i)) continue;
+    if (Math.abs(total) <= ALLOCATION_TOLERANCE) continue;        // nothing to account for
+    let sum = 0, sawBrand = false;
+    for (let j = i + 1; j < rows.length; j++) {
+      if (rows[j].type === 'Grand Total') break;
+      sum += rows[j].total;
+      if (!TOP_LEVEL_PAYMENTS.has(rows[j].type)) sawBrand = true;
+      if (Math.abs(sum - total) <= ALLOCATION_TOLERANCE) {
+        if (sawBrand) for (let k = i + 1; k <= j; k++) proven.add(k);
+        break;
+      }
+    }
+  }
+  return proven;
+}
+
 function parsePayments(rows: string[][]): PaymentRow[] {
+  const body = rows.slice(1);
+  const brands = provenBrands(body.map(r => ({ type: label(r[0]), total: num(r[7]) })));
   let parentType: string | null = null;
-  return rows.slice(1).map(r => {
+  return body.map((r, i) => {
     const type = label(r[0]);
-    const isTop = TOP_LEVEL_PAYMENTS.has(type);
+    const isTop = TOP_LEVEL_PAYMENTS.has(type) && !brands.has(i);
     if (isTop) parentType = type;
     return {
       type,

@@ -189,3 +189,77 @@ test('a file with no trailing newline keeps its last row', () => {
   const sections = splitSections('DISCOUNT REASON,Qty,Total\nCorbin,2,42.00');
   assert.deepEqual(sections, [['DISCOUNT REASON,Qty,Total', 'Corbin,2,42.00']]);
 });
+
+/**
+ * Neon Pigeon, 4 Oct 2026 — the real PAYMENTS section, verbatim.
+ *
+ * Revel listed a card brand called `Other` under Credit. `Other` is also a
+ * payment METHOD name, so the list promoted it and $502.38 was counted twice:
+ * methods summed to $4,696.13 against a Grand Total of $4,193.75. The brands
+ * sum to Credit exactly, which is what the parser now reads.
+ */
+const PAYMENTS_4_OCT = [
+  'PAYMENTS,Qty,Sales,Deposits,House Accounts,Refunds,Tips,Total',
+  'Cash,0,0.00,0.00,0.00,0.00,0.00,0.00',
+  'Credit,14.0,3137.42,0.00,0.00,0.00,0.00,3137.42',
+  'MasterCard,2,794.94,0.00,0.00,0.00,0.00,794.94',
+  'Other,2,502.38,0.00,0.00,0.00,0.00,502.38',
+  'UnionPay,1,202.63,0.00,0.00,0.00,0.00,202.63',
+  'Visa,9,1637.47,0.00,0.00,0.00,0.00,1637.47',
+  'Debit,5.0,1056.33,0.00,0.00,0.00,0.00,1056.33',
+  'House Account,0.0,0.0,0.0,-,0.0,0.0,0.0',
+  'NETS,0,0.00,0.00,0.00,0.00,0.00,0.00',
+  'Custom Payment,0,0.00,0.00,0.00,0.00,0.00,0.00',
+  'Grand Total,19,4193.75,0.00,0.00,0.00,0.00,4193.75',
+].join('\n');
+
+test('a card brand that shares a method\'s name sits under its card, by arithmetic', () => {
+  const { payments } = parseOperationsReport(PAYMENTS_4_OCT);
+  const other = payments.find(p => p.type === 'Other')!;
+  assert.equal(other.isSubType, true, '"Other" was promoted to a method and counted twice');
+  assert.equal(other.parentType, 'Credit');
+
+  // And the methods are exactly what they were: Debit still starts its own.
+  const debit = payments.find(p => p.type === 'Debit')!;
+  assert.equal(debit.isSubType, false);
+
+  const check = paymentsReconcile(payments)!;
+  assert.ok(check.passed, `methods summed to ${check.methodsTotal} against ${check.grandTotal}`);
+  assert.equal(check.grandTotal, 4193.75);
+});
+
+test('a card total a few dollars short cannot swallow the next method', () => {
+  /**
+   * The guard on the arithmetic. If the brands under Credit fall short of it —
+   * a rounding gap, a brand Revel left out — Credit stays "open", and without
+   * the size check NETS would be read as a card brand and vanish from the sum.
+   * A row bigger than what is left cannot be a brand.
+   */
+  const report = [
+    'PAYMENTS,Qty,Sales,Deposits,House Accounts,Refunds,Tips,Total',
+    'Credit,3,300.00,0,0,0,0,300.00',
+    'Visa,2,295.00,0,0,0,0,295.00',
+    'NETS,4,400.00,0,0,0,0,400.00',
+    'Grand Total,7,700.00,0,0,0,0,700.00',
+  ].join('\n');
+  const { payments } = parseOperationsReport(report);
+  assert.equal(payments.find(p => p.type === 'NETS')!.isSubType, false, 'NETS was swallowed by an open Credit');
+  assert.ok(paymentsReconcile(payments)!.passed);
+});
+
+test('a method with no brands cannot swallow the next method', () => {
+  // Debit carries no card brands beneath it, so its whole total is "open". A
+  // running-balance rule read NETS as a Debit brand; proof by exact sum does not.
+  const report = [
+    'PAYMENTS,Qty,Sales,Deposits,House Accounts,Refunds,Tips,Total',
+    'Debit,5,1056.33,0,0,0,0,1056.33',
+    'NETS,3,400.00,0,0,0,0,400.00',
+    'House Account,0,0,0,-,0,0,0',
+    'Grand Total,8,1456.33,0,0,0,0,1456.33',
+  ].join('\n');
+  const { payments } = parseOperationsReport(report);
+  assert.equal(payments.find(p => p.type === 'NETS')!.isSubType, false);
+  // And a zero row is never "proven" to be anything — it stays on the list.
+  assert.equal(payments.find(p => p.type === 'House Account')!.isSubType, false);
+  assert.ok(paymentsReconcile(payments)!.passed);
+});
