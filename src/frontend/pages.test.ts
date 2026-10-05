@@ -1166,3 +1166,38 @@ test('every load is measured, in the logs and in the browser', () => {
   assert.match(server, /c\.header\('Server-Timing'/);
 });
 
+
+/**
+ * Where the answer sits. Khai, 5 Oct 2026: "the result covers the entire screen
+ * so then no point, no place to reference. it should be side by side" — and on
+ * mobile, "a certain % of the screen so you can still see the dashboard".
+ *
+ * An answer about the figures that hides the figures defeats the reason it is
+ * on this page instead of in the chat.
+ */
+test('on a desktop the answer is a column BESIDE the dashboard, not over it', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  const wide = home.slice(home.indexOf('@media (min-width: 1100px)'), home.indexOf('@media (min-width: 1100px)') + 900);
+  // The page makes room, so nothing is underneath the answer — header included.
+  assert.match(wide, /body\.answer-open \{ padding-right: var\(--side-w\); \}/, 'the answer is laid over the dashboard');
+  assert.match(wide, /body\.answer-open \.ask-sheet \{[^}]*top: 0; bottom: 0;[^}]*right: 0; width: var\(--side-w\)/s);
+  // The ask bar sits under the dashboard, so a follow-up is typed beside its answer.
+  assert.match(wide, /body\.answer-open \.askbar \{ right: var\(--side-w\); \}/);
+});
+
+test('on a phone the answer takes half the screen and can be expanded', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  const narrow = home.slice(home.indexOf('@media (max-width: 1099px)'), home.indexOf('@media (max-width: 1099px)') + 600);
+  assert.match(narrow, /\.ask-sheet \{ max-height: 50vh; max-height: 50dvh; \}/, 'the sheet covers the dashboard again');
+  // And the page behind can still scroll every panel into the visible half.
+  assert.match(narrow, /body\.answer-open main \{ padding-bottom: calc\(50vh \+ 86px\)/);
+  assert.match(home, /id="ask-size"/, 'a long answer cannot be expanded');
+  assert.match(home, /classList\.toggle\('tall'\)/);
+});
+
+test('closing the answer, or re-rendering, gives the page its full width back', () => {
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /document\.body\.classList\.add\('answer-open'\)/);
+  const removals = home.match(/document\.body\.classList\.remove\('answer-open'\)/g) ?? [];
+  assert.ok(removals.length >= 2, 'a closed or re-rendered answer leaves an empty gutter');
+});

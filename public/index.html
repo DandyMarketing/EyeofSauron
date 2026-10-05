@@ -281,6 +281,46 @@
   .ask-answer a { color: var(--accent); }
   .ask-chart { margin: 8px 0; }
   .ask-chart svg { width: 100%; height: auto; display: block; }
+  /* SIDE BY SIDE WHERE THERE IS ROOM. Khai, 5 Oct 2026: "the result covers the
+     entire screen so then no point, no place to reference. it should be side by
+     side." On a desktop the dashboard is a 760 px column with empty space
+     either side, and an answer laid over it hid the very figures it was about.
+     From 1100 px the answer is a full-height column on the right and the page
+     moves left to make room -- the header too, so the nav is never covered --
+     and the ask bar narrows to sit under the dashboard, so a follow-up is typed
+     beside the answer it follows. A phone keeps the sheet: there is no "beside"
+     at 390 px, and a split there would leave two unreadable halves. */
+  /* ON A PHONE, HALF THE SCREEN. Khai, 5 Oct 2026: "on the mobile it may ...
+     take up a certain % of the screen so you can still see the dashboard but
+     the question can be responded to." The sheet stops at half the viewport
+     and scrolls inside itself; the page behind it gains the same padding, so
+     every panel can still be scrolled into the visible half above the answer
+     and read alongside it. A long answer -- a table, a chart -- can be pulled
+     up to nearly full height with the expand button and back down again.
+     dvh, not vh: on a phone vh is measured with the browser bar hidden, so a
+     "50vh" sheet is taller than half of what is actually visible. */
+  @media (max-width: 1099px) {
+    .ask-sheet { max-height: 50vh; max-height: 50dvh; }
+    .ask-sheet.tall { max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); }
+    body.answer-open main { padding-bottom: calc(50vh + 86px); padding-bottom: calc(50dvh + 86px); }
+  }
+  .ask-size {
+    position: sticky; top: 0; float: right; margin: -6px 2px 0 0;
+    background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted);
+    font-size: 11px; line-height: 1; cursor: pointer; padding: 5px 8px;
+  }
+  @media (min-width: 1100px) {
+    /* A full-height column has nothing to expand into. */
+    .ask-size { display: none; }
+    :root { --side-w: clamp(400px, 36vw, 600px); }
+    body.answer-open { padding-right: var(--side-w); }
+    body.answer-open .ask-sheet {
+      top: 0; bottom: 0; left: auto; right: 0; width: var(--side-w);
+      max-height: none; border-top: none; border-left: 1px solid var(--border);
+      box-shadow: -12px 0 28px rgba(0,0,0,0.35); padding: 18px 22px 24px; z-index: 21;
+    }
+    body.answer-open .askbar { right: var(--side-w); }
+  }
   /* --- guest mix pie ------------------------------------------------------ */
   /* Three mutually exclusive parts of one whole, which is the one shape a pie
      is actually right for. The counts sit beside it because a share without its
@@ -584,7 +624,16 @@ function draw(recData) {
   ask.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   document.getElementById('ask-close').addEventListener('click', () => {
     document.getElementById('ask-sheet').hidden = true;
+    document.body.classList.remove('answer-open');
   });
+  document.getElementById('ask-size').addEventListener('click', e => {
+    const tall = document.getElementById('ask-sheet').classList.toggle('tall');
+    e.currentTarget.textContent = tall ? 'Shrink' : 'Expand';
+    e.currentTarget.setAttribute('aria-label', tall ? 'Shrink the answer' : 'Expand the answer');
+  });
+  // A re-render (another venue, another period) rebuilds the sheet closed, so
+  // the page must not keep a gutter for an answer that is no longer there.
+  document.body.classList.remove('answer-open');
 }
 
 /**
@@ -1408,6 +1457,8 @@ async function askNow(v, w) {
     : `(Context: ${v.venue}, ${w.label.toLowerCase()}, ${w.current.start} to ${w.current.end}.)`;
 
   sheet.hidden = false;
+  // Only has an effect at desktop width; see the .answer-open styles.
+  document.body.classList.add('answer-open');
   body.innerHTML =
     '<div class="ask-q">' + esc(question) + '</div>' +
     '<div class="ask-ctx">' + esc(context) + '</div>' +
@@ -1487,6 +1538,7 @@ function askBar(v) {
   const name = v.slug === 'group' ? 'the group' : v.venue;
   return '<div class="ask-sheet" id="ask-sheet" hidden>' +
       '<button class="ask-close" id="ask-close" aria-label="Close">×</button>' +
+      '<button class="ask-size" id="ask-size" aria-label="Expand the answer">Expand</button>' +
       '<div id="ask-sheet-body"></div>' +
     '</div>' +
     '<div class="askbar"><div class="askbar-inner">' +
