@@ -208,10 +208,27 @@ const PANEL_GRACE_MS = 250;
  * The slow, slow-changing panels, cached by hour. See hourly-cache.ts for why
  * these four and why never sales or covers.
  */
-const retentionCache = new HourlyCache<Record<string, RetentionBlock>>();
+const retentionCache = new HourlyCache<RetentionInputs>();
 const costsCache = new HourlyCache<Record<string, CostBlock>>();
 const periodCostsCache = new HourlyCache<Record<string, WeeklyCogs>>();
 const forecastCache = new HourlyCache<ForecastInputs>();
+const dataThroughCache = new HourlyCache<string | null>();
+
+/**
+ * Called after a Revel file is ingested, from the one route that does it.
+ *
+ * The last-day-of-data lookup is CLEARED, because the window must move to the
+ * new day on the very next load -- "I uploaded it and it isn't there" is the
+ * worst thing a dashboard can say after an upload. The two cost panels read
+ * sales too and are EXPIRED instead: served once more as they were while the
+ * refresh runs, so the upload costs nobody a wait. Retention and the forecast
+ * read SevenRooms, which a Revel file does not touch, and are left alone.
+ */
+export function invalidateAfterSalesIngest(): void {
+  dataThroughCache.clear();
+  costsCache.expire();
+  periodCostsCache.expire();
+}
 
 /**
  * A builder that returns null for "nothing there" and for "failed" alike, made
@@ -261,8 +278,10 @@ export async function buildDashboard(
     c.value.then(() => { timings[name] = { ms: since(), cache: c.state }; }, () => {});
     return c;
   };
-  const retentionC = track('retention', retentionCache.get(`${month.start}|${scope}`, token,
-    () => orThrow('retention', buildRetention(venues, day))));
+  // Keyed by MONTH alone: the RPC returns every venue whoever asks, so the
+  // owner and every manager share one run. Each reader's slice is cut below.
+  const retentionC = track('retention', retentionCache.get(month.start, token,
+    () => loadRetentionInputs(month)));
   const costsC = track('costs', costsCache.get(`${month.start}|${scope}`, token,
     () => orThrow('costs', buildCosts(venues, day))));
   // Keyed by venues only, so the hour turning over -- or the day -- serves the
@@ -284,16 +303,29 @@ export async function buildDashboard(
    * day of every week. The dates were right and the data behind one of them
    * was not, which is the hardest version of this to see.
    */
-  const { data: latest } = await supabaseAdmin
-    .from('daily_operations')
-    .select('business_date')
-    .in('venue_id', ids)
-    // The Singapore day, not the server's: UTC is still yesterday until 8am.
-    .lte('business_date', day)
-    .order('business_date', { ascending: false })
-    .limit(1);
-  const dataThrough: string | null = latest?.[0]?.business_date ?? null;
-  timings.data_through = { ms: since() };
+  /**
+   * CACHED, BECAUSE IT CHANGES ONCE A DAY AND COST A FULL ROUND TRIP EVERY LOAD.
+   *
+   * The production log of 5 Oct 2026 put this one-row query at 110-700 ms,
+   * with the whole core waiting on it -- not for the work, for the distance.
+   * The answer moves only when a Revel file lands, and that happens through
+   * this process: `invalidateAfterSalesIngest()` clears it there, so an upload
+   * shows on the very next load rather than up to an hour later.
+   */
+  const dataThroughC = dataThroughCache.get(`${scope}|${day}`, token, async () => {
+    const { data: latest, error } = await supabaseAdmin
+      .from('daily_operations')
+      .select('business_date')
+      .in('venue_id', ids)
+      // The Singapore day, not the server's: UTC is still yesterday until 8am.
+      .lte('business_date', day)
+      .order('business_date', { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`data_through: ${error.message}`);
+    return (latest?.[0]?.business_date as string | undefined) ?? null;
+  });
+  const dataThrough: string | null = await dataThroughC.value;
+  timings.data_through = { ms: since(), cache: dataThroughC.state };
 
   const window = periodWindow(period ?? defaultPeriod(day), day, dataThrough);
   const periodCostsC = track('period_costs', periodCostsCache.get(
@@ -505,7 +537,7 @@ export async function buildDashboard(
       return null;
     }
   };
-  const [retention, costs, periodCosts, forecastInputs, { data: hols }] = await Promise.all([
+  const [retentionInputs, costs, periodCosts, forecastInputs, { data: hols }] = await Promise.all([
     panel('retention', retentionC),
     panel('costs', costsC),
     panel('period_costs', periodCostsC),
@@ -514,6 +546,7 @@ export async function buildDashboard(
   ]);
   const holidays = new Map<string, string>((hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]));
   const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays) : null;
+  const retention = retentionInputs ? assembleRetention(venues, month, retentionInputs) : null;
 
   timings.total = { ms: since() };
   /**
@@ -637,124 +670,136 @@ function assembleForecast(
 }
 
 /**
- * Retention for the last COMPLETE month, keyed by venue slug plus "group".
+ * Retention's raw inputs for a month: the RPC's rows for EVERY venue, and the
+ * first booking date each venue holds.
  *
- * A FAILURE HERE COSTS THE PANEL, NEVER THE PAGE. The function is a database
- * RPC that has timed out in production before (22 Sep 2026), and a dashboard
- * that will not load because one panel could not be computed is a worse outcome
- * than a dashboard without that panel. Same rule as the terms gate and
- * warnSchema: a degraded page beats a dead one.
+ * SHARED ACROSS EVERY READER, which is why it is split from the assembly
+ * below. `guest_retention` computes all venues whatever the caller can see, so
+ * caching it per person's scope ran the heaviest query on the page once for the
+ * owner and once more for each manager -- and the production log of 5 Oct 2026
+ * shows that query brushing the database's statement timeout. One run per
+ * month per hour, filtered per reader afterwards, is the same answer for a
+ * fraction of the load. Nothing here crosses a venue boundary: the assembly
+ * hands each reader only their own venues' rows.
+ *
+ * Throws on failure, so a failure is retried rather than cached as nothing.
  */
-async function buildRetention(
+interface RetentionInputs {
+  rows: Array<RetentionCounts & { venue_id: string }>;
+  /** venue id -> first booking date we hold. */
+  firsts: Map<string, string | null>;
+}
+
+async function loadRetentionInputs(month: { start: string; end: string }): Promise<RetentionInputs> {
+  /**
+   * A LIFETIME LOOKBACK, not 365 days. Khai, 4 Oct 2026: "perhaps it should be
+   * all time -- people who had been guest in our life time." Under the year
+   * rule a guest who first came in 2023 and ate here last month counted as NEW
+   * TO THE GROUP. The chart tools keep 365 and say so.
+   */
+  const [{ data, error }, { data: allVenues }] = await Promise.all([
+    supabaseAdmin.rpc('guest_retention', {
+      p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
+    }),
+    supabaseAdmin.from('venues').select('id'),
+  ]);
+  // Named, not swallowed: an unapplied migration otherwise looks exactly like a
+  // month in which nobody ever came back.
+  if (error) throw new Error(`guest_retention: ${error.message}`);
+
+  /**
+   * PER-VENUE HORIZONS. Each venue's records start when its own ingest did,
+   * and the earliest row across the group would overstate the depth for a
+   * venue that came later -- claiming history behind a figure that has none.
+   */
+  const ids = (allVenues ?? []).map((v: any) => String(v.id));
+  const firstRows = await Promise.all(ids.map(id => supabaseAdmin.from('reservations').select('business_date')
+    .eq('venue_id', id).order('business_date', { ascending: true }).limit(1)));
+  const firsts = new Map(ids.map((id, i) => [id, (firstRows[i] as any)?.data?.[0]?.business_date ?? null] as const));
+
+  return { rows: (data ?? []) as RetentionInputs['rows'], firsts };
+}
+
+/**
+ * Retention for the last COMPLETE month, keyed by venue slug plus "group",
+ * for THIS reader's venues only.
+ *
+ * Returns null when there is nothing to show; the caller degrades the panel
+ * rather than the page, because the RPC has timed out in production before
+ * (22 Sep 2026, and again on a background refresh on 5 Oct 2026).
+ */
+function assembleRetention(
   venues: Array<{ id: string; name: string; slug: string }>,
-  today: string,
-): Promise<Record<string, RetentionBlock> | null> {
-  const month = lastCompleteMonth(today);
+  month: { start: string; end: string; label: string },
+  inputs: RetentionInputs,
+): Record<string, RetentionBlock> | null {
+  const { rows, firsts } = inputs;
+  if (rows.length === 0) return null;
 
-  try {
-    /**
-     * A LIFETIME LOOKBACK, not 365 days. Khai, 4 Oct 2026: "perhaps it should
-     * be all time -- people who had been guest in our life time."
-     *
-     * Under the year rule a guest who first came in 2023 and ate here last
-     * month counted as NEW TO THE GROUP, which is not a cautious reading of the
-     * data but a false statement about somebody we have a record of. The year
-     * rule's reason -- that a widening window makes a TREND climb for no
-     * business reason -- applies to a line over months and not to one month's
-     * mix, which is all this panel shows. The chart tools keep 365 and say so.
-     *
-     * PER-VENUE HORIZONS. Each venue's records start when its own ingest did,
-     * and the earliest row across the group would overstate the depth for a
-     * venue that came later -- claiming history behind a figure that has none.
-     */
-    const [{ data, error }, ...firsts] = await Promise.all([
-      supabaseAdmin.rpc('guest_retention', {
-        p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
-      }),
-      ...venues.map(v => supabaseAdmin.from('reservations').select('business_date')
-        .eq('venue_id', v.id).order('business_date', { ascending: true }).limit(1)),
-    ]);
+  const out: Record<string, RetentionBlock> = {};
+  const mine: RetentionCounts[] = [];
+  const horizons: HistoryHorizon[] = [];
 
-    if (error) {
-      // Named, not swallowed. An unapplied migration otherwise looks exactly
-      // like a month in which nobody ever came back.
-      console.warn(`[dashboard] retention unavailable: ${error.message}`);
-      return null;
-    }
+  for (const v of venues) {
+    const r = rows.find(x => x.venue_id === v.id);
+    const counts: RetentionCounts = r
+      ? {
+          booked_guests: Number(r.booked_guests), returning_here: Number(r.returning_here),
+          crossed_from_sister: Number(r.crossed_from_sister), new_to_group: Number(r.new_to_group),
+          walk_in_guests: Number(r.walk_in_guests),
+        }
+      : { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
+    mine.push(counts);
+    const shares = retentionShares(counts);
 
-    const rows = (data ?? []) as Array<RetentionCounts & { venue_id: string }>;
-    if (rows.length === 0) return null;
+    const horizon = historyHorizon(month.start, firsts.get(v.id) ?? null);
+    horizons.push(horizon);
 
-    const out: Record<string, RetentionBlock> = {};
-    const mine: RetentionCounts[] = [];
-    const horizons: HistoryHorizon[] = [];
-
-    for (const [i, v] of venues.entries()) {
-      const r = rows.find(x => x.venue_id === v.id);
-      const counts: RetentionCounts = r
-        ? {
-            booked_guests: Number(r.booked_guests), returning_here: Number(r.returning_here),
-            crossed_from_sister: Number(r.crossed_from_sister), new_to_group: Number(r.new_to_group),
-            walk_in_guests: Number(r.walk_in_guests),
-          }
-        : { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
-      mine.push(counts);
-      const shares = retentionShares(counts);
-
-      const horizon = historyHorizon(month.start, (firsts[i] as any)?.data?.[0]?.business_date ?? null);
-      horizons.push(horizon);
-
-      out[v.slug] = {
-        month, counts, shares,
-        plain: inPlainWords(counts, shares, month.label, horizon.from),
-        /**
-         * WITHHELD ONLY WHEN "LIFETIME" IS A YEAR OR LESS. Below that the
-         * phrase promises more than the records hold and the figure carries the
-         * same shrinking shortfall the 365-day rule was withheld for; above it,
-         * the horizon is stated and the figure stands.
-         */
-        withheld: horizon.too_thin,
-        horizon,
-      };
-    }
-
-    if (venues.length > 1) {
+    out[v.slug] = {
+      month, counts, shares,
+      plain: inPlainWords(counts, shares, month.label, horizon.from),
       /**
-       * SUMMED, then the rate recomputed -- never an average of the venue
-       * rates, which would weight a quiet venue the same as a busy one.
-       *
-       * Note this is not the same as the group retention the FUNCTION reports:
-       * a guest who ate at two venues in the month is one guest at each and the
-       * venue rows deliberately do not sum to a group row. This is the group's
-       * venues added up, which is the right figure for "how did the group do"
-       * and the wrong one for "how many distinct people", so the page says
-       * "across the venues" rather than implying a headcount.
+       * WITHHELD ONLY WHEN "LIFETIME" IS A YEAR OR LESS. Below that the phrase
+       * promises more than the records hold and the figure carries the same
+       * shrinking shortfall the 365-day rule was withheld for; above it, the
+       * horizon is stated and the figure stands.
        */
-      const counts = sumCounts(mine);
-      const shares = retentionShares(counts);
-      /**
-       * THE SHALLOWEST VENUE BOUNDS THE GROUP, on the same argument as the
-       * oldest sync in the service roll-up: a group line is only as sound as
-       * its weakest part, and the deepest venue vouching for the rest is how a
-       * figure looks better than any of the things it is made of.
-       */
-      const groupHorizon = horizons.reduce<HistoryHorizon>(
-        (worst, h) => (h.days < worst.days ? h : worst),
-        horizons[0] ?? { from: null, days: 0, too_thin: true },
-      );
-      out.group = {
-        month, counts, shares,
-        plain: inPlainWords(counts, shares, month.label, groupHorizon.from),
-        withheld: groupHorizon.too_thin,
-        horizon: groupHorizon,
-      };
-    }
-
-    return out;
-  } catch (e: any) {
-    console.warn(`[dashboard] retention failed: ${e?.message ?? e}`);
-    return null;
+      withheld: horizon.too_thin,
+      horizon,
+    };
   }
+
+  if (venues.length > 1) {
+    /**
+     * SUMMED, then the rate recomputed -- never an average of the venue rates,
+     * which would weight a quiet venue the same as a busy one.
+     *
+     * Not the same as the group retention the FUNCTION reports: a guest who ate
+     * at two venues in the month is one guest at each and the venue rows
+     * deliberately do not sum to a group row. This is the group's venues added
+     * up, the right figure for "how did the group do" and the wrong one for
+     * "how many distinct people", so the page says "across the venues".
+     */
+    const counts = sumCounts(mine);
+    const shares = retentionShares(counts);
+    /**
+     * THE SHALLOWEST VENUE BOUNDS THE GROUP: a group line is only as sound as
+     * its weakest part, and the deepest venue vouching for the rest is how a
+     * figure looks better than any of the things it is made of.
+     */
+    const groupHorizon = horizons.reduce<HistoryHorizon>(
+      (worst, h) => (h.days < worst.days ? h : worst),
+      horizons[0] ?? { from: null, days: 0, too_thin: true },
+    );
+    out.group = {
+      month, counts, shares,
+      plain: inPlainWords(counts, shares, month.label, groupHorizon.from),
+      withheld: groupHorizon.too_thin,
+      horizon: groupHorizon,
+    };
+  }
+
+  return out;
 }
 
 

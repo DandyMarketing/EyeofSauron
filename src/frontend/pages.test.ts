@@ -669,7 +669,7 @@ test('the guest panel says which WINDOW "been here before" means', () => {
   assert.match(lib, /p_lookback: LIFETIME_LOOKBACK_DAYS/, 'the dashboard still asks for a fixed year');
   // Per venue, because the earliest row across the group claims history behind
   // a venue that joined later.
-  assert.match(lib, /\.eq\('venue_id', v\.id\)\.order\('business_date'/, 'one horizon is used for every venue');
+  assert.match(lib, /\.eq\('venue_id', id\)\.order\('business_date'/, 'one horizon is used for every venue');
 });
 
 test('the forward book counts EXPECTED covers, not completed ones', () => {
@@ -744,12 +744,15 @@ test('the snapshot says how old it is, measured on the server', () => {
 });
 
 test('a failed retention read costs the panel, never the page', () => {
-  // The RPC has timed out in production before (22 Sep 2026). A dashboard that
-  // will not load because one panel could not be computed is the worse outcome.
+  // The RPC has timed out in production before (22 Sep 2026, and on a
+  // background refresh on 5 Oct 2026). A dashboard that will not load because
+  // one panel could not be computed is the worse outcome.
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
-  assert.match(lib, /async function buildRetention/);
-  assert.ok(lib.includes('return null;'), 'buildRetention no longer degrades to null on failure');
-  assert.match(lib, /console\.warn\(`\[dashboard\] retention/, 'a retention failure is silent');
+  // The loader names the failure rather than returning an empty month...
+  assert.match(lib, /if \(error\) throw new Error\(`guest_retention: \$\{error\.message\}`\)/);
+  // ...and the panel wrapper turns any failure into a missing panel, logged.
+  assert.match(lib, /panel\('retention', retentionC\)/);
+  assert.match(lib, /console\.warn\(`\[dashboard\] \$\{name\} unavailable/, 'a retention failure is silent');
 });
 
 /**
@@ -1119,7 +1122,7 @@ test('a failed forecast costs the panel, never the page, and names the likely ca
 test('the date-only panels start BEFORE the lookup the core waits on', () => {
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
   const fn = lib.slice(lib.indexOf('export async function buildDashboard('), lib.indexOf('async function loadForecastInputs('));
-  const firstAwait = fn.indexOf("await supabaseAdmin\n    .from('daily_operations')");
+  const firstAwait = fn.indexOf('const dataThrough: string | null = await dataThroughC.value;');
   assert.ok(firstAwait > 0, 'the data-through lookup has moved; update this test');
   for (const started of ['retentionCache.get(', 'costsCache.get(', 'forecastCache.get(', 'getDayMoments(', 'getClosedWeekdays(']) {
     const at = fn.indexOf(started);
@@ -1200,4 +1203,44 @@ test('closing the answer, or re-rendering, gives the page its full width back', 
   assert.match(home, /document\.body\.classList\.add\('answer-open'\)/);
   const removals = home.match(/document\.body\.classList\.remove\('answer-open'\)/g) ?? [];
   assert.ok(removals.length >= 2, 'a closed or re-rendered answer leaves an empty gutter');
+});
+
+/**
+ * Speed, round two, from the production log of 5 Oct 2026. The heavy panels
+ * were all cache hits by then; what remained was ROUND TRIPS — a one-row
+ * lookup taking 110-700 ms, for the distance rather than the work — and the
+ * lifetime retention query timing out on a background refresh.
+ */
+test('the slow-changing lookups in front of the core are cached, and an upload resets them', () => {
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /const dataThroughCache = new HourlyCache/);
+  // An upload must show on the very next load, so the lookup is CLEARED, not expired.
+  const inv = lib.slice(lib.indexOf('export function invalidateAfterSalesIngest('), lib.indexOf('export function invalidateAfterSalesIngest(') + 200);
+  assert.match(inv, /dataThroughCache\.clear\(\)/);
+  const server = readFileSync('src/server.ts', 'utf8');
+  assert.match(server, /if \(c\.res\.status < 300\) invalidateAfterSalesIngest\(\)/, 'an upload no longer resets the dashboard');
+  assert.match(server, /const venuesCache = new HourlyCache/);
+});
+
+test('retention runs once for everybody, not once per person', () => {
+  // The RPC returns every venue whoever asks; keyed by scope it ran for the
+  // owner and again for each manager.
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /retentionCache\.get\(month\.start, token,/);
+  // And each reader is still handed only their own venues.
+  assert.match(lib, /assembleRetention\(venues, month, retentionInputs\)/);
+});
+
+test('migration 052 reads history for the period\'s guests, not for all time', () => {
+  /**
+   * 044 bounded history by DATE — right for a year, a full scan for a
+   * lifetime. 052 starts from the month's guests and walks each one's past
+   * through the (client, date) index. Checked locally against 044: identical
+   * output for 15 month/lookback pairs, 130 ms down to 40 ms at lifetime.
+   */
+  const sql = readFileSync('supabase/migrations/052_guest_retention_by_guest.sql', 'utf8');
+  assert.match(sql, /guests as \(\s*select distinct sevenrooms_client_id from period\s*\)/);
+  assert.match(sql, /from guests g\s*join public\.reservations r\s*on r\.sevenrooms_client_id = g\.sevenrooms_client_id/);
+  // Same signature, so every caller keeps working unchanged.
+  assert.match(sql, /create or replace function public\.guest_retention\(\s*p_start\s+date,\s*p_end\s+date,\s*p_lookback int default 365\s*\)/);
 });

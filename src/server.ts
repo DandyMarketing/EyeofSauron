@@ -2,7 +2,10 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { buildDashboard, type DashboardTimings } from './lib/dashboard.js';
+import { buildDashboard, invalidateAfterSalesIngest, type DashboardTimings } from './lib/dashboard.js';
+import { HourlyCache } from './lib/hourly-cache.js';
+
+const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
 import { isPeriodKind } from './lib/dashboard-window.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
@@ -140,6 +143,18 @@ app.use('/ingest/*', async (c, next) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   return next();
+});
+
+/**
+ * A Revel file that landed must show on the very next dashboard load. The
+ * dashboard caches its "last day with sales" lookup, which costs a full round
+ * trip and changes once a day; this resets it after any successful ingest, the
+ * n8n delivery and the admin page's manual upload alike -- both arrive here.
+ * Registered after the key check, so a refused request never reaches it.
+ */
+app.use('/ingest/*', async (c, next) => {
+  await next();
+  if (c.res.status < 300) invalidateAfterSalesIngest();
 });
 
 // --- User auth middleware (session token) ---
@@ -1258,7 +1273,16 @@ app.get('/api/dashboard', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const { data: allVenues } = await supabaseAdmin.from('venues').select('id, name, slug');
+  /**
+   * The venue list, cached by the hour: three rows that change when a venue
+   * opens, and a full round trip in front of everything else on every load.
+   * A failed read is not cached, and degrades exactly as an uncached one did.
+   */
+  const allVenues = await venuesCache.get('all', new Date().toISOString().slice(0, 13), async () => {
+    const { data, error } = await supabaseAdmin.from('venues').select('id, name, slug');
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Array<{ id: string; name: string; slug: string }>;
+  }).value.catch(() => [] as Array<{ id: string; name: string; slug: string }>);
   const scoped = user.isOwner
     ? (allVenues ?? [])
     : (allVenues ?? []).filter(v => user.venues.some(uv => uv.venue_id === v.id));

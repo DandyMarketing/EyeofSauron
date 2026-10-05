@@ -110,3 +110,25 @@ describe('waiting only so long', () => {
     await later(null, 30);   // an unhandled rejection here would fail the run
   });
 });
+
+describe('after an upload', () => {
+  test('clear makes the next load wait for fresh data', async () => {
+    const c = new HourlyCache<string>();
+    await c.get('k', '17', () => later('3 Oct')).value;
+    c.clear();
+    const r = c.get('k', '17', () => later('4 Oct'));
+    assert.equal(r.state, 'miss');
+    assert.equal(await r.value, '4 Oct');
+  });
+
+  test('expire serves the old value at once and refreshes behind it, even within the hour', async () => {
+    const c = new HourlyCache<string>();
+    await c.get('k', '17', () => later('before')).value;
+    c.expire();
+    const r = c.get('k', '17', () => later('after', 10));
+    assert.equal(r.state, 'stale');
+    assert.equal(await r.value, 'before');
+    await later(null, 30);
+    assert.equal(await c.get('k', '17', () => later('unused')).value, 'after');
+  });
+});

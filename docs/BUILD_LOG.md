@@ -851,6 +851,34 @@ rule that came out of it: a new dashboard panel is either live-and-cheap or
 cached-and-optional, and it says which in `buildDashboard` — there is no third
 kind.
 
+**Round two, from the first production log (5 Oct 2026).** The instrumentation
+paid for itself at once. Every heavy panel was a cache hit at 0–2 ms, so the
+first fix had worked — and what was left was not work but DISTANCE:
+
+- `data_through`, a one-row indexed lookup, took **110–700 ms**. Nothing that
+  small costs that much; it is the round trip. Two more such trips sat in
+  front of it (the venue list, and the session on a cold load), all in series.
+  The venue list and the last-day-of-data lookup are now cached, the latter
+  CLEARED by the ingest route so an upload shows on the next load.
+- `retention unavailable: canceling statement due to statement timeout`, on a
+  background refresh. The cache served the old value, exactly as designed —
+  which is how it showed up as a log line and not as a missing panel. The
+  cause was this entry's own third row: lifetime lookback plus a date-bounded
+  history scan is a full scan. Migration 052 reads history for the PERIOD'S
+  GUESTS through the (client, date) index. Checked against 044 on 148,230
+  synthetic rows: identical output for 15 month/lookback pairs, 130 → 40 ms at
+  lifetime, and the plan shows one index probe per guest.
+- Retention was cached per reader, so the owner and each manager each ran it.
+  The RPC returns every venue whoever asks; it is now one run per month per
+  hour, sliced per reader afterwards.
+
+**What a slow line looks like now, so it can be read without this entry.**
+`[dashboard] total data_through=… core=…` is server time; the `[slow] GET
+/api/dashboard` line just after it is the same request INCLUDING session
+validation and the venue read. The gap between the two is time spent before
+the dashboard started. Railway shows every `[slow]` line as severity "error"
+because it is written to stderr; none of them is an error.
+
 ### 5.10 The retry was wrapped around everything except the call that failed
 
 Spotted by Khai in the admin console: three `sevenrooms:auth-error` rows at

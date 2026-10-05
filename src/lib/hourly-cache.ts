@@ -78,6 +78,22 @@ export class HourlyCache<T> {
     }
   }
 
+  /**
+   * Forget everything: the next load waits for fresh data. For a value that
+   * must be right on the very next load -- the last day with sales, after a
+   * Revel file lands.
+   */
+  clear(): void { this.entries.clear(); }
+
+  /**
+   * Keep the values but mark them out of date: the next load is served the old
+   * value at once and refreshes behind it. For a panel that may lag one load
+   * behind an upload but should not make anybody wait for it.
+   */
+  expire(): void {
+    for (const [k, e] of this.entries) this.entries.set(k, { token: '', value: e.value });
+  }
+
   /** For tests. */
   size(): number { return this.entries.size; }
 }
