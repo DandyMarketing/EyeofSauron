@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { fetchBoardItems, ingestMondayItems, getVenueBoards } from '../ingest/monday.js';
+import { fetchBoardItems, ingestMondayItems, getVenueBoards, sweepRevelDrift } from '../ingest/monday.js';
 import { logIngestion } from '../ingest/log.js';
 
 const apiToken = process.env.MONDAY_API_TOKEN;
@@ -117,6 +117,19 @@ if (postLockChanges.length > 0) {
 
 if (reconciliationFailures.length === 0 && postLockChanges.length === 0) {
   console.log('\nAll clear — no reconciliation issues.');
+}
+
+// Re-compare the last five weeks, whatever changed this run. Revel accepts
+// edits to a day long after Sauron has loaded it, and the board is how we find
+// out. Its own failure is reported and does not fail the run: the ingest above
+// has already done its job.
+if (!dryRun) {
+  try {
+    const drift = await sweepRevelDrift();
+    console.log(`\nRevel vs board: ${drift.differ} day(s) differ (alerted), ${drift.resolved} alert(s) resolved now that they agree.`);
+  } catch (e: any) {
+    console.error(`\n[revel-drift] sweep failed: ${e?.message ?? e}`);
+  }
 }
 
 // Exit non-zero ONLY for an execution error.

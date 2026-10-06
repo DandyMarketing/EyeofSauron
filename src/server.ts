@@ -2362,11 +2362,34 @@ app.get('/admin/api/alerts', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { data } = await selectAll(() => supabaseAdmin
-    .from('reconciliation_alerts')
-    .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, old_meal_periods, new_meal_periods, created_at, venues(name)')
-    .eq('resolved', false)
-    .order('business_date', { ascending: false }));
+  const [{ data }, { data: recentOps }] = await Promise.all([
+    selectAll(() => supabaseAdmin
+      .from('reconciliation_alerts')
+      .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, old_meal_periods, new_meal_periods, created_at, venues(name)')
+      .eq('resolved', false)
+      .order('business_date', { ascending: false })),
+    // The key each venue's Revel files currently carry, from the latest loads,
+    // so a card can name the exact file to re-upload.
+    supabaseAdmin
+      .from('ingestion_log')
+      .select('venue_id, venue_key')
+      .eq('report_type', 'operations')
+      .eq('status', 'success')
+      .not('venue_key', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(60),
+  ]);
+  const keyByVenue = new Map<string, string>();
+  for (const r of (recentOps ?? []) as any[]) {
+    if (r.venue_id && r.venue_key && !keyByVenue.has(r.venue_id)) keyByVenue.set(r.venue_id, r.venue_key);
+  }
+  const revelFileFor = (venueId: string, date: string): string | null => {
+    const key = keyByVenue.get(venueId);
+    if (!key) return null;
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return `Operations_Report_${key}_${date}_${next.toISOString().slice(0, 10)}.csv`;
+  };
 
   // One card per finding, not per row.
   //
@@ -2396,6 +2419,7 @@ app.get('/admin/api/alerts', async (c) => {
       changes: a.alert_type === 'post_lock_change'
         ? summarisePostLockChange(a.old_meal_periods, a.new_meal_periods)
         : [],
+      revel_file: a.alert_type === 'reconciliation_failed' ? revelFileFor(a.venue_id, a.business_date) : null,
     });
   }
 

@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
 import { isPeriodClosed, closeDateFor, isSettled } from '../lib/accounting-period.js';
+import { revelBoardDrift, alreadyDecided, DRIFT_WINDOW_DAYS } from '../lib/revel-drift.js';
+import { selectAll } from '../lib/paged.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
 
@@ -702,4 +704,76 @@ export async function ingestMondayItems(
 
 export function getVenueBoards(): typeof VENUE_BOARDS {
   return VENUE_BOARDS;
+}
+
+/**
+ * Every run, re-compare the recent days -- not only the ones whose board changed.
+ *
+ * A day that differs gets ONE open `reconciliation_failed` alert (raiseAlert
+ * de-duplicates). A day that agrees again -- usually because somebody has
+ * re-uploaded the day's Revel report -- has its open alert resolved here, so
+ * the list holds only what still needs doing and nobody has to remember to
+ * clear it. See src/lib/revel-drift.ts for why the board is the witness.
+ */
+export async function sweepRevelDrift(asOf: Date = new Date()): Promise<{ differ: number; resolved: number }> {
+  const since = new Date(asOf.getTime() - DRIFT_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
+
+  const { data: rows, error } = await selectAll(() => supabase
+    .from('daily_operations')
+    .select('venue_id, business_date, gross_sales, meal_periods')
+    .eq('data_source', 'both')
+    .gte('business_date', since));
+  if (error) throw new Error(`revel drift sweep: ${error.message}`);
+
+  const { differ, agree } = revelBoardDrift(rows as any[], asOf);
+
+  const { data: alerts, error: alertError } = await selectAll(() => supabase
+    .from('reconciliation_alerts')
+    .select('id, venue_id, business_date, resolved, monday_gross, revel_gross')
+    .eq('alert_type', 'reconciliation_failed')
+    .gte('business_date', since));
+  if (alertError) throw new Error(`revel drift sweep: ${alertError.message}`);
+  const open = alerts.filter((a: any) => !a.resolved);
+  const resolved = alerts.filter((a: any) => a.resolved);
+  const openByDay = new Map(open.map((o: any) => [`${o.venue_id}|${o.business_date}`, o.id]));
+
+  for (const d of differ) {
+    const existing = openByDay.get(`${d.venue_id}|${d.business_date}`);
+    // Somebody already resolved this exact difference -- leave their decision be.
+    if (!existing && alreadyDecided(d, resolved)) continue;
+    if (existing) {
+      // Kept CURRENT, and filled in where an older alert was raised without the
+      // figures. An alert that says "$67" and not of what against what cannot be
+      // acted on -- Khai, 6 Oct 2026: "how to reconcile anything when there is
+      // no reference".
+      await supabase.from('reconciliation_alerts')
+        .update({ monday_gross: d.monday_gross, revel_gross: d.revel_gross, difference: d.difference })
+        .eq('id', existing);
+      continue;
+    }
+    await raiseAlert({
+      venue_id: d.venue_id,
+      business_date: d.business_date,
+      alert_type: 'reconciliation_failed',
+      monday_gross: d.monday_gross,
+      revel_gross: d.revel_gross,
+      difference: d.difference,
+    });
+  }
+
+  const agreeing = new Set(agree.map(a => `${a.venue_id}|${a.business_date}`));
+  const toResolve = open.filter((o: any) => agreeing.has(`${o.venue_id}|${o.business_date}`)).map((o: any) => o.id);
+  if (toResolve.length > 0) {
+    const { error: resolveError } = await supabase
+      .from('reconciliation_alerts')
+      .update({
+        resolved: true,
+        resolved_at: asOf.toISOString(),
+        notes: 'Resolved automatically: Revel and the Monday board now agree to the cent.',
+      })
+      .in('id', toResolve);
+    if (resolveError) console.error(`  [ALERT DB ERROR] ${resolveError.message}`);
+  }
+
+  return { differ: differ.length, resolved: toResolve.length };
 }

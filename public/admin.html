@@ -1796,6 +1796,38 @@ function renderAlerts(root, alerts) {
  * this codebase keeps writing down; the count and the page position are both on
  * screen, and every alert is still reachable.
  */
+/**
+ * What a Revel-vs-board alert needs to be acted on: both figures, which way they
+ * differ, and the exact file. Khai, 6 Oct 2026, looking at 73 cards that said
+ * "$67" and nothing else: "how to reconcile anything when there is no
+ * reference".
+ */
+function reconcileDetail(al) {
+  const m = (n) => '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const muted = 'font-size:12px;color:var(--text-muted);line-height:1.6';
+  if (al.monday_gross === null || al.monday_gross === undefined || al.revel_gross === null || al.revel_gross === undefined) {
+    // The sweep looks back DRIFT_WINDOW_DAYS (35) in src/lib/revel-drift.ts.
+    const ageDays = (Date.now() - new Date(al.business_date + 'T00:00:00Z').getTime()) / 86400000;
+    return '<div style="' + muted + '">Raised before the figures were kept with the alert. ' +
+      (ageDays <= 34
+        ? 'The next hourly check fills them in if the day still differs, or clears the alert if it no longer does.'
+        : 'This day is older than the five weeks the hourly check looks back, so nothing will fill them in. Compare the day in Revel with the Monday board by hand, re-upload if Revel is right, then resolve here.') +
+      '</div>';
+  }
+  const diff = Number(al.monday_gross) - Number(al.revel_gross);
+  const which = diff > 0 ? 'The board is ' + m(diff) + ' higher than Revel.' : 'Revel is ' + m(-diff) + ' higher than the board.';
+  const file = al.revel_file
+    ? '<code style="font-size:11px;word-break:break-all">' + escapeHtml(al.revel_file) + '</code>'
+    : 'the Operations report for this date';
+  return '<table style="font-size:12px;margin-bottom:6px">' +
+      '<tr><td style="color:var(--text-muted);padding-right:12px">Monday board, food + drink</td><td>' + m(al.monday_gross) + '</td></tr>' +
+      '<tr><td style="color:var(--text-muted);padding-right:12px">Revel, as Sauron loaded it</td><td>' + m(al.revel_gross) + '</td></tr>' +
+    '</table>' +
+    '<div style="' + muted + '"><b>' + which + '</b> Export ' + file + ' from Revel now:' +
+      '<br>&bull; if it shows ' + m(al.monday_gross) + ', upload it under Connections &rarr; Upload Reports &mdash; this alert clears itself at the next hourly check;' +
+      '<br>&bull; if it still shows ' + m(al.revel_gross) + ', the board is the one to fix &mdash; ask Finance, then resolve here with a note.</div>';
+}
+
 function drawAlerts(a, alerts, page, scroll) {
   const pages = Math.max(1, Math.ceil(alerts.length / alertsPerPage));
   const current = Math.min(Math.max(0, page), pages - 1);
@@ -1825,7 +1857,8 @@ function drawAlerts(a, alerts, page, scroll) {
             dupes + diff +
           '</summary>' +
           '<div style="margin-top:10px">' +
-            (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>') +
+            (al.alert_type === 'reconciliation_failed' ? reconcileDetail(al)
+              : (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>')) +
             '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">' +
               '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
               '<button class="al-resolve btn btn-small">Resolve</button>' +
