@@ -92,7 +92,43 @@ export interface WeeklyCogsSide {
   usable: boolean;
 }
 
+/**
+ * Whether a period's invoices can all be in yet.
+ *
+ * Khai, 6 Oct 2026: "the invoice should reach within the week". A bill is
+ * entered in Xero up to seven days after its date, so on the Monday after a
+ * week ends that week is missing whatever was uploaded late, reads LOW, and
+ * rises over the following days. Nothing said so, and a low food cost is the
+ * flattering direction to be wrong in. The same three venues showed it on the
+ * first check: Angra, Wine Heritage and Mr Vino on Monday's board, not yet in
+ * Xero.
+ *
+ *   in_progress  the period has not ended
+ *   provisional  it has ended, and invoices dated in it may still arrive
+ *   final        seven days have passed since it ended
+ */
+export interface CostSettlement {
+  status: 'in_progress' | 'provisional' | 'final';
+  /** The first day the figure is final. */
+  final_on: string;
+}
+
+/** Days after a period ends that its invoices may still be entered. */
+export const INVOICE_ARRIVAL_DAYS = 7;
+
+export function costSettlement(periodEnd: string, today: string): CostSettlement {
+  const end = new Date(`${periodEnd}T00:00:00Z`);
+  const finalOn = new Date(end);
+  // Seven days to be entered, plus the daily Xero pull the morning after.
+  finalOn.setUTCDate(finalOn.getUTCDate() + INVOICE_ARRIVAL_DAYS + 1);
+  const final_on = finalOn.toISOString().slice(0, 10);
+  if (today <= periodEnd) return { status: 'in_progress', final_on };
+  return { status: today >= final_on ? 'final' : 'provisional', final_on };
+}
+
 export interface WeeklyCogs {
+  /** Set by the caller, which knows the period and today. */
+  settlement?: CostSettlement;
   food: WeeklyCogsSide;
   beverage: WeeklyCogsSide;
   /** Sushi purchases, kept out of both percentages. See `costBucket`. */

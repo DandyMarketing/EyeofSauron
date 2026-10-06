@@ -139,6 +139,8 @@
     font-size: 0.8em; line-height: 1.5; color: var(--text-muted);
     font-style: normal; padding: 8px 14px 12px;
   }
+  /* A figure that will still move. Amber, not red: nothing is wrong with it. */
+  .figure-note.provisional { color: #f0a050; padding-top: 0; }
 
   /* --- forward book ------------------------------------------------------ */
   .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; }
@@ -1125,6 +1127,19 @@ function forecastPanel(payload, v) {
     '<p class="figure-note">' + esc(f.note) + '</p></div>';
 }
 
+// Invoices reach Xero up to a week after their date, so a period that has just
+// ended reads LOW and rises. Said on the panel, because a low food cost is the
+// flattering way to be wrong. Nothing is shown once the figure is final.
+function settlementNote(s) {
+  if (!s || s.status === 'final') return '';
+  const on = new Date(s.final_on + 'T00:00:00Z').toLocaleDateString('en-SG',
+    { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const text = s.status === 'in_progress'
+    ? 'In progress \u2014 invoices are still arriving, so this will rise.'
+    : 'Provisional until ' + esc(on) + ' \u2014 invoices can take up to a week to reach Xero, so this may still rise.';
+  return '<p class="figure-note provisional">' + text + '</p>';
+}
+
 // Sushi is sold wholesale outside Revel, so its cost has no sales figure here to
 // divide by and is kept out of the food %. Shown as an amount, and only when
 // there is some.
@@ -1151,6 +1166,7 @@ function periodCostPanel(payload, v, w) {
   };
 
   return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
+    settlementNote(c.settlement) +
     '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + sushiRow(c.sushi) + '</tbody></table>' +
     '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
     'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +

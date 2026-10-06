@@ -16,7 +16,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { weeklyCogs, coverageFor, USABLE_COVERAGE_PCT, type BillLine } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine } from './weekly-cogs.js';
 
 const names = new Map([
   ['acc-food', 'COGS - Food'],
@@ -226,5 +226,30 @@ describe('the week the panel read 38.2%', () => {
     const withDeleted = weeklyCogs([line('food', 500, 'VOIDED')], names, { food_sales: 1000, beverage_sales: 0 }, { food: 95, beverage: 95 });
     assert.equal(withDeleted.food.cogs, 0);
     assert.deepEqual(coverageFor([line('food', 500, 'DELETED')], names, { food: 1000, beverage: 0 }), { food: 0, beverage: null });
+  });
+});
+
+/**
+ * Khai, 6 Oct 2026: "the invoice should reach within the week". The week of
+ * 28 Sep - 4 Oct is the real case: viewed on 6 Oct it was missing invoices
+ * that were on Monday's board and not yet in Xero.
+ */
+describe('when a period\'s cost is final', () => {
+  test('a week still running is in progress', () => {
+    assert.equal(costSettlement('2026-10-11', '2026-10-06').status, 'in_progress');
+  });
+
+  test('last week, two days after it ended, is provisional', () => {
+    assert.deepEqual(costSettlement('2026-10-04', '2026-10-06'), { status: 'provisional', final_on: '2026-10-12' });
+  });
+
+  test('provisional for the whole following week, final the Monday after', () => {
+    assert.equal(costSettlement('2026-10-04', '2026-10-11').status, 'provisional');
+    assert.equal(costSettlement('2026-10-04', '2026-10-12').status, 'final');
+  });
+
+  test('a month works the same way', () => {
+    assert.deepEqual(costSettlement('2026-09-30', '2026-10-06'), { status: 'provisional', final_on: '2026-10-08' });
+    assert.equal(costSettlement('2026-09-30', '2026-10-08').status, 'final');
   });
 });

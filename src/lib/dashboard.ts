@@ -40,7 +40,7 @@ import {
 import { costRatios, costCaveats, costBucket, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { readAllPages, selectAll } from './paged.js';
-import { weeklyCogs, coverageFor, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
@@ -982,12 +982,12 @@ async function buildPeriodCosts(
         }));
 
       const sales = sumClassSplits(ops ?? []);
-      out[v.slug] = weeklyCogs(
+      out[v.slug] = { settlement: costSettlement(end, today), ...weeklyCogs(
         toLines(windowLines),
         names,
         sales,
         coverageFor(toLines(monthLines), names, ledger),
-      );
+      ) };
     }));
 
     return any ? out : null;
