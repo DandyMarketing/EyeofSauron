@@ -14,7 +14,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCogs, costRatios, costCaveats, type PLRow } from './cost-ratios.js';
+import { classifyCogs, costRatios, costCaveats, costBucket, type PLRow } from './cost-ratios.js';
 
 const line = (canonical: string, amount: number, over: Partial<PLRow> = {}): PLRow => ({
   account_name: canonical,
@@ -112,11 +112,11 @@ describe('the ratios', () => {
   test('two accounts rolling to the same canonical name are added, not replaced', () => {
     const rows = [
       line('COGS - Food', 8000),
-      line('COGS - Sushi', 4000),
+      line('COGS - Food', 4000, { account_name: 'Cost of Food' }),
     ];
     const r = costRatios(rows, sales);
     assert.equal(r.food.cogs, 12000);
-    assert.deepEqual(r.food.accounts, ['COGS - Food', 'COGS - Sushi']);
+    assert.deepEqual(r.food.accounts, ['COGS - Food']);
   });
 
   test('the accounts that were added up are named, so a reader can check', () => {
@@ -253,5 +253,53 @@ describe('cost over short sales', () => {
     assert.ok(caveats.some(c => /WITHHELD/.test(c)));
     assert.ok(!caveats.some(c => /has no sales in the period/.test(c)),
       'a withheld ratio must not be explained as a venue with no sales');
+  });
+});
+
+/**
+ * Settled with Khai, 6 Oct 2026: "kitchen expenses doesn't go into cogs", and
+ * Transportation - Sushi belongs in a separate bucket that is not shown while
+ * profit is not being calculated. The weekly panel had put both into food on
+ * their names alone.
+ */
+describe('which bucket an account belongs in', () => {
+  test('an operating expense is never food, whatever its name', () => {
+    assert.equal(costBucket({ canonical: 'Kitchen expenses', section: 'Less Operating Expenses' }), null);
+  });
+
+  test('Transportation - Sushi is not a cost of sales, sushi or otherwise', () => {
+    assert.equal(costBucket({ canonical: 'Transportation - Sushi', section: 'Less Operating Expenses' }), null);
+  });
+
+  test('COGS - Sushi is sushi, though account_map gives it the canonical name COGS - Food', () => {
+    assert.equal(costBucket({
+      canonical: 'COGS - Food', raw: 'COGS - Sushi', section: 'Less Cost of Sales', business_line: 'sushi',
+    }), 'sushi');
+  });
+
+  test('sushi income is not a cost', () => {
+    assert.equal(costBucket({ canonical: 'Sales - Food', raw: 'Sales - Sushi', section: 'Income', business_line: 'sushi' }), null);
+  });
+
+  test('food and drink are cost of sales only', () => {
+    assert.equal(costBucket({ canonical: 'COGS - Food', section: 'Less Cost of Sales' }), 'food');
+    assert.equal(costBucket({ canonical: 'COGS - Alcohol', section: 'Less Cost of Sales' }), 'beverage');
+  });
+});
+
+describe('sushi is reported on its own and kept out of food cost', () => {
+  test('the monthly figure splits it out, and leaves operating expenses out entirely', () => {
+    const sales = { food_sales: 40000, beverage_sales: 20000 };
+    const r = costRatios([
+      line('COGS - Food', 8000),
+      line('COGS - Food', 2000, { account_name: 'COGS - Sushi', business_line: 'sushi' }),
+      line('Transportation - Sushi', 1490, { section: 'Less Operating Expenses' }),
+      line('Kitchen expenses', 97.5, { section: 'Less Operating Expenses' }),
+    ], sales);
+    assert.equal(r.food.cogs, 8000);
+    assert.equal(r.sushi.cogs, 2000);
+    assert.deepEqual(r.sushi.accounts, ['COGS - Sushi']);
+    assert.deepEqual(r.unclassified, [], 'an operating expense is not "unclassified cost of sales" either');
+    assert.ok(costCaveats(r, 1).some(c => /Sushi cost of \$2000\.00/.test(c)), 'the sushi line is named');
   });
 });

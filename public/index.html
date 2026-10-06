@@ -1123,6 +1123,14 @@ function forecastPanel(payload, v) {
     '<p class="figure-note">' + esc(f.note) + '</p></div>';
 }
 
+// Sushi is sold wholesale outside Revel, so its cost has no sales figure here to
+// divide by and is kept out of the food %. Shown as an amount, and only when
+// there is some.
+function sushiRow(sushi) {
+  if (!sushi || !sushi.cogs) return '';
+  return '<tr><td>Sushi</td><td>' + money(sushi.cogs) + ' <span class="cov">kept out of food %</span></td></tr>';
+}
+
 function periodCostPanel(payload, v, w) {
   const wait = calculating(payload, 'period_costs', 'Cost of sales \u00b7 ' + w.label.toLowerCase());
   if (wait) return wait;
@@ -1141,7 +1149,7 @@ function periodCostPanel(payload, v, w) {
   };
 
   return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
-    '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
+    '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + sushiRow(c.sushi) + '</tbody></table>' +
     '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
     'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +
     'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches an invoice.</p>' +
@@ -1175,7 +1183,7 @@ function costPanel(payload, v) {
 
   return '<div class="panel"><h2>Cost of sales</h2>' +
     '<table><tbody>' +
-      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + unmapped +
+      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + sushiRow(r.sushi) + unmapped +
     '</tbody></table>' +
     (r.unclassified.length
       ? '<p class="figure-note">Excluded from both percentages: ' +

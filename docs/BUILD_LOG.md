@@ -609,6 +609,40 @@ history will almost always sit in a different system from their live feed. Any
 figure that sums a field must also count the rows where the field was absent,
 and a sum with absent rows must not be divided.
 
+### 2.9 Food cost by name: two operating expenses, a deleted bill, and sushi
+**Symptom.** The weekly panel put Neon Pigeon's food cost for 28 Sep – 4 Oct
+2026 at **$6,609, 38.2%**. Monday's weekly report said **23.0%**.
+**Root cause, four parts, found by listing every bill behind the figure:**
+
+| | Amount | Should it count? |
+|---|---|---|
+| COGS - Food | $4,264.54 | yes |
+| COGS - Sushi | $596.14 | separate line: sushi sales are not in Revel's food sales |
+| Transportation - Sushi (operating expense) | $1,490.00 | no; matched on the word "sushi" |
+| Toho bill **DELETED** in Xero, re-entered at $147.80 | $161.10 | no; counted twice |
+| Kitchen expenses (operating expense) | $97.50 | no; matched on the word "kitchen" |
+
+The weekly panel classified a bill line by its account **name** alone. The
+monthly figure checked the section first, but the weekly path never got that
+filter. `classifyCogs`' own comment said "the caller filters on section first",
+and one caller didn't. The dashboard also never excluded VOIDED/DELETED bills,
+although `query_supplier_bills` always had (`NON_SPEND_STATUSES`). That's the
+same lesson as 4.2: a rule applied at one call site is not a rule.
+**Fix.** `costBucket()` is the only rule: **cost-of-sales section first**, then
+sushi (by business line or name) as its own bucket, then food or drink by name.
+Every cost figure uses it: the weekly panel, its coverage, the monthly panel and
+the chat's `query_food_beverage_cost`. Sushi is shown as an amount with no
+percentage, because there is no sushi sales figure in Revel to divide by.
+Operating expenses appear nowhere, by Khai's decision: "we are not calculating
+profits yet". Voided and deleted bills are skipped in the figure and in its
+coverage. The week now reads food $4,264.54, **24.7%**. What remains against
+Monday's 23.0% is invoice timing (delivery date against bill date).
+**Recurs?** **Every customer.** Their accounts will have names. Never classify
+by name until the section says it is the kind of account the name is being
+asked about. And when a figure looks wrong, **list the rows behind it**: this
+one was four defects and one decision, and no amount of reasoning about the
+total would have separated them.
+
 ---
 
 ## 3. Analysis that misleads

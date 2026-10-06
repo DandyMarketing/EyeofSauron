@@ -37,7 +37,7 @@ import {
   historyHorizon, LIFETIME_LOOKBACK_DAYS,
   type RetentionCounts, type RetentionShares, type HistoryHorizon,
 } from './retention-month.js';
-import { costRatios, costCaveats, classifyCogs, type CostRatios, type PLRow } from './cost-ratios.js';
+import { costRatios, costCaveats, costBucket, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { weeklyCogs, coverageFor, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
@@ -923,12 +923,12 @@ async function buildPeriodCosts(
           .gte('period_start', month.start)
           .lte('period_end', month.end),
         supabaseAdmin.from('supplier_bill_lines')
-          .select('account_id, line_amount, supplier_bills!inner(bill_date)')
+          .select('account_id, line_amount, supplier_bills!inner(bill_date, status)')
           .eq('venue_id', v.id)
           .gte('supplier_bills.bill_date', start)
           .lte('supplier_bills.bill_date', end),
         supabaseAdmin.from('supplier_bill_lines')
-          .select('account_id, line_amount, supplier_bills!inner(bill_date)')
+          .select('account_id, line_amount, supplier_bills!inner(bill_date, status)')
           .eq('venue_id', v.id)
           .gte('supplier_bills.bill_date', month.start)
           .lte('supplier_bills.bill_date', month.end),
@@ -952,16 +952,22 @@ async function buildPeriodCosts(
       const ledger = { food: 0, beverage: 0 };
       for (const r of pl ?? []) {
         if (!r.account_id) continue;
-        const canonical = resolveAccount(r.account_name, accountMap).canonical_account;
-        names.set(r.account_id, canonical);
-        if (r.is_summary || !/cost of sales/i.test(r.section ?? '')) continue;
-        const kind = classifyCogs(canonical);
+        const { canonical_account: canonical, business_line } = resolveAccount(r.account_name, accountMap);
+        const info = { name: canonical, raw: r.account_name, section: r.section, business_line };
+        names.set(r.account_id, info);
+        if (r.is_summary) continue;
+        const kind = costBucket({ canonical, raw: r.account_name, section: r.section, business_line });
         if (kind === 'food') ledger.food += Number(r.amount);
         else if (kind === 'beverage') ledger.beverage += Number(r.amount);
       }
 
       const toLines = (rows: any[]): BillLine[] =>
-        rows.map(r => ({ account_id: r.account_id, line_amount: Number(r.line_amount), bill_date: '' }));
+        rows.map(r => ({
+          account_id: r.account_id,
+          line_amount: Number(r.line_amount),
+          bill_date: '',
+          status: r.supplier_bills?.status ?? null,
+        }));
 
       const sales = sumClassSplits(ops ?? []);
       out[v.slug] = weeklyCogs(

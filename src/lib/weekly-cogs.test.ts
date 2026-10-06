@@ -55,11 +55,12 @@ describe('a week of purchases against the same week of sales', () => {
   });
 
   test('the same classifier as the monthly path, so the two cannot disagree', () => {
-    // 'COGS - Sushi' rolls to food in the P&L route; it must here too, or the
-    // weekly and monthly figures describe different things.
+    // Sushi is split out in the P&L route; it must be here too, or the weekly
+    // and monthly figures describe different things.
     const r = weeklyCogs([bill('acc-sushi', 1000)],
       new Map([['acc-sushi', 'COGS - Sushi']]), sales, { food: 100, beverage: 100 });
-    assert.equal(r.food.cogs, 1000);
+    assert.equal(r.food.cogs, 0);
+    assert.equal(r.sushi.cogs, 1000);
   });
 });
 
@@ -178,5 +179,52 @@ describe('short sales in the window', () => {
     const out = weeklyCogs([], new Map(), { food_sales: 9000, beverage_sales: 3000, days: { monday_board: 2, none: 0 } },
       { food: 95, beverage: 90 });
     assert.ok(out.caveats.some(c => /Monday board/.test(c)));
+  });
+});
+
+/**
+ * Neon Pigeon, 28 Sep - 4 Oct 2026, from the bills Sauron actually held. The
+ * panel showed food at $6,609 (38.2%) against Monday's 23%: $1,748.60 of it was
+ * not cost of sales at all, and $596.14 was sushi.
+ */
+describe('the week the panel read 38.2%', () => {
+  const names = new Map<string, any>([
+    ['food',   { name: 'COGS - Food', raw: 'COGS - Food', section: 'Less Cost of Sales', business_line: 'main' }],
+    ['sushi',  { name: 'COGS - Food', raw: 'COGS - Sushi', section: 'Less Cost of Sales', business_line: 'sushi' }],
+    ['alc',    { name: 'COGS - Alcohol', raw: 'COGS - Alcohol', section: 'Less Cost of Sales', business_line: 'main' }],
+    ['bev',    { name: 'COGS - Beverages', raw: 'COGS - Beverages', section: 'Less Cost of Sales', business_line: 'main' }],
+    ['trans',  { name: 'Transportation - Sushi', raw: 'Transportation - Sushi', section: 'Less Operating Expenses', business_line: 'main' }],
+    ['kitchen',{ name: 'Kitchen expenses', raw: 'Kitchen expenses', section: 'Less Operating Expenses', business_line: 'main' }],
+  ]);
+  const line = (account_id: string, line_amount: number, status = 'AUTHORISED') =>
+    ({ account_id, line_amount, bill_date: '2026-09-29', status });
+  const lines = [
+    line('food', 4264.54),
+    line('food', 161.10, 'DELETED'),   // Toho S126-00099813, re-entered at $147.80
+    line('sushi', 596.14),
+    line('trans', 1490),
+    line('kitchen', 97.50),
+    line('alc', 1933.20),
+    line('bev', 884.03),
+  ];
+  const r = weeklyCogs(lines, names, { food_sales: 17286, beverage_sales: 16312 }, { food: 95, beverage: 95 });
+
+  test('food is cost-of-sales food only', () => {
+    assert.equal(r.food.cogs, 4264.54);
+    assert.equal(r.food.pct, 24.67);
+  });
+
+  test('sushi is its own line, and its transport is not a cost of sales', () => {
+    assert.equal(r.sushi.cogs, 596.14);
+  });
+
+  test('drink is unchanged, because it was right', () => {
+    assert.equal(r.beverage.cogs, 2817.23);
+  });
+
+  test('a deleted bill is never spend, in the figure or in its coverage', () => {
+    const withDeleted = weeklyCogs([line('food', 500, 'VOIDED')], names, { food_sales: 1000, beverage_sales: 0 }, { food: 95, beverage: 95 });
+    assert.equal(withDeleted.food.cogs, 0);
+    assert.deepEqual(coverageFor([line('food', 500, 'DELETED')], names, { food: 1000, beverage: 0 }), { food: 0, beverage: null });
   });
 });

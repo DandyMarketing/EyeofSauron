@@ -34,17 +34,49 @@
  * this is the second place that could get it wrong.
  */
 
-import { classifyCogs } from './cost-ratios.js';
+import { costBucket, type CostBucket } from './cost-ratios.js';
+import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
 
 export interface BillLine {
   /** Xero's account UUID. Joins to profit_and_loss.account_id. */
   account_id: string | null;
   line_amount: number;
   bill_date: string;
+  /**
+   * The bill's Xero status. VOIDED and DELETED bills are stored, so a figure
+   * that changed can be explained, and are never spend. The dashboard counted
+   * them anyway: a Toho bill deleted and re-entered on 29 Sep 2026 was counted
+   * twice ($161.10 + $147.80). The chat's bill tool had always excluded them.
+   */
+  status?: string | null;
 }
 
-/** account_id -> the canonical account name, built from the P&L. */
-export type AccountNames = Map<string, string>;
+/** What the P&L says about an account: its canonical name, section and line. */
+export interface AccountInfo {
+  name: string;
+  raw?: string | null;
+  section?: string | null;
+  business_line?: string | null;
+}
+
+/**
+ * account_id -> what the P&L knows about the account.
+ *
+ * A bare string is a canonical name taken to be COST OF SALES, kept for callers
+ * that only ever hold cost-of-sales accounts. The dashboard passes the section,
+ * because without it an operating expense named "Kitchen expenses" reads as food.
+ */
+export type AccountNames = Map<string, string | AccountInfo>;
+
+/** The bucket a bill line lands in, 'unknown' when its account is not in the P&L. */
+function bucketOfLine(l: BillLine, names: AccountNames): CostBucket | null | 'unknown' {
+  const info = l.account_id ? names.get(l.account_id) : undefined;
+  if (!info) return 'unknown';
+  if (typeof info === 'string') return costBucket({ canonical: info, section: 'Cost of Sales' });
+  return costBucket({ canonical: info.name, raw: info.raw, section: info.section, business_line: info.business_line });
+}
+
+const isSpend = (l: BillLine) => !NON_SPEND_STATUSES.has(String(l.status ?? '').toUpperCase());
 
 export interface WeeklyCogsSide {
   cogs: number;
@@ -63,6 +95,8 @@ export interface WeeklyCogsSide {
 export interface WeeklyCogs {
   food: WeeklyCogsSide;
   beverage: WeeklyCogsSide;
+  /** Sushi purchases, kept out of both percentages. See `costBucket`. */
+  sushi: { cogs: number };
   /** Bill lines whose account could not be named at all. */
   unknown_account_total: number;
   caveats: string[];
@@ -103,24 +137,26 @@ export function weeklyCogs(
   sales: { food_sales: number; beverage_sales: number; days?: { monday_board: number; none: number } },
   coverage: { food: number | null; beverage: number | null },
 ): WeeklyCogs {
-  let food = 0, bev = 0, unknown = 0;
+  let food = 0, bev = 0, sushi = 0, unknown = 0;
 
   for (const l of lines) {
-    const name = l.account_id ? names.get(l.account_id) : undefined;
-    if (!name) {
+    if (!isSpend(l)) continue;
+    const kind = bucketOfLine(l, names);
+    if (kind === 'unknown') {
       // Counted, never dropped. A line we cannot name is a line we cannot say
       // is not food, and shrinking the numerator silently flatters the ratio.
       unknown += Number(l.line_amount);
       continue;
     }
-    const kind = classifyCogs(name);
     if (kind === 'food') food += Number(l.line_amount);
     else if (kind === 'beverage') bev += Number(l.line_amount);
+    else if (kind === 'sushi') sushi += Number(l.line_amount);
   }
 
   const out: WeeklyCogs = {
     food: side(food, sales.food_sales, coverage.food),
     beverage: side(bev, sales.beverage_sales, coverage.beverage),
+    sushi: { cogs: round2(sushi) },
     unknown_account_total: round2(unknown),
     caveats: [],
   };
@@ -189,9 +225,8 @@ export function coverageFor(
 ): { food: number | null; beverage: number | null } {
   let food = 0, bev = 0;
   for (const l of billLinesInMonth) {
-    const name = l.account_id ? names.get(l.account_id) : undefined;
-    if (!name) continue;
-    const kind = classifyCogs(name);
+    if (!isSpend(l)) continue;
+    const kind = bucketOfLine(l, names);
     if (kind === 'food') food += Number(l.line_amount);
     else if (kind === 'beverage') bev += Number(l.line_amount);
   }

@@ -67,6 +67,12 @@ export interface CostRatios {
    */
   unclassified: Array<{ account: string; amount: number }>;
   unclassified_total: number;
+  /**
+   * Sushi cost, reported on its own and kept out of every percentage. No ratio:
+   * sushi is sold wholesale outside Revel, so there is no sushi sales figure
+   * here to divide by. See `costBucket`.
+   */
+  sushi: { cogs: number; accounts: string[] };
   /** Days whose food/drink split came from the Monday board rather than Revel. */
   board_days: number;
   /**
@@ -119,6 +125,43 @@ export function classifyCogs(canonicalAccount: string): 'food' | 'beverage' | nu
   return null;
 }
 
+export type CostBucket = 'food' | 'beverage' | 'sushi';
+
+/**
+ * Which cost bucket an account belongs in, or null for none.
+ *
+ * ONE RULE FOR EVERY COST FIGURE, settled with Khai on 6 Oct 2026 after the
+ * weekly panel read Neon Pigeon's food cost at 38.2% against Monday's 23%:
+ *
+ *   - COST OF SALES ONLY. The name decides the bucket only once the SECTION
+ *     says the account is cost of sales. Classifying on the name alone put two
+ *     operating expenses into food: `Kitchen expenses` (contains "kitchen") and
+ *     `Transportation - Sushi` (contains "sushi"). Khai: kitchen expenses
+ *     "doesn't go into cogs", and sushi transport belongs in a separate bucket
+ *     that is not shown at all while profit is not being calculated.
+ *     BUILD_LOG 2.9.
+ *   - SUSHI IS ITS OWN COST. `COGS - Sushi` maps to canonical `COGS - Food`
+ *     with business line `sushi` (account_map), and is kept OUT of food cost:
+ *     the food % divides by Revel's food sales, and sushi is sold wholesale and
+ *     invoiced outside Revel, so counting its cost over sales that do not include
+ *     it overstates the kitchen. Monday's weekly report splits it out the same way.
+ */
+export function costBucket(a: {
+  canonical: string;
+  raw?: string | null;
+  section?: string | null;
+  business_line?: string | null;
+}): CostBucket | null {
+  if (!/cost of sales/i.test(a.section ?? '')) return null;
+
+  const sushi = a.business_line === 'sushi'
+    || /\bsushi\b/i.test(a.canonical)
+    || /\bsushi\b/i.test(a.raw ?? '');
+  if (sushi) return 'sushi';
+
+  return classifyCogs(a.canonical);
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function ratio(cogs: number, sales: number, accounts: string[]): CostRatio {
@@ -142,16 +185,29 @@ export function costRatios(
    * profit_and_loss table carries is_summary precisely because somebody will
    * forget, and this is where forgetting costs a food cost of 64%.
    */
-  const lines = rows.filter(r => !r.is_summary && /cost of sales/i.test(r.section));
+  const lines = rows.filter(r => !r.is_summary);
 
-  let foodCogs = 0, bevCogs = 0;
-  const foodAccounts: string[] = [], bevAccounts: string[] = [];
+  let foodCogs = 0, bevCogs = 0, sushiCogs = 0;
+  const foodAccounts: string[] = [], bevAccounts: string[] = [], sushiAccounts: string[] = [];
   const unclassified: Array<{ account: string; amount: number }> = [];
 
   for (const r of lines) {
-    const kind = classifyCogs(r.canonical_account || r.account_name);
+    const kind = costBucket({
+      canonical: r.canonical_account || r.account_name,
+      raw: r.account_name,
+      section: r.section,
+      business_line: r.business_line,
+    });
     const name = r.canonical_account || r.account_name;
-    if (kind === 'food') {
+    if (kind === 'sushi') {
+      // Named by the ledger's OWN account name: the canonical one for COGS -
+      // Sushi is "COGS - Food", which is exactly what this line is not.
+      sushiCogs += Number(r.amount);
+      if (!sushiAccounts.includes(r.account_name)) sushiAccounts.push(r.account_name);
+    } else if (!/cost of sales/i.test(r.section)) {
+      // Operating expenses, income: not a cost of sales and not shown here.
+      continue;
+    } else if (kind === 'food') {
       foodCogs += Number(r.amount);
       if (!foodAccounts.includes(name)) foodAccounts.push(name);
     } else if (kind === 'beverage') {
@@ -172,6 +228,7 @@ export function costRatios(
                     [...foodAccounts, ...bevAccounts].sort()),
     unclassified: unclassified.sort((a, b) => b.amount - a.amount),
     unclassified_total: round2(unclassified.reduce((n, u) => n + u.amount, 0)),
+    sushi: { cogs: round2(sushiCogs), accounts: sushiAccounts.sort() },
     board_days: sales.days?.monday_board ?? 0,
     short_sales_days: short,
   };
@@ -247,6 +304,14 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
       `${r.short_sales_days} day(s) in this period carried sales with no food/drink split from either Revel or the ` +
       'Monday board, so the sales side is short and every percentage is WITHHELD rather than shown high. ' +
       'The cost figures are real; the ratios are not computable until those days are filled.',
+    );
+  }
+
+  if (r.sushi.cogs !== 0) {
+    out.push(
+      `Sushi cost of $${r.sushi.cogs.toFixed(2)} (${r.sushi.accounts.join(', ')}) is reported on its own and kept out of ` +
+      'the food percentage: sushi is sold wholesale and invoiced outside Revel, so its sales are not in the food sales ' +
+      'the percentage divides by. Counting its cost there would overstate the kitchen.',
     );
   }
 

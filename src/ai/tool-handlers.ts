@@ -497,9 +497,13 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
   const ratios = costRatios(rows as any, sales);
   const caveats = costCaveats(ratios, periods.length);
 
-  if (subLines.length > 0 && !input.business_line) {
+  // Sushi is now split out by `costBucket` and never in the food %. Any OTHER
+  // sub-business still in the cost lines is named, so a blended figure is
+  // never quoted as a restaurant-only one.
+  const otherSubLines = subLines.filter(l => l !== 'sushi');
+  if (otherSubLines.length > 0 && !input.business_line) {
     caveats.push(
-      `This venue has cost lines outside the main business (${subLines.join(', ')}), which are INCLUDED here. ` +
+      `This venue has cost lines outside the main business (${otherSubLines.join(', ')}), which are INCLUDED here. ` +
       'That is correct for the entity and wrong for a cross-venue benchmark — a wholesale line carries its own ' +
       'margin structure. Re-run with business_line:"main" before comparing this against another venue, and say which basis you used.',
     );
@@ -527,6 +531,7 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
     food_cost: ratios.food,
     beverage_cost: ratios.beverage,
     combined_cost: ratios.combined,
+    sushi_cost: ratios.sushi,
     unclassified_cost_of_sales: ratios.unclassified,
     unclassified_total: ratios.unclassified_total,
     business_line: input.business_line ?? 'all',
