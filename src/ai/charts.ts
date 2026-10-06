@@ -112,7 +112,7 @@ export interface ChartSpec {
 }
 
 const METRIC_META: Record<Metric, { label: string; unit: ChartSpec['unit']; source: string }> = {
-  gross_sales:        { label: 'Gross sales',        unit: 'currency', source: 'Revel (POS)' },
+  gross_sales:        { label: 'Food & beverage sales', unit: 'currency', source: 'Revel (POS)' },
   food_bev_sales:     { label: 'Food & beverage sales', unit: 'currency', source: 'Revel (POS)' },
   net_sales:          { label: 'Net sales',          unit: 'currency', source: 'Revel (POS)' },
   instagram_reach:        { label: 'Instagram reach (avg/day)', unit: 'count', source: 'Meta' },

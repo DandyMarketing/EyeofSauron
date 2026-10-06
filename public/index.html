@@ -574,7 +574,9 @@ function draw(recData) {
     '</div>';
 
   const rows = [
-    ['Gross sales', money(v.gross_sales)],
+    // Not "Gross sales": Monday's weekly reports use that name for food +
+    // beverage + service charge, so the same label would mean two figures.
+    ['Food &amp; beverage sales', money(v.gross_sales)],
     ['Food', money(v.food_sales) + (v.food_pct === null ? '' : ' — ' + pct(v.food_pct))],
     ['Beverage', money(v.beverage_sales) + (v.food_pct === null ? '' : ' — ' + pct(100 - v.food_pct))],
     ['Discounts', money(v.total_discounts) + (v.discount_rate_pct === null ? '' : ' — ' + pct(v.discount_rate_pct))],
@@ -604,11 +606,11 @@ function draw(recData) {
     '<div class="panel"><h2>' + esc(w.label) + '</h2><table><tbody>' +
     rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
     '</tbody></table>' +
-    '<p class="figure-note">Gross = food + beverage, service charge excluded · ' +
-    'Monday\'s weekly report calls food + beverage + service charge (+ delivery) "Gross Sales", ' +
-    'so its gross reads about 10% above this one; net sales is the same in both · ' +
-    'Net sales = gross less discounts plus the 10% service charge, so it sits above gross · ' +
-    'Discounts = item + order, as a share of gross · ' +
+    '<p class="figure-note">Food &amp; beverage sales = food + beverage before discounts, service charge excluded. ' +
+    'Monday\'s weekly reports call food + beverage + service charge (+ delivery) "Gross Sales", about 10% more; ' +
+    'net sales is the same in both · ' +
+    'Net sales = food &amp; beverage less discounts plus the 10% service charge, so it sits above it · ' +
+    'Discounts = item + order, as a share of food &amp; beverage · ' +
     'Spend per head = food &amp; beverage ÷ covers · Average check = revenue per bill</p></div>';
 
   document.getElementById('app').innerHTML =

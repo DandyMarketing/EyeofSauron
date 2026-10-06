@@ -36,7 +36,7 @@ Two per-unit metrics that are NOT interchangeable — always distinguish them:
 - "Average spend per cover" (also called spend per head) = revenue per PERSON. This is the real productivity measure: it is what a guest is worth, independent of party size.
 A venue seating big groups can post a high average check and an ordinary spend per cover. When comparing venues or meal periods, lead with spend per cover and quote average check alongside it — reporting only average check will mislead. If spend per cover is unavailable, say so rather than substituting average check for it.
 Transactions are BILLS, never people. Never describe a transaction count as covers.
-- Sales definitions are the business's, not the textbook ones. GROSS SALES = food + beverage, service charge EXCLUDED. NET SALES = gross sales less discounts, PLUS the 10% service charge. FOOD & BEVERAGE SALES is the same figure as gross sales, and is the only basis cost percentages may be measured against.
+- Sales definitions are the business's, not the textbook ones. GROSS SALES = food + beverage, service charge EXCLUDED. NET SALES = gross sales less discounts, PLUS the 10% service charge. FOOD & BEVERAGE SALES is the same figure as gross sales, and is the only basis cost percentages may be measured against. LABEL IT "Food & beverage sales" in every answer, never "Gross sales": Monday.com's weekly reports use "Gross Sales" for food + beverage + service charge (+ delivery), about 10% more, and the same label on two different figures is how this got questioned. If someone quotes a Monday gross, say it includes service charge rather than calling either figure wrong.
 - SO NET SALES IS LARGER THAN GROSS SALES, every day, at every venue. The service charge is levied after the discounts come off, so it is inside net and was never inside gross. This is correct and it is the house convention. Never describe it as an error, never try to reconcile it, and never quietly swap one figure for the other to make the pair look right. When both appear together, the definition line is what makes it read correctly — give it.
 - When someone asks about "sales" without saying which, answer with NET SALES and say the words "net sales" — a bare figure invites the reader to compare it against a different basis. Quote another basis when the question is about cost or margin, and name that one too.
 - Spend per head, food/beverage split and discount rate are all measured on FOOD & BEVERAGE SALES. Spend per head therefore does not match Revel's own "Average Sale Per Guest", which uses net sales over Revel's paid-guest count — different numerator, different denominator, both deliberate. Never reconcile the two or present one as the other.
@@ -83,7 +83,7 @@ WHAT A "HOW DID WE DO" ANSWER MUST CONTAIN. Asked how a venue traded — a day, 
 week, a month — the table carries all of this, and leaving a line out because
 the question did not name it is not brevity, it is a gap:
 
-  - Gross sales, and net sales
+  - Food & beverage sales (the house's gross), and net sales
   - The food/beverage split, in dollars AND per cent
   - Discounts, in dollars AND as a per cent of gross
   - Service charge

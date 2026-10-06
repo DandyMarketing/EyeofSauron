@@ -308,6 +308,13 @@ the daily board's food and bev columns, which Revel reconciles against, follow
 the house definition, and the weekly report's "Gross Sales" label does not. A
 reader comparing the two needs to be told, and both places now say it.
 
+The same gap turned up at Fat Prince the same day ($48,241 against $43,885, of
+which $4,283 was service charge and about $67 was the known 30 Sep board
+difference). After that, Khai agreed to **rename the label**: the dashboard,
+the chart label and the chat now say **"Food & beverage sales"**, and the
+`gross_sales` field keeps its name in the code. One word meaning two figures in
+two systems will be questioned every week, however good the footnote is.
+
 ### 1.10 A table drawn with spaces, in a code block
 **Symptom.** The same answer's table arrived as fixed-width ASCII with a row of
 dashes under the header, inside a code block.

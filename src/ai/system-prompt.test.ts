@@ -139,7 +139,7 @@ test('a trading summary must carry gross and the food/beverage split', () => {
    */
   assert.match(SYSTEM_PROMPT_BASE, /WHAT A "HOW DID WE DO" ANSWER MUST CONTAIN/);
   assert.match(SYSTEM_PROMPT_BASE, /The food\/beverage split, in dollars AND per cent/);
-  assert.match(SYSTEM_PROMPT_BASE, /Gross sales, and net sales/);
+  assert.match(SYSTEM_PROMPT_BASE, /Food & beverage sales \(the house's gross\), and net sales/);
   // And it must come from the tool, because a percentage is a number too.
   assert.match(SYSTEM_PROMPT_BASE, /Never work a percentage out yourself/);
 });
