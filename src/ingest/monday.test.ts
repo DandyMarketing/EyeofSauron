@@ -2,7 +2,7 @@ import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseDate, summarisePostLockChange, cleanFinanceNote, hashMealPeriods, figuresChanged } from './monday.js';
+import { parseDate, summarisePostLockChange, cleanFinanceNote, hashMealPeriods, figuresChanged, alreadyDismissed } from './monday.js';
 
 /**
  * BUILD_LOG 2.1. A Monday.com item was literally named "2925-12-30 Tuesday".
@@ -220,5 +220,27 @@ describe('a correction on the board reaches the warehouse', () => {
     assert.doesNotMatch(body, /meal_periods_hash\s*[!=]==/, 'a decision still compares the stored hash');
     assert.equal((body.match(/figuresChanged\(existing\.meal_periods, mealPeriods\)/g) ?? []).length, 2,
       'both the closed-period check and the update check must compare figures');
+  });
+});
+
+/**
+ * A dismissed "changed after close" edit must stay dismissed. Resolving changes
+ * neither the board nor what Sauron holds, so the next hourly run saw the same
+ * difference and raised it again -- Neon Pigeon 30 Jul 2026 reached 83 copies.
+ */
+describe('alreadyDismissed', () => {
+  const p = (food: number) => ({ dinner: { food_sales: food, bev_sales: 100, covers: 10, walk_ins: 0, reservations: 10, cancellations: 0, discounts: 0, reductions: 0, service_charge: 0 } });
+
+  test('the same edit, already dismissed, is not raised again', () => {
+    assert.equal(alreadyDismissed([{ new_meal_periods: p(3433) }], p(3433) as any), true);
+  });
+
+  test('a further edit to the board is new, and is raised', () => {
+    assert.equal(alreadyDismissed([{ new_meal_periods: p(3433) }], p(3500) as any), false);
+  });
+
+  test('nothing dismissed, nothing suppressed', () => {
+    assert.equal(alreadyDismissed([], p(3433) as any), false);
+    assert.equal(alreadyDismissed([{ new_meal_periods: null }], p(3433) as any), false);
   });
 });

@@ -1828,6 +1828,26 @@ function reconcileDetail(al) {
       '<br>&bull; if it still shows ' + m(al.revel_gross) + ', the board is the one to fix &mdash; ask Finance, then resolve here with a note.</div>';
 }
 
+/**
+ * Does the corrected board agree with Revel? The question that decides whether
+ * a post-lock edit is the board catching up with the POS or something to check.
+ */
+function postLockVerdict(al) {
+  const m = (n) => '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const style = 'font-size:12px;margin-top:8px;line-height:1.5';
+  if (al.board_food_bev === null || al.board_food_bev === undefined) return '';
+  if (al.revel_food_bev === null || al.revel_food_bev === undefined) {
+    return '<div style="' + style + ';color:var(--text-muted)">Board food + drink now ' + m(al.board_food_bev) +
+      '. No Revel figure for this day to check it against, so it needs a person: ask Finance before applying.</div>';
+  }
+  if (al.board_matches_revel) {
+    return '<div style="' + style + ';color:var(--success)">Board now ' + m(al.board_food_bev) + ', the same as Revel. Safe to apply.</div>';
+  }
+  const gap = Number(al.board_food_bev) - Number(al.revel_food_bev);
+  return '<div style="' + style + ';color:var(--text-muted)">Board now ' + m(al.board_food_bev) + ', Revel ' + m(al.revel_food_bev) +
+    ' (board ' + (gap > 0 ? m(gap) + ' higher' : m(-gap) + ' lower') + '). Export this day from Revel: if it now shows the board figure, re-upload it and apply; if not, ask Finance.</div>';
+}
+
 function drawAlerts(a, alerts, page, scroll) {
   const pages = Math.max(1, Math.ceil(alerts.length / alertsPerPage));
   const current = Math.min(Math.max(0, page), pages - 1);
@@ -1835,7 +1855,14 @@ function drawAlerts(a, alerts, page, scroll) {
   const slice = alerts.slice(from, from + alertsPerPage);
 
   a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. Resolving clears every duplicate of the same finding.</p>' +
+      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. On a post-lock card, <b>Apply board figures</b> takes the edit into Sauron; <b>Keep Sauron\'s figures</b> dismisses it, and it stays dismissed unless the board changes again.</p>' +
+      (function () {
+        const matching = alerts.filter(function (x) { return x.board_matches_revel; }).length;
+        return matching
+          ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><button id="al-apply-matching" class="btn btn-small">Apply the ' + matching + ' that match Revel</button>' +
+            '<span style="font-size:12px;color:var(--text-muted)">The board was corrected after close and now agrees with Revel to the cent.</span></div>'
+          : '';
+      })() +
       slice.map(function (al) {
         const changeRows = (al.changes || []).map(function (c) {
           return '<div style="font-size:12px;color:var(--text-muted)">' +
@@ -1859,9 +1886,13 @@ function drawAlerts(a, alerts, page, scroll) {
           '<div style="margin-top:10px">' +
             (al.alert_type === 'reconciliation_failed' ? reconcileDetail(al)
               : (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>')) +
-            '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">' +
-              '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
-              '<button class="al-resolve btn btn-small">Resolve</button>' +
+            (al.alert_type === 'post_lock_change' ? postLockVerdict(al) : '') +
+            '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">' +
+              '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
+              (al.alert_type === 'post_lock_change'
+                ? '<button class="al-apply btn btn-small">Apply board figures</button>' +
+                  '<button class="al-resolve btn btn-small btn-outline">Keep Sauron\'s figures</button>'
+                : '<button class="al-resolve btn btn-small">Resolve</button>') +
             '</div>' +
           '</div></details>';
       }).join('') +
@@ -1911,31 +1942,54 @@ function drawAlerts(a, alerts, page, scroll) {
    */
   if (scroll) a.scrollIntoView({ block: 'start', behavior: 'smooth' });
 
+  /**
+   * Refetch the ALERTS, not the tab.
+   *
+   * Resolving used to rebuild the whole Attention panel, which meant waiting
+   * for the system-health check — the slowest read on the page — after every
+   * click, and losing your place in the list. Resolving clears every duplicate
+   * of the same finding, so the list genuinely has to come back from the server
+   * rather than just dropping the one card. Stays on the page you were on,
+   * unless resolving emptied it.
+   */
+  async function refresh() {
+    const fresh = await api('GET', '/admin/api/alerts');
+    if (fresh.error) { toast('error', fresh.error); return; }
+    const remaining = fresh.alerts || [];
+    if (remaining.length === 0) { a.remove(); loadBadges(); return; }
+    drawAlerts(a, remaining, Math.min(current, Math.ceil(remaining.length / alertsPerPage) - 1));
+    loadBadges();
+  }
+
+  const bulk = a.querySelector('#al-apply-matching');
+  if (bulk) {
+    bulk.addEventListener('click', async function () {
+      bulk.disabled = true;
+      const res = await api('POST', '/admin/api/alerts/apply-matching', {});
+      if (res.error) { toast('error', res.error); bulk.disabled = false; return; }
+      toast(res.failures && res.failures.length ? 'error' : 'success',
+        'Applied ' + res.applied + ' day(s)' + (res.failures && res.failures.length ? '; ' + res.failures.length + ' failed: ' + res.failures.join('; ') : ''));
+      await refresh();
+    });
+  }
+
   a.querySelectorAll('.alert-card').forEach(function (card) {
+    const applyBtn = card.querySelector('.al-apply');
+    if (applyBtn) {
+      applyBtn.addEventListener('click', async function () {
+        const res = await api('POST', '/admin/api/alerts/' + card.dataset.id + '/apply', {
+          notes: card.querySelector('.al-note').value || null,
+        });
+        if (res.error) { toast('error', res.error); return; }
+        await refresh();
+      });
+    }
     card.querySelector('.al-resolve').addEventListener('click', async function () {
       const res = await api('POST', '/admin/api/alerts/' + card.dataset.id + '/resolve', {
         notes: card.querySelector('.al-note').value || null,
       });
       if (res.error) { toast('error', res.error); return; }
-
-      /**
-       * Refetch the ALERTS, not the tab.
-       *
-       * Resolving used to rebuild the whole Attention panel, which meant
-       * waiting for the system-health check — the slowest read on the page —
-       * after every click, and losing your place in the list. Resolving clears
-       * every duplicate of the same finding, so the list genuinely has to come
-       * back from the server rather than just dropping the one card.
-       */
-      const fresh = await api('GET', '/admin/api/alerts');
-      if (fresh.error) { toast('error', fresh.error); return; }
-
-      const remaining = fresh.alerts || [];
-      if (remaining.length === 0) { a.remove(); loadBadges(); return; }
-
-      // Stay on the page you were on, unless resolving emptied it.
-      drawAlerts(a, remaining, Math.min(current, Math.ceil(remaining.length / alertsPerPage) - 1));
-      loadBadges();
+      await refresh();
     });
   });
 }

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardFoodBev, revelBoardDrift, alreadyDecided } from './revel-drift.js';
+import { boardFoodBev, revelBoardDrift, alreadyDecided, boardMatchesRevel } from './revel-drift.js';
 
 const at = (d: string) => new Date(`${d}T12:00:00Z`);
 const board = (lunch: [number, number], dinner: [number, number]) => ({
@@ -84,5 +84,23 @@ describe('alreadyDecided — a person\'s resolution stands until the day moves',
     assert.equal(alreadyDecided(finding, [resolved(5759.8, 5692.8, 'np')]), false);
     assert.equal(alreadyDecided(finding, [resolved(5759.8, 5692.8, 'fp', '2026-09-29')]), false);
     assert.equal(alreadyDecided(finding, []), false);
+  });
+});
+
+describe('boardMatchesRevel — when a post-close board edit needs no second look', () => {
+  // Fat Prince 17 Aug 2026: the board was corrected from $2,095 to $9,034, which is Revel's figure.
+  const corrected = { dinner: { food_sales: 6468, bev_sales: 2566 } };
+
+  test('the corrected board equals Revel: safe to apply', () => {
+    assert.equal(boardMatchesRevel(corrected, { data_source: 'both', gross_sales: '9034.00' }), true);
+  });
+
+  test('it does not: a person decides (Firangi 7 Aug: board $9,932, Revel $8,816.50)', () => {
+    assert.equal(boardMatchesRevel({ dinner: { food_sales: 7000, bev_sales: 2932 } }, { data_source: 'both', gross_sales: 8816.5 }), false);
+  });
+
+  test('a board-only day has nothing to check against, so never qualifies', () => {
+    assert.equal(boardMatchesRevel(corrected, { data_source: 'monday', gross_sales: 9034 }), false);
+    assert.equal(boardMatchesRevel(corrected, undefined), false);
   });
 });

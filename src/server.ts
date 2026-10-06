@@ -18,7 +18,8 @@ import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, i
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
 import { humanApiError } from './lib/api-fatal.js';
-import { summarisePostLockChange } from './ingest/monday.js';
+import { summarisePostLockChange, applyPostLockChange } from './ingest/monday.js';
+import { boardMatchesRevel, boardFoodBev } from './lib/revel-drift.js';
 import { newState, verifyState, buildAuthorizeUrl, exchangeCode, fetchTenants, storeConnection, XERO_SCOPES } from './ingest/xero.js';
 import { ingestProfitAndLoss } from './ingest/xero-pl.js';
 import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, redactTokens, calibrateDayAlignment, askMetaForValidMetrics } from './ingest/meta.js';
@@ -2437,7 +2438,108 @@ app.get('/admin/api/alerts', async (c) => {
     });
   }
 
+  // For a "changed after close" card: does the corrected board now agree with
+  // Revel? That is what decides whether applying it needs a second look.
+  const postLock = [...grouped.values()].filter(g => g.alert_type === 'post_lock_change');
+  if (postLock.length > 0) {
+    const latestNew = new Map<string, { at: string; mp: unknown }>();
+    for (const a of (data ?? []) as any[]) {
+      if (a.alert_type !== 'post_lock_change') continue;
+      const key = `${a.venue_id}|${a.business_date}`;
+      const seen = latestNew.get(key);
+      if (!seen || a.created_at > seen.at) latestNew.set(key, { at: a.created_at, mp: a.new_meal_periods });
+    }
+    const venueIds = [...new Set((data ?? []).map((a: any) => a.venue_id))];
+    const dates = [...new Set(postLock.map(g => g.business_date))];
+    const { data: days } = await selectAll(() => supabaseAdmin
+      .from('daily_operations')
+      .select('venue_id, business_date, data_source, gross_sales')
+      .in('venue_id', venueIds)
+      .in('business_date', dates));
+    const dayOf = new Map((days ?? []).map((d: any) => [`${d.venue_id}|${d.business_date}`, d]));
+    for (const a of (data ?? []) as any[]) {
+      if (a.alert_type !== 'post_lock_change') continue;
+      const g = grouped.get(`${a.venue_id}|${a.business_date}|${a.alert_type}`);
+      if (!g || g.board_matches_revel !== undefined) continue;
+      const key = `${a.venue_id}|${a.business_date}`;
+      const mp = latestNew.get(key)?.mp;
+      const day = dayOf.get(key) as any;
+      g.board_matches_revel = boardMatchesRevel(mp, day);
+      g.board_food_bev = boardFoodBev(mp);
+      g.revel_food_bev = day?.data_source === 'both' ? Number(day.gross_sales) : null;
+    }
+  }
+
   return c.json({ alerts: [...grouped.values()], total_rows: (data ?? []).length });
+});
+
+/**
+ * Take a closed day's board edit into Sauron (see applyPostLockChange).
+ *
+ * "Resolve" alone keeps Sauron's figures, and now stays resolved; this is the
+ * other answer -- the board was right, use it.
+ */
+app.post('/admin/api/alerts/:id/apply', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    const r = await applyPostLockChange(c.req.param('id'), user.id, typeof body.notes === 'string' ? body.notes : null);
+    return c.json(r);
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+/**
+ * Apply every "changed after close" edit that now agrees with Revel to the cent.
+ *
+ * Decided HERE, from the database, never from the list the page sent: a button
+ * that writes figures must not trust a client's idea of which ones qualify.
+ * Built 6 Oct 2026 for a backlog of 39 such days left by the hash bug
+ * (BUILD_LOG 1.12) -- the board catching up with Revel, which nobody needs to
+ * judge one at a time.
+ */
+app.post('/admin/api/alerts/apply-matching', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+
+  const { data: open, error } = await selectAll(() => supabaseAdmin
+    .from('reconciliation_alerts')
+    .select('id, venue_id, business_date, new_meal_periods, created_at')
+    .eq('alert_type', 'post_lock_change')
+    .eq('resolved', false));
+  if (error) return c.json({ error: error.message }, 400);
+
+  const latest = new Map<string, any>();
+  for (const a of open as any[]) {
+    const key = `${a.venue_id}|${a.business_date}`;
+    const seen = latest.get(key);
+    if (!seen || a.created_at > seen.created_at) latest.set(key, a);
+  }
+  if (latest.size === 0) return c.json({ applied: 0, resolved: 0, skipped: 0 });
+
+  const { data: days, error: dayError } = await selectAll(() => supabaseAdmin
+    .from('daily_operations')
+    .select('venue_id, business_date, data_source, gross_sales')
+    .in('venue_id', [...new Set([...latest.values()].map(a => a.venue_id))])
+    .in('business_date', [...new Set([...latest.values()].map(a => a.business_date))]));
+  if (dayError) return c.json({ error: dayError.message }, 400);
+  const dayOf = new Map((days ?? []).map((d: any) => [`${d.venue_id}|${d.business_date}`, d]));
+
+  let applied = 0, resolved = 0, skipped = 0;
+  const failures: string[] = [];
+  for (const [key, a] of latest) {
+    if (!boardMatchesRevel(a.new_meal_periods, dayOf.get(key) as any)) { skipped++; continue; }
+    try {
+      const r = await applyPostLockChange(a.id, user.id, 'Bulk: the board matched Revel to the cent.');
+      applied++;
+      resolved += r.resolved;
+    } catch (e: any) {
+      failures.push(`${a.business_date}: ${e?.message ?? e}`);
+    }
+  }
+  return c.json({ applied, resolved, skipped, failures });
 });
 
 /**

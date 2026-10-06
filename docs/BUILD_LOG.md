@@ -423,6 +423,15 @@ decision compares the stored hash again.
 with a change*: this one was only ever exercised on unchanged data, where a
 detector that sees nothing passes. And *an "unchanged, skipped" count of 100%
 for weeks is a finding*, not a quiet week.
+**Addendum, 6 Oct 2026: the backlog could not be cleared.** Resolving a
+"changed after close" alert changed neither the board nor what Sauron held, so
+the next hourly run found the same difference and raised it again. Neon Pigeon
+30 and 31 Jul each reached 83 copies. Two fixes: **Apply board figures** writes
+the edit into Sauron deliberately (`applyPostLockChange`, with a bulk button for
+days where the corrected board equals Revel to the cent, which covered 39 of 46
+days), and a dismissed edit stays dismissed unless the board changes again
+(`alreadyDismissed`). *An alert a person resolves must not be re-derivable from
+state the resolution did not touch.*
 
 ### 1.13 Revel's Total row parsed and then thrown away
 **Symptom.** `raw_sales`, `voids_amount` and `comps_amount` were NULL on every

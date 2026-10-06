@@ -541,6 +541,20 @@ export async function ingestMondayItems(
       // a hash from the broken format, and comparing against it would raise a
       // "changed after close" alert for the whole of history on the first run.
       if (figuresChanged(existing.meal_periods, mealPeriods)) {
+        // A person already looked at exactly this edit and decided to keep
+        // Sauron's figures. Raising it again every hour would undo their
+        // decision -- the reason Neon Pigeon 30 Jul reached 83 copies. A
+        // further edit to the board is new, and is raised.
+        // row-cap: the resolved alerts for one day of one venue.
+        const { data: decided } = await supabase
+          .from('reconciliation_alerts')
+          .select('new_meal_periods')
+          .eq('venue_id', venueId)
+          .eq('business_date', date)
+          .eq('alert_type', 'post_lock_change')
+          .eq('resolved', true);
+        if (alreadyDismissed(decided ?? [], mealPeriods)) continue;
+
         if (!options.dryRun) {
           await raiseAlert({
             venue_id: venueId,
@@ -700,6 +714,98 @@ export async function ingestMondayItems(
   }
 
   return results;
+}
+
+/**
+ * Has a person already dismissed exactly this board edit?
+ *
+ * A "changed after close" alert compares the board with what Sauron holds, and
+ * resolving it changes neither -- so without this, the next hourly run raises
+ * it again. Matched on the FIGURES of the edit that was dismissed.
+ */
+export function alreadyDismissed(
+  resolved: Array<{ new_meal_periods: unknown }>,
+  incoming: Record<string, MealPeriodData>,
+): boolean {
+  return resolved.some(r => r.new_meal_periods && !figuresChanged(r.new_meal_periods as any, incoming));
+}
+
+/**
+ * Take a closed day's board edit into Sauron, on a person's say-so.
+ *
+ * Closed months are not overwritten by the sync (BUILD_LOG 2.5, 1.12): an edit
+ * after close becomes an alert instead, to be applied DELIBERATELY. This is that
+ * deliberate step. It writes what an open-month update would have written --
+ * the meal periods, and for a board-only day the totals derived from them --
+ * and resolves every copy of the alert, so the next sync finds nothing to say.
+ */
+export async function applyPostLockChange(
+  alertId: string,
+  resolvedBy: string | null,
+  notes: string | null,
+): Promise<{ venue_id: string; business_date: string; resolved: number }> {
+  const { data: alert, error } = await supabase
+    .from('reconciliation_alerts')
+    .select('venue_id, business_date, alert_type, new_meal_periods')
+    .eq('id', alertId)
+    .single();
+  if (error || !alert) throw new Error('Alert not found');
+  if (alert.alert_type !== 'post_lock_change' || !alert.new_meal_periods) {
+    throw new Error('Only a "changed after close" alert carries board figures to apply');
+  }
+
+  // The NEWEST copy carries the board as it stands; a card groups copies raised
+  // at different times, and the one it points at may hold an earlier edit.
+  // row-cap: the alerts for one day of one venue; top-1.
+  const { data: latest } = await supabase
+    .from('reconciliation_alerts')
+    .select('new_meal_periods')
+    .eq('venue_id', alert.venue_id)
+    .eq('business_date', alert.business_date)
+    .eq('alert_type', 'post_lock_change')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const mealPeriods = ((latest?.[0]?.new_meal_periods) ?? alert.new_meal_periods) as Record<string, MealPeriodData>;
+  const { data: row } = await supabase
+    .from('daily_operations')
+    .select('id, data_source, taxed_service_fee')
+    .eq('venue_id', alert.venue_id)
+    .eq('business_date', alert.business_date)
+    .maybeSingle();
+  if (!row) throw new Error(`No stored day for ${alert.business_date}`);
+
+  const update: Record<string, unknown> = {
+    meal_periods: mealPeriods,
+    meal_periods_hash: hashMealPeriods(mealPeriods),
+  };
+  if (row.data_source === 'monday') {
+    // Board-only day: the sales figures come from the board, so they move too.
+    const totals = deriveTotals(mealPeriods, Number(row.taxed_service_fee ?? 0));
+    update.gross_sales = totals.grossSales || null;
+    update.net_sales = totals.netSales || null;
+    update.item_discounts = totals.totalDiscounts;
+    update.taxed_service_fee = totals.effectiveSC;
+    update.total_guests = totals.totalCovers || null;
+  }
+  const { error: writeError } = await supabase.from('daily_operations').update(update).eq('id', row.id);
+  if (writeError) throw new Error(writeError.message);
+
+  const { data: done, error: resolveError } = await supabase
+    .from('reconciliation_alerts')
+    .update({
+      resolved: true,
+      resolved_by: resolvedBy,
+      resolved_at: new Date().toISOString(),
+      notes: 'Applied: the board\'s corrected figures were written to Sauron.' + (notes ? ' ' + notes : ''),
+    })
+    .eq('venue_id', alert.venue_id)
+    .eq('business_date', alert.business_date)
+    .eq('alert_type', 'post_lock_change')
+    .eq('resolved', false)
+    .select('id');
+  if (resolveError) throw new Error(resolveError.message);
+
+  return { venue_id: alert.venue_id, business_date: alert.business_date, resolved: done?.length ?? 0 };
 }
 
 export function getVenueBoards(): typeof VENUE_BOARDS {

@@ -99,5 +99,22 @@ export function alreadyDecided(finding: DriftFinding, resolved: ResolvedAlert[])
      (same(r.monday_gross, finding.monday_gross) && same(r.revel_gross, finding.revel_gross))));
 }
 
+/**
+ * Does a board edit made after close agree with Revel to the cent?
+ *
+ * The test for applying a "changed after close" edit without a second look:
+ * when the corrected board equals what Revel says for the day, the edit is the
+ * board catching up with the POS, and taking it is not a judgement. Only days
+ * holding BOTH sources qualify; a board-only day has nothing to check it with.
+ */
+export function boardMatchesRevel(
+  newMealPeriods: unknown,
+  row: { data_source: string | null; gross_sales: number | string | null } | undefined,
+): boolean {
+  if (!row || row.data_source !== 'both' || row.gross_sales === null || row.gross_sales === undefined) return false;
+  const board = boardFoodBev(newMealPeriods);
+  return board !== null && Math.abs(board - Number(row.gross_sales)) < 0.005;
+}
+
 /** How far back the sweep looks. Five weeks covers a month's close with room. */
 export const DRIFT_WINDOW_DAYS = 35;
