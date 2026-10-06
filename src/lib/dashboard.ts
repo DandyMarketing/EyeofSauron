@@ -40,7 +40,7 @@ import {
 import { costRatios, costCaveats, costBucket, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { readAllPages, selectAll } from './paged.js';
-import { weeklyCogs, coverageFor, costSettlement, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, transferTotals, type TransferTotals, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
@@ -907,6 +907,62 @@ async function buildCosts(
  * reported. A part-month has bills not yet entered and a ledger not yet closed;
  * measuring coverage there compares two different kinds of incomplete.
  */
+/**
+ * Stock sent between sister venues in the window, per venue. See
+ * `transferTotals` for the rule.
+ *
+ * Read across ALL venues, whatever the page is scoped to: a venue's transfers
+ * OUT sit in the other venue's bills, so a manager's own figure cannot be right
+ * without reading them. Only this venue's own totals reach its panel.
+ *
+ * The sender is found by EXACT supplier name in `sister_companies`, confirmed
+ * by a person -- "Potus Pte. Ltd." sends stock, "Potus Pte Ltd" is a different
+ * contact that bills Neon Pigeon itself.
+ */
+async function readTransfers(start: string, end: string): Promise<Map<string, TransferTotals>> {
+  // row-cap: one row per sister company, three today.
+  const { data: sisters, error } = await supabaseAdmin.from('sister_companies').select('supplier_name, venue_id');
+  if (error) throw new Error(error.message);
+  if (!sisters || sisters.length === 0) return new Map();
+  const senderByName = new Map<string, string>(sisters.map((s: any) => [s.supplier_name, s.venue_id]));
+
+  const rows = await readAllPages<any>((from, to) => supabaseAdmin.from('supplier_bill_lines')
+    .select('id, venue_id, account_id, line_amount, supplier_bills!inner(bill_date, status, supplier_name)')
+    .in('supplier_bills.supplier_name', [...senderByName.keys()])
+    .gte('supplier_bills.bill_date', start)
+    .lte('supplier_bills.bill_date', end)
+    .order('id')
+    .range(from, to));
+  if (rows.length === 0) return new Map();
+
+  // Each line is classified by the account the RECEIVER coded it to.
+  const receivers = [...new Set(rows.map(r => r.venue_id as string))];
+  const accountIds = [...new Set(rows.map(r => r.account_id).filter(Boolean))] as string[];
+  const [{ data: pl, error: plError }, ...maps] = await Promise.all([
+    selectAll(() => supabaseAdmin.from('profit_and_loss')
+      .select('venue_id, account_id, account_name, section')
+      .in('account_id', accountIds)),
+    ...receivers.map(id => fetchAccountMap(id)),
+  ]);
+  if (plError) throw new Error(plError.message);
+  const namesByVenue = new Map<string, AccountNames>(receivers.map(id => [id, new Map()]));
+  for (const r of pl ?? []) {
+    const i = receivers.indexOf(r.venue_id);
+    if (i < 0) continue;
+    const { canonical_account, business_line } = resolveAccount(r.account_name, maps[i] as any);
+    namesByVenue.get(r.venue_id)!.set(r.account_id, { name: canonical_account, raw: r.account_name, section: r.section, business_line });
+  }
+
+  return transferTotals(rows.map(r => ({
+    account_id: r.account_id,
+    line_amount: Number(r.line_amount),
+    bill_date: r.supplier_bills?.bill_date ?? '',
+    status: r.supplier_bills?.status ?? null,
+    receiver_venue_id: r.venue_id,
+    sender_venue_id: senderByName.get(r.supplier_bills?.supplier_name) as string,
+  })), namesByVenue);
+}
+
 async function buildPeriodCosts(
   venues: Array<{ id: string; name: string; slug: string }>,
   start: string,
@@ -918,6 +974,12 @@ async function buildPeriodCosts(
   try {
     let any = false;
     const out: Record<string, WeeklyCogs> = {};
+
+    // A failure here costs the adjustment, never the panel -- and says so.
+    const transfersRead = readTransfers(start, end).catch((e: any) => {
+      console.warn(`[dashboard] sister-venue transfers failed: ${e?.message ?? e}`);
+      return null;
+    });
 
     await Promise.all(venues.map(async v => {
       const [{ data: pl }, windowLines, monthLines, { data: ops }, accountMap] = await Promise.all([
@@ -982,12 +1044,18 @@ async function buildPeriodCosts(
         }));
 
       const sales = sumClassSplits(ops ?? []);
-      out[v.slug] = { settlement: costSettlement(end, today), ...weeklyCogs(
+      const transfers = await transfersRead;
+      const result = weeklyCogs(
         toLines(windowLines),
         names,
         sales,
         coverageFor(toLines(monthLines), names, ledger),
-      ) };
+        transfers?.get(v.id),
+      );
+      if (transfers === null) {
+        result.caveats.push('Stock moved between sister venues could not be read, so any sent from this venue is still counted in its cost.');
+      }
+      out[v.slug] = { settlement: costSettlement(end, today), ...result };
     }));
 
     return any ? out : null;

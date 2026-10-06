@@ -16,7 +16,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine, transferTotals, type TransferLine, type AccountNames, type AccountInfo } from './weekly-cogs.js';
 
 const names = new Map([
   ['acc-food', 'COGS - Food'],
@@ -251,5 +251,76 @@ describe('when a period\'s cost is final', () => {
   test('a month works the same way', () => {
     assert.deepEqual(costSettlement('2026-09-30', '2026-10-06'), { status: 'provisional', final_on: '2026-10-08' });
     assert.equal(costSettlement('2026-09-30', '2026-10-08').status, 'final');
+  });
+});
+
+/**
+ * Stock moved between sister venues. Khai, 6 Oct 2026: "if Neon Pigeon buys for
+ * FP then it should minus from NP and + to FP", and "transfers are usually food
+ * and beverage products". The cases are real lines from query 51.
+ */
+describe('transfers between sister venues', () => {
+  const fpAccounts: AccountNames = new Map<string, AccountInfo>([
+    ['fp-alc', { name: 'COGS - Alcohol', section: 'Less Cost of Sales' }],
+    ['fp-food', { name: 'COGS - Food', section: 'Less Cost of Sales' }],
+    ['fp-pr', { name: 'Public Relations / Marketing costs', section: 'Less Operating Expenses' }],
+    ['fp-tips', { name: 'Staff costs - Tips', section: 'Less Operating Expenses' }],
+  ]);
+  const npAccounts: AccountNames = new Map<string, AccountInfo>([
+    ['np-sushi', { name: 'COGS - Food', raw: 'COGS - Sushi', section: 'Less Cost of Sales', business_line: 'sushi' }],
+    ['np-bev', { name: 'COGS - Beverages', section: 'Less Cost of Sales' }],
+  ]);
+  const names = new Map([['fp', fpAccounts], ['np', npAccounts]]);
+  const t = (receiver: string, sender: string, account: string, amount: number, status = 'AUTHORISED'): TransferLine =>
+    ({ receiver_venue_id: receiver, sender_venue_id: sender, account_id: account, line_amount: amount, bill_date: '2026-09-30', status });
+
+  test('Neon Pigeon sends Fat Prince tequila: + to Fat Prince, - from Neon Pigeon', () => {
+    const r = transferTotals([t('fp', 'np', 'fp-alc', 716)], names);
+    assert.deepEqual(r.get('fp'), { in: { food: 0, beverage: 716, sushi: 0 }, out: { food: 0, beverage: 0 } });
+    assert.deepEqual(r.get('np'), { in: { food: 0, beverage: 0, sushi: 0 }, out: { food: 0, beverage: 716 } });
+  });
+
+  test('PR fees and tips from a sister company are costs, not stock, and move nothing', () => {
+    const r = transferTotals([t('fp', 'fi', 'fp-pr', 25014.98), t('fp', 'fp', 'fp-tips', 269.66)], names);
+    assert.equal(r.size, 0);
+  });
+
+  test('a company billing its own venue is not a transfer, even for stock', () => {
+    assert.equal(transferTotals([t('fp', 'fp', 'fp-food', 100)], names).size, 0);
+  });
+
+  test('sushi received is sushi at the receiver and comes off the sender\'s food', () => {
+    const r = transferTotals([t('np', 'fp', 'np-sushi', 25.6)], names);
+    assert.equal(r.get('np')!.in.sushi, 25.6);
+    assert.equal(r.get('fp')!.out.food, 25.6);
+  });
+
+  test('a voided bill moves nothing; an account the receiver never reported moves nothing', () => {
+    assert.equal(transferTotals([t('fp', 'np', 'fp-alc', 610.29, 'VOIDED'), t('fp', 'np', 'no-such', 50)], names).size, 0);
+  });
+
+  test('the sender\'s weekly cost loses what it sent, and says so', () => {
+    const own: BillLine[] = [{ account_id: 'np-bev', line_amount: 2000, bill_date: '2026-09-29', status: 'PAID' }];
+    const sent = { in: { food: 0, beverage: 0, sushi: 0 }, out: { food: 0, beverage: 716 } };
+    const w = weeklyCogs(own, npAccounts, { food_sales: 10000, beverage_sales: 8000 }, { food: 95, beverage: 95 }, sent);
+    assert.equal(w.beverage.cogs, 1284);
+    assert.equal(w.beverage.pct, 16.05);
+    assert.deepEqual(w.transfers, sent);
+    assert.ok(w.caveats.some(c => /\$716\.00 of stock sent to sister venues/.test(c)));
+  });
+
+  test('the receiver\'s cost is unchanged -- it is already in its bills -- and the caveat names it', () => {
+    const own: BillLine[] = [{ account_id: 'fp-alc', line_amount: 716, bill_date: '2026-09-30', status: 'PAID' }];
+    const got = { in: { food: 0, beverage: 716, sushi: 0 }, out: { food: 0, beverage: 0 } };
+    const w = weeklyCogs(own, fpAccounts, { food_sales: 1, beverage_sales: 1 }, { food: 95, beverage: 95 }, got);
+    assert.equal(w.beverage.cogs, 716);
+    assert.ok(w.caveats.some(c => /Includes \$716\.00 of stock received/.test(c)));
+  });
+
+  test('no transfers, no field and no caveat', () => {
+    const w = weeklyCogs([], fpAccounts, { food_sales: 1, beverage_sales: 1 }, { food: 95, beverage: 95 },
+      { in: { food: 0, beverage: 0, sushi: 0 }, out: { food: 0, beverage: 0 } });
+    assert.equal(w.transfers, undefined);
+    assert.ok(!w.caveats.some(c => /sister venues/.test(c)));
   });
 });

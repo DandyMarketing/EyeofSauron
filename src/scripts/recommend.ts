@@ -119,13 +119,23 @@ if (venues.length === 0) {
  * Every name that must not appear in another venue's briefing.
  *
  * Legal entity names are included because two of the three -- "Potus" and
- * "20 Craig Road" -- tell a reader nothing about the venue, so a leak through
+ * "Craig Place 20" -- tell a reader nothing about the venue, so a leak through
  * one of them would not be caught by eye.
  */
 const { data: entities } = await supabase.from('xero_connections').select('venue_id, tenant_name');  // row-cap: one per venue
+// The companies as they appear on bills. Xero's organisation names are trading
+// names ("Firangi Superstar"), so "Craig Place 20 Pte. Ltd." -- Firangi's
+// company, confirmed 6 Oct 2026 -- was in no list at all. Missing table: the
+// names above still apply, and the run says so rather than failing.
+const { data: sisters, error: sistersError } = await supabase.from('sister_companies').select('venue_id, supplier_name');  // row-cap: one per sister company
+if (sistersError) console.warn(`  sister_companies unreadable (${sistersError.message}); company names on bills are not in the venue filter.`);
 const forbiddenFor = (venueId: string) => [
   ...(venues as any[]).filter(v => v.id !== venueId).map(v => v.name),
   ...((entities ?? []) as any[]).filter(e => e.venue_id !== venueId && e.tenant_name).map(e => e.tenant_name),
+  // Both the full name and the name without "Pte. Ltd.": a briefing that says
+  // "Craig Place 20" would not contain the full string.
+  ...((sisters ?? []) as any[]).filter(s => s.venue_id !== venueId && s.supplier_name)
+    .flatMap(s => [s.supplier_name, String(s.supplier_name).replace(/\s+pte\.?\s+ltd\.?$/i, '')]),
 ];
 
 let written = 0;

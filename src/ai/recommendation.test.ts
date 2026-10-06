@@ -189,7 +189,7 @@ test('a legal entity name counts as naming the venue', () => {
   // leak through "Potus" would not be spotted by eye.
   const found = namesOtherVenues(
     'Potus Pte Ltd is running a stronger beverage margin this quarter.',
-    ['Potus Pte Ltd', '20 Craig Road Pte Ltd'],
+    ['Potus Pte Ltd', 'Craig Place 20 Pte. Ltd.'],
   );
   assert.deepEqual(found, ['Potus Pte Ltd']);
 });

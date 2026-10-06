@@ -562,7 +562,7 @@ export function parseRecommendations(
  * common case and is not a substitute for the venue filter on the query tools.
  *
  * Legal entity names are included in the terms because two of the three tell
- * you nothing about the venue -- "Potus" and "20 Craig Road" would not be
+ * you nothing about the venue -- "Potus" and "Craig Place 20" would not be
  * recognised as a leak by anyone reading quickly.
  */
 export function namesOtherVenues(text: string, forbiddenTerms: string[]): string[] {

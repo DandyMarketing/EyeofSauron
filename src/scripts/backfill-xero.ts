@@ -94,7 +94,7 @@ const targets = (connections ?? []).filter((c: any) => !onlySlug || c.venues?.sl
 
 if (targets.length === 0) {
   // An unmapped organisation is a configuration problem, not a quiet night.
-  // And the mapping cannot be guessed: "Potus" and "20 Craig Road" name no
+  // And the mapping cannot be guessed: "Potus" and "Craig Place 20" name no
   // venue a human or a model would recognise.
   console.error(onlySlug
     ? `No mapped Xero connection matched --venue=${onlySlug}.`

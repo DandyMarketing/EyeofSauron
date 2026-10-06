@@ -126,9 +126,79 @@ export function costSettlement(periodEnd: string, today: string): CostSettlement
   return { status: today >= final_on ? 'final' : 'provisional', final_on };
 }
 
+/**
+ * Stock moved between sister venues, in one venue's terms.
+ *
+ * Khai, 6 Oct 2026: a transfer "should be counted as cost and also credit so if
+ * Neon Pigeon buys for FP then it should minus from NP and + to FP". The
+ * receiving venue already carries it -- the transfer arrives there as a bill
+ * from the sending company. The sender's own purchase bill is still in ITS
+ * bills, so without this the same stock is cost at both venues.
+ *
+ * ONLY FOOD AND DRINK. Sister companies also bill each other for PR fees, booth
+ * fees, glassware and uniforms (about $57,000 against $5,600 of stock over
+ * twelve months); those are real costs at the receiver and are not credited
+ * back. "Transfers are usually food and beverage products" -- so a line counts
+ * when the RECEIVER coded it to food, drink or sushi cost of sales.
+ *
+ * WEEKLY ONLY. The monthly P&L is not adjusted: no venue books transfers to a
+ * separate income account, so the sender most likely credits its own COGS
+ * already, and subtracting again would count the credit twice.
+ */
+export interface TransferTotals {
+  /** Received from sister venues: already in this venue's bills, reported for clarity. */
+  in: { food: number; beverage: number; sushi: number };
+  /** Sent to sister venues: taken OFF this venue's food and beverage cost. */
+  out: { food: number; beverage: number };
+}
+
+export interface TransferLine extends BillLine {
+  /** The venue whose bills this line is in. */
+  receiver_venue_id: string;
+  /** The venue whose company sent it, from sister_companies (exact name). */
+  sender_venue_id: string;
+}
+
+/**
+ * Per-venue transfer totals from the bill lines that sister companies sent.
+ *
+ * `namesByVenue` is each RECEIVER's account map: the line is classified by the
+ * account the receiver coded it to, which is the only coding we can see.
+ * Sushi received is taken off the sender's FOOD: the sender has no sushi line
+ * of its own, and sushi is food.
+ */
+export function transferTotals(
+  lines: TransferLine[],
+  namesByVenue: Map<string, AccountNames>,
+): Map<string, TransferTotals> {
+  const out = new Map<string, TransferTotals>();
+  const of = (venueId: string) => {
+    let t = out.get(venueId);
+    if (!t) out.set(venueId, t = { in: { food: 0, beverage: 0, sushi: 0 }, out: { food: 0, beverage: 0 } });
+    return t;
+  };
+  for (const l of lines) {
+    if (!isSpend(l)) continue;
+    // A venue's own company billing itself (tips, petty items) is not a transfer.
+    if (l.sender_venue_id === l.receiver_venue_id) continue;
+    const kind = bucketOfLine(l, namesByVenue.get(l.receiver_venue_id) ?? new Map());
+    if (kind !== 'food' && kind !== 'beverage' && kind !== 'sushi') continue;
+    const amount = Number(l.line_amount);
+    of(l.receiver_venue_id).in[kind] += amount;
+    of(l.sender_venue_id).out[kind === 'beverage' ? 'beverage' : 'food'] += amount;
+  }
+  for (const t of out.values()) {
+    for (const k of ['food', 'beverage', 'sushi'] as const) t.in[k] = round2(t.in[k]);
+    for (const k of ['food', 'beverage'] as const) t.out[k] = round2(t.out[k]);
+  }
+  return out;
+}
+
 export interface WeeklyCogs {
   /** Set by the caller, which knows the period and today. */
   settlement?: CostSettlement;
+  /** Stock moved to and from sister venues in the window, when there was any. */
+  transfers?: TransferTotals;
   food: WeeklyCogsSide;
   beverage: WeeklyCogsSide;
   /** Sushi purchases, kept out of both percentages. See `costBucket`. */
@@ -172,6 +242,7 @@ export function weeklyCogs(
   names: AccountNames,
   sales: { food_sales: number; beverage_sales: number; days?: { monday_board: number; none: number } },
   coverage: { food: number | null; beverage: number | null },
+  transfers?: TransferTotals,
 ): WeeklyCogs {
   let food = 0, bev = 0, sushi = 0, unknown = 0;
 
@@ -189,6 +260,12 @@ export function weeklyCogs(
     else if (kind === 'sushi') sushi += Number(l.line_amount);
   }
 
+  // Stock sent to a sister venue is that venue's cost, not this one's.
+  if (transfers) {
+    food -= transfers.out.food;
+    bev -= transfers.out.beverage;
+  }
+
   const out: WeeklyCogs = {
     food: side(food, sales.food_sales, coverage.food),
     beverage: side(bev, sales.beverage_sales, coverage.beverage),
@@ -196,6 +273,26 @@ export function weeklyCogs(
     unknown_account_total: round2(unknown),
     caveats: [],
   };
+
+  const money = (n: number) => '$' + n.toFixed(2);
+  if (transfers) {
+    const sent = transfers.out.food + transfers.out.beverage;
+    const got = transfers.in.food + transfers.in.beverage + transfers.in.sushi;
+    if (got !== 0 || sent !== 0) out.transfers = transfers;
+    if (got !== 0) {
+      out.caveats.push(
+        `Includes ${money(got)} of stock received from sister venues (food ${money(transfers.in.food)}, ` +
+        `drink ${money(transfers.in.beverage)}${transfers.in.sushi ? `, sushi ${money(transfers.in.sushi)}` : ''}), ` +
+        'counted here because this venue used it.',
+      );
+    }
+    if (sent !== 0) {
+      out.caveats.push(
+        `${money(sent)} of stock sent to sister venues (food ${money(transfers.out.food)}, drink ${money(transfers.out.beverage)}) ` +
+        'has been taken off: it is their cost, not this venue\'s. The monthly P&L figure is not adjusted.',
+      );
+    }
+  }
 
   out.caveats.push(
     'From supplier bills, which carry a date, so this is PURCHASING in the period and not consumption. ' +

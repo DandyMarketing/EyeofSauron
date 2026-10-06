@@ -406,12 +406,20 @@ accounts are read:
 | Legal entity | Trading as |
 |---|---|
 | **The Dandy Partnership Pte Ltd** | umbrella — operates the others |
-| Potus Pte Ltd | Neon Pigeon |
-| 20 Craig Road Pte Ltd | Firangi Superstar |
-| Fat Prince Pte Ltd | Fat Prince |
+| Potus Pte. Ltd. | Neon Pigeon |
+| Craig Place 20 Pte. Ltd. | Firangi Superstar |
+| Fat Prince Pte. Ltd. | Fat Prince |
+
+Firangi's company is **Craig Place 20 Pte. Ltd.**, confirmed by Khai on 6 Oct
+2026. This table said "20 Craig Road Pte Ltd" until then, a name that does not
+appear on any bill between the venues. The names above are exactly as they appear on bills
+between the venues, and they are EXACT: "Potus Pte Ltd" without the full stops
+is a different Xero contact. `sister_companies` (migration 053) holds them, and
+the Xero organisation names (`xero_connections.tenant_name`) are the trading
+names, not these.
 
 **Two of the three entity names tell you nothing about the venue.** "Potus" and
-"20 Craig Road" (an address) would not be guessed by any human or model, and
+"Craig Place 20" would not be guessed by any human or model, and
 Meta's verified entity is a fourth name again. This is the concrete reason
 every source that arrives keyed by a legal entity — Xero organisations above
 all — maps to a venue through a lookup table confirmed by a person, never by
@@ -732,7 +740,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 52 migrations, 25 query tools, 11 ingest sources, 1,444 tests.
+started.** 53 migrations, 25 query tools, 11 ingest sources, 1,452 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse

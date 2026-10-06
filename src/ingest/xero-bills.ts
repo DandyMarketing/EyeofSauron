@@ -228,7 +228,7 @@ async function ingestDocuments(
   if (!conn.venue_id) {
     throw new Error(
       `Xero organisation ${tenantId} is not mapped to a venue. Map it first — ` +
-      `"Potus" and "20 Craig Road" name no venue anyone could guess.`,
+      `"Potus" and "Craig Place 20" name no venue anyone could guess.`,
     );
   }
 

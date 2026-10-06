@@ -1901,7 +1901,7 @@ app.get('/admin/api/staffany/probe', async (c) => {
  *
  * The same shape as the Xero tenant mapping and `revel_venue_keys`, and here
  * for the same reason. Two of the three legal entities behind these venues are
- * called "Potus" and "20 Craig Road", so nothing in this system resolves a
+ * called "Potus" and "Craig Place 20", so nothing in this system resolves a
  * source key to a venue by matching on a name -- and a section guessed into the
  * wrong venue would put another venue's labour cost onto this venue's margin
  * comparison, which is a wrong number that looks entirely reasonable.
