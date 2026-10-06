@@ -68,11 +68,16 @@ export interface CostRatios {
   unclassified: Array<{ account: string; amount: number }>;
   unclassified_total: number;
   /**
-   * Sushi cost, reported on its own and kept out of every percentage. No ratio:
-   * sushi is sold wholesale outside Revel, so there is no sushi sales figure
-   * here to divide by. See `costBucket`.
+   * Sushi, reported on its own and kept out of every food and beverage figure.
+   *
+   * Its SALES come from the ledger (`Sales - Sushi`), because sushi is sold
+   * wholesale and invoiced in Xero, never rung through Revel -- so its cost is
+   * divided by its own sales, from the same P&L month, and never by the Revel
+   * food sales the food % uses. Khai, 6 Oct 2026: its own card, "not
+   * contributing to Food and beverage sales". Delivery (`Transportation -
+   * Sushi`) is an operating expense and is in neither figure.
    */
-  sushi: { cogs: number; accounts: string[] };
+  sushi: { cogs: number; accounts: string[]; sales: number; sales_accounts: string[]; pct: number | null };
   /** Days whose food/drink split came from the Monday board rather than Revel. */
   board_days: number;
   /**
@@ -162,6 +167,18 @@ export function costBucket(a: {
   return classifyCogs(a.canonical);
 }
 
+/**
+ * A sushi SALES line: income, and sushi by business line or by name. Same
+ * identification as the cost side in `costBucket`, so the two cannot drift
+ * apart onto different accounts.
+ */
+export function isSushiSales(a: { section: string; business_line?: string; canonical_account?: string; account_name: string }): boolean {
+  if (!/income|revenue/i.test(a.section) || /cost|expense/i.test(a.section)) return false;
+  return a.business_line === 'sushi'
+    || /\bsushi\b/i.test(a.canonical_account ?? '')
+    || /\bsushi\b/i.test(a.account_name);
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function ratio(cogs: number, sales: number, accounts: string[]): CostRatio {
@@ -187,8 +204,9 @@ export function costRatios(
    */
   const lines = rows.filter(r => !r.is_summary);
 
-  let foodCogs = 0, bevCogs = 0, sushiCogs = 0;
+  let foodCogs = 0, bevCogs = 0, sushiCogs = 0, sushiSales = 0;
   const foodAccounts: string[] = [], bevAccounts: string[] = [], sushiAccounts: string[] = [];
+  const sushiSalesAccounts: string[] = [];
   const unclassified: Array<{ account: string; amount: number }> = [];
 
   for (const r of lines) {
@@ -204,8 +222,11 @@ export function costRatios(
       // Sushi is "COGS - Food", which is exactly what this line is not.
       sushiCogs += Number(r.amount);
       if (!sushiAccounts.includes(r.account_name)) sushiAccounts.push(r.account_name);
+    } else if (isSushiSales(r)) {
+      sushiSales += Number(r.amount);
+      if (!sushiSalesAccounts.includes(r.account_name)) sushiSalesAccounts.push(r.account_name);
     } else if (!/cost of sales/i.test(r.section)) {
-      // Operating expenses, income: not a cost of sales and not shown here.
+      // Operating expenses, other income: not a cost of sales and not shown here.
       continue;
     } else if (kind === 'food') {
       foodCogs += Number(r.amount);
@@ -228,7 +249,14 @@ export function costRatios(
                     [...foodAccounts, ...bevAccounts].sort()),
     unclassified: unclassified.sort((a, b) => b.amount - a.amount),
     unclassified_total: round2(unclassified.reduce((n, u) => n + u.amount, 0)),
-    sushi: { cogs: round2(sushiCogs), accounts: sushiAccounts.sort() },
+    sushi: {
+      cogs: round2(sushiCogs),
+      accounts: sushiAccounts.sort(),
+      sales: round2(sushiSales),
+      sales_accounts: sushiSalesAccounts.sort(),
+      // Not withheld for short Revel days: neither side of it comes from Revel.
+      pct: sushiSales > 0 ? round2(sushiCogs / sushiSales * 100) : null,
+    },
     board_days: sales.days?.monday_board ?? 0,
     short_sales_days: short,
   };
@@ -307,11 +335,14 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
     );
   }
 
-  if (r.sushi.cogs !== 0) {
+  if (r.sushi.cogs !== 0 || r.sushi.sales !== 0) {
     out.push(
-      `Sushi cost of $${r.sushi.cogs.toFixed(2)} (${r.sushi.accounts.join(', ')}) is reported on its own and kept out of ` +
-      'the food percentage: sushi is sold wholesale and invoiced outside Revel, so its sales are not in the food sales ' +
-      'the percentage divides by. Counting its cost there would overstate the kitchen.',
+      `Sushi is reported on its own: cost $${r.sushi.cogs.toFixed(2)} (${r.sushi.accounts.join(', ') || 'no cost lines'}) ` +
+      `against sales of $${r.sushi.sales.toFixed(2)} (${r.sushi.sales_accounts.join(', ') || 'no sales lines'})` +
+      (r.sushi.pct === null ? '' : `, ${r.sushi.pct.toFixed(1)}% of its own sales`) + '. ' +
+      'Both are kept out of the food and beverage figures: sushi is sold wholesale and invoiced in Xero, not rung ' +
+      'through Revel, so its sales are not in the food sales the food percentage divides by, and counting its cost ' +
+      'there would overstate the kitchen. Sushi delivery (Transportation - Sushi) is an operating expense and is in neither figure.',
     );
   }
 

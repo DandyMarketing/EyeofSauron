@@ -1201,7 +1201,7 @@ function costPanel(payload, v) {
 
   return '<div class="panel"><h2>Cost of sales</h2>' +
     '<table><tbody>' +
-      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + sushiRow(r.sushi) + unmapped +
+      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + unmapped +
     '</tbody></table>' +
     (r.unclassified.length
       ? '<p class="figure-note">Excluded from both percentages: ' +
@@ -1226,7 +1226,30 @@ function monthlySection(payload, v) {
     || (payload.costs && payload.costs[v.slug] && payload.costs[v.slug].month);
   if (!month) return '';
   return '<div class="section-head">Last complete month · <strong>' + esc(month.label) + '</strong></div>' +
-         costPanel(payload, v) + retentionPanel(payload, v);
+         costPanel(payload, v) + sushiPanel(payload, v) + retentionPanel(payload, v);
+}
+
+/**
+ * Sushi on its own card. It is sold wholesale and invoiced in Xero, never rung
+ * through Revel, so its sales are NOT in "Food & beverage sales" and its cost
+ * is divided by its own sales, both from the same P&L month. Khai, 6 Oct 2026:
+ * "labeled but not contributing to Food and beverage sales". Only drawn where
+ * there is sushi.
+ */
+function sushiPanel(payload, v) {
+  const c = payload.costs && payload.costs[v.slug];
+  const s = c && c.available && c.ratios && c.ratios.sushi;
+  if (!s || (!s.sales && !s.cogs)) return '';
+  return '<div class="panel"><h2>Sushi \u00b7 wholesale</h2>' +
+    '<table><tbody>' +
+      '<tr><td>Sushi sales</td><td>' + money(s.sales) + '</td></tr>' +
+      '<tr><td>Sushi cost</td><td>' + money(s.cogs) +
+        (s.pct === null ? ' \u2014 no sushi sales' : ' \u2014 ' + pct(s.pct) + ' of sushi sales') + '</td></tr>' +
+    '</tbody></table>' +
+    '<p class="figure-note">Not included in Food &amp; beverage sales or the food % above: sushi is sold wholesale and invoiced in Xero, not rung through Revel. ' +
+    'Both figures are from the Xero P&amp;L' + (s.accounts.length ? ' (cost: ' + s.accounts.map(esc).join(', ') + ')' : '') +
+    '. Sushi delivery is not included.</p>' +
+    '</div>';
 }
 
 function retentionPanel(payload, v) {

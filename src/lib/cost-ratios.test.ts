@@ -14,7 +14,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCogs, costRatios, costCaveats, costBucket, type PLRow } from './cost-ratios.js';
+import { classifyCogs, costRatios, costCaveats, costBucket, isSushiSales, type PLRow } from './cost-ratios.js';
 
 const line = (canonical: string, amount: number, over: Partial<PLRow> = {}): PLRow => ({
   account_name: canonical,
@@ -300,6 +300,53 @@ describe('sushi is reported on its own and kept out of food cost', () => {
     assert.equal(r.sushi.cogs, 2000);
     assert.deepEqual(r.sushi.accounts, ['COGS - Sushi']);
     assert.deepEqual(r.unclassified, [], 'an operating expense is not "unclassified cost of sales" either');
-    assert.ok(costCaveats(r, 1).some(c => /Sushi cost of \$2000\.00/.test(c)), 'the sushi line is named');
+    assert.ok(costCaveats(r, 1).some(c => /cost \$2000\.00 \(COGS - Sushi\)/.test(c)), 'the sushi line is named');
+  });
+
+  /**
+   * Sushi's own card, Khai 6 Oct 2026: cost as a % of sushi sales, "not
+   * contributing to Food and beverage sales". Sushi sales are in Xero only, so
+   * they come from the ledger and must never reach the Revel food denominator.
+   */
+  test('sushi sales come from the ledger, give sushi its own %, and touch no food or beverage figure', () => {
+    const sales = { food_sales: 40000, beverage_sales: 20000 };
+    const r = costRatios([
+      line('COGS - Food', 8000),
+      line('COGS - Food', 2000, { account_name: 'COGS - Sushi', business_line: 'sushi' }),
+      line('COGS - Packaging', 250, { account_name: 'COGS - Sushi Packaging', business_line: 'sushi' }),
+      line('Sales - Food', 9000, { account_name: 'Sales - Sushi', business_line: 'sushi', section: 'Income' }),
+      line('Sales - Food', 38000, { section: 'Income' }),
+      line('Transportation - Sushi', 1490, { section: 'Less Operating Expenses' }),
+    ], sales);
+    assert.equal(r.sushi.sales, 9000);
+    assert.deepEqual(r.sushi.sales_accounts, ['Sales - Sushi']);
+    assert.equal(r.sushi.cogs, 2250, 'packaging is sushi cost of sales; delivery is not');
+    assert.equal(r.sushi.pct, 25);
+    assert.equal(r.food.sales, 40000, 'food sales are Revel\'s, untouched by sushi');
+    assert.equal(r.food.pct, 20);
+    assert.equal(r.combined.sales, 60000);
+  });
+
+  test('no sushi sales is no percentage, not 0% or infinity', () => {
+    const r = costRatios([line('COGS - Food', 2000, { account_name: 'COGS - Sushi', business_line: 'sushi' })],
+      { food_sales: 1, beverage_sales: 1 });
+    assert.equal(r.sushi.pct, null);
+  });
+
+  test('short Revel days withhold the food % but not sushi\'s, which uses no Revel figure', () => {
+    const r = costRatios([
+      line('COGS - Food', 2000, { account_name: 'COGS - Sushi', business_line: 'sushi' }),
+      line('Sales - Food', 8000, { account_name: 'Sales - Sushi', business_line: 'sushi', section: 'Income' }),
+    ], { food_sales: 1000, beverage_sales: 1000, days: { monday_board: 0, none: 2 } });
+    assert.equal(r.food.pct, null);
+    assert.equal(r.sushi.pct, 25);
+  });
+
+  test('a sushi sales line is income only', () => {
+    assert.equal(isSushiSales({ section: 'Income', account_name: 'Sales - Sushi' }), true);
+    assert.equal(isSushiSales({ section: 'Trading Income', account_name: 'Sales - Food', business_line: 'sushi' }), true);
+    assert.equal(isSushiSales({ section: 'Less Cost of Sales', account_name: 'COGS - Sushi' }), false);
+    assert.equal(isSushiSales({ section: 'Less Operating Expenses', account_name: 'Transportation - Sushi' }), false);
+    assert.equal(isSushiSales({ section: 'Income', account_name: 'Sales - Food' }), false);
   });
 });
