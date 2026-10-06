@@ -373,3 +373,12 @@ describe('weekly sushi: sales from invoices, cost from bills, both checked again
     assert.equal(w.sushi.pct, null);
   });
 });
+
+test('bills above the ledger are explained, not hidden or capped', () => {
+  // Firangi, September 2026: alcohol bills $14,025 against $9,785 in the ledger.
+  const r = weeklyCogs([bill('acc-food', 1)], names, { food_sales: 10, beverage_sales: 10 }, { food: 100, beverage: 143.3 });
+  assert.equal(r.beverage.coverage_pct, 143.3, 'shown as it is');
+  assert.equal(r.beverage.usable, true);
+  assert.ok(r.caveats.some(c => /Beverage: bills .* 143\.3% of the ledger/.test(c)));
+  assert.ok(!r.caveats.some(c => /^Food: bills .* of the ledger/.test(c)), 'food at 100% says nothing');
+});

@@ -356,6 +356,18 @@ export function weeklyCogs(
   for (const [label, s] of [['Food', out.food], ['Beverage', out.beverage]] as const) {
     if (s.coverage_pct === null) {
       out.caveats.push(`${label}: no ledger month to measure coverage against, so there is no way to tell whether these bills are the whole story.`);
+    } else if (s.coverage_pct > 105) {
+      // Bills ABOVE the ledger. Measured 6 Oct 2026 once discounts stopped
+      // padding the ledger side: Firangi's alcohol bills were 143% of the
+      // ledger's COGS - Alcohol for September. Not an error in the bills -- the
+      // ledger is lower than purchases whenever something is journalled OUT of
+      // cost of sales, and journals are the one thing we cannot read.
+      out.caveats.push(
+        `${label}: bills for the last complete month came to ${s.coverage_pct}% of the ledger's ${label.toLowerCase()} cost — more than it. ` +
+        'The ledger ends up below purchases when something is moved out of cost of sales by journal: a month-end stock count, ' +
+        'staff meals or wastage, or stock sent to a sister venue. None of those is a bill, so this weekly figure is what was ' +
+        'bought and reads higher than what the ledger counts as used.',
+      );
     } else if (!s.usable) {
       out.caveats.push(
         `${label}: bills explain only ${s.coverage_pct}% of this account in the ledger, so a weekly figure from them is ` +
