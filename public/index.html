@@ -621,7 +621,10 @@ function draw(recData) {
     'net sales is the same in both · ' +
     'Net sales = food &amp; beverage less discounts plus the 10% service charge, so it sits above it · ' +
     'Discounts = item + order, as a share of food &amp; beverage · ' +
-    'Spend per head = food &amp; beverage ÷ covers · Average check = revenue per bill</p></div>';
+    // The two per-unit figures are on DIFFERENT bases and the note says so:
+    // spend per head leaves service charge out, average check keeps it in.
+    'Spend per head = food &amp; beverage ÷ covers, no service charge · ' +
+    'Average check = net sales ÷ bills, so it includes service charge and is after discounts; it is per bill, not per person</p></div>';
 
   document.getElementById('app').innerHTML =
     adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
@@ -1197,9 +1200,11 @@ function periodCostPanel(payload, v, w) {
   return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
     settlementNote(c.settlement) +
     '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
-    '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
-    'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +
-    'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches an invoice.</p>' +
+    // ONE note for what the panel is. It used to say "from supplier invoices,
+    // which carry a date" here and again, reworded, in the first caveat below.
+    '<p class="figure-note">From supplier bills dated in this period, so it is what was BOUGHT, not what was used: one large delivery lands in the week it was invoiced, so read the direction over several weeks, not the level of one. ' +
+    'Coverage is how much of the ledger those bills explain, measured on the last complete month. ' +
+    'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches a bill.</p>' +
     (c.caveats.length ? '<p class="figure-note">' + c.caveats.map(x => esc(x)).join('<br><br>') + '</p>' : '') +
     '</div>';
 }

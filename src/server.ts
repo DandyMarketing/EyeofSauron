@@ -13,7 +13,7 @@ import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
 import { injectConfig } from './lib/inject-config.js';
-import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile, paymentsReconcile } from './parsers/revel/index.js';
+import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile, paymentsReconcile, classSplitReconciles } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
@@ -404,6 +404,20 @@ app.post('/ingest/revel', async (c) => {
             `payment methods sum to $${pay.methodsTotal.toFixed(2)} against a stated ` +
             `Grand Total of $${pay.grandTotal.toFixed(2)} — a payment type is probably ` +
             `being read as a card brand, or the other way round`;
+          detail += ` — WARNING: ${warning}`;
+          console.warn(`[revel] ${ops.filename}: ${warning}`);
+        }
+
+        // Same standing as the payments check: a warning on the upload, never a
+        // refusal. A class the split does not cover means every food and drink
+        // figure for the day is short by it, which is worth knowing loudly.
+        const split = classSplitReconciles(ops.operations);
+        if (split && !split.passed) {
+          const warning = split.otherClasses.length > 0
+            ? `sales in class(es) ${split.otherClasses.join(', ')} are neither food nor drink, so food & beverage ` +
+              `($${split.foodAndBeverage.toFixed(2)}) is below gross product sales ($${split.grossProductSales.toFixed(2)})`
+            : `sales classes sum to $${split.classesTotal.toFixed(2)}, the class Total row says ` +
+              `$${split.totalRow.toFixed(2)} and gross product sales $${split.grossProductSales.toFixed(2)}`;
           detail += ` — WARNING: ${warning}`;
           console.warn(`[revel] ${ops.filename}: ${warning}`);
         }

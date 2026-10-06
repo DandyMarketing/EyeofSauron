@@ -67,6 +67,11 @@ export interface VoidCompReasonRow {
 
 export interface OperationsData {
   salesByClass: SalesByClassRow[];
+  /**
+   * The SALES BY CLASS section's own Total row, or null if the report has none.
+   * Carries raw sales, voids and comps for the day, which no other section does.
+   */
+  salesByClassTotal: SalesByClassRow | null;
   grossProductSales: {
     taxedGrossSales: number;
     untaxedGrossSales: number;

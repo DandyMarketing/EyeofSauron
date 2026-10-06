@@ -349,11 +349,9 @@ export function weeklyCogs(
     }
   }
 
-  out.caveats.push(
-    'From supplier bills, which carry a date, so this is PURCHASING in the period and not consumption. ' +
-    'One large delivery lands entirely in the week it was invoiced against sales spread over the next three — ' +
-    'weekly, that does not average out. Read the direction over several weeks, not the level of one.',
-  );
+  // What the figure IS (purchasing, not consumption) is said once, in the
+  // panel's own note. It used to be repeated here as the first caveat, so the
+  // panel read the same explanation twice in different words.
 
   for (const [label, s] of [['Food', out.food], ['Beverage', out.beverage]] as const) {
     if (s.coverage_pct === null) {

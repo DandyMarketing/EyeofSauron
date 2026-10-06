@@ -424,6 +424,51 @@ with a change*: this one was only ever exercised on unchanged data, where a
 detector that sees nothing passes. And *an "unchanged, skipped" count of 100%
 for weeks is a finding*, not a quiet week.
 
+### 1.13 Revel's Total row parsed and then thrown away
+**Symptom.** `raw_sales`, `voids_amount` and `comps_amount` were NULL on every
+day ever loaded, so no question about voids or comps could be answered.
+**Root cause.** The parser read the SALES BY CLASS Total row, then filtered it
+out of the class list it returned. The ingest looked for the Total row in that
+same list, found nothing every time, and stored NULL. `gross_sales` survived
+only because it had a fallback to the GROSS PRODUCT SALES section.
+**Fix.** The parser returns the Total row separately. `gross_sales` is still
+stored from GROSS PRODUCT SALES, exactly as before, so no figure changes
+meaning. `classSplitReconciles()` now checks on every upload that the classes
+add up to the Total row, that the Total matches gross product sales, and names
+any class that is neither food nor drink, as a warning beside the payments check.
+Days already loaded keep their NULLs until re-uploaded.
+**Recurs?** Code, not data: fixed once. The lesson is the shape: *a value a
+function removes must not be looked for downstream in what it returns.*
+
+### 1.14 A Revel day that changed after Sauron had read it
+**Symptom.** Fat Prince 1 Aug and 30 Sep 2026 each disagreed with the Monday
+board, the only two days in two months that did. On 30 Sep Sauron held $67 less
+food and drink than Revel showed when asked again a week later. The board,
+corrected by Finance on 2 and 5 Oct, was right.
+**Root cause.** Sauron loads each day's Operations report once, from the 3 am
+auto-delivery, and Revel can change a past day afterwards. The 30 Sep
+difference is exactly one order, #366862, $80.33 with service charge and GST,
+which Revel shows as opened 12:38 pm, paid by card and closed 1:47 pm the same
+day — thirteen hours before the export that left it out. A re-exported report
+then included the sale but not its payment. **Why the order was late is not
+settled.** The likeliest reading is that the station (POS4) was offline and
+synced later, with its own clock stamping the times; Revel support can confirm
+from server timestamps. "A bill left open overnight" was the first theory and
+the order's own history disproves it for this day.
+**Why it was invisible.** The only check comparing Revel with the board ran at
+the moment the board changed, and only on days already settled. 1 Aug was edited
+on the Monday after, before it had settled, and was never looked at again.
+**Fix.** `sweepRevelDrift()` re-compares the board's food and drink with Revel's
+for every settled day in the last 35 days on every hourly Monday run, raises one
+alert per differing day, keeps its figures current, and resolves it on its own
+once a re-upload makes the two agree. A difference a person has resolved stays
+resolved unless the figures move again. The alert card names the file to export.
+There is no automatic re-fetch: Revel's auto-delivery cannot resend a past day
+and its API is refused on cost, so the correction is a manual re-upload.
+**Recurs?** **Every customer on Revel**, and any POS that lets a past day change
+after a nightly export. The board works as a witness here only because Finance
+maintains one; a customer without a second source would never see it.
+
 ---
 
 ## 2. Data that is valid but wrong
@@ -685,6 +730,30 @@ one was four defects and one decision, and no amount of reasoning about the
 total would have separated them.
 
 ---
+
+### 2.10 Discounts counted as food and drink cost, every month
+**Symptom.** Found while loading Xero sales invoices on 6 Oct 2026, not from a
+wrong-looking number: nothing on the page looked odd.
+**Root cause.** The daily sales reach Xero as invoices, and their discount lines
+are coded to `COGS - Discounts - Food` and `COGS - Discounts - Beverages`, filed
+under Less Cost of Sales at all three venues. Food and drink cost is decided by
+the account NAME once the section says cost of sales, and both names contain
+"Food" or "Beverages". So every monthly food and drink cost included that
+month's discounts: in September 2026, $5,122 of Neon Pigeon's food cost and
+$3,543 of its drink cost, about 7 and 5 points.
+**Why it was invisible.** It was consistent. Every month carried it, so the
+trend was smooth, and a food cost a few points high reads as a kitchen
+problem, not a classification one. It also made the weekly coverage check read
+low (bills against a ledger total that included discounts), which withheld
+Neon Pigeon's weekly food % in September for a reason nobody could see.
+**Fix.** `isDiscountAccount()`: a discount account has no cost bucket anywhere.
+The monthly figure reports the amount separately as a % of sales, marked "not
+in cost", matching the Monday weekly report's own Discount % card. Khai: the
+COGS board "doesn't include discounts".
+**Recurs?** **Every customer.** How a chart of accounts files discounts is a
+bookkeeping choice, and a name-based classifier inherits it. Listing every
+account that lands in a bucket, once, at onboarding, is cheaper than finding
+one of these a year later.
 
 ## 3. Analysis that misleads
 

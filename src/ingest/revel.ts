@@ -95,7 +95,11 @@ export async function ingestOperations(
   businessDate: string,
   ops: OperationsData,
 ): Promise<number> {
-  const totalRow = ops.salesByClass.find(r => r.class.toLowerCase() === 'total');
+  // The parser hands the Total row over separately. It used to be looked for
+  // here, among rows the parser had already removed it from -- so raw sales,
+  // voids and comps were NULL on every day. The find() stays for any caller
+  // that builds OperationsData by hand with the Total still in the list.
+  const totalRow = ops.salesByClassTotal ?? ops.salesByClass.find(r => r.class.toLowerCase() === 'total') ?? null;
   const classRows = ops.salesByClass.filter(r => r.class.toLowerCase() !== 'total');
 
   const record = {
@@ -107,7 +111,11 @@ export async function ingestOperations(
     voids_amount: totalRow?.voidsAmount ?? null,
     comps_qty: totalRow?.compsQty ?? null,
     comps_amount: totalRow?.compsAmount ?? null,
-    gross_sales: totalRow?.grossSales ?? ops.grossProductSales.taxedGrossSales + ops.grossProductSales.untaxedGrossSales,
+    // Taxed + untaxed gross product sales, exactly as every day so far has been
+    // stored: the Total row was never found, so this was always the figure used.
+    // Now that the Total row IS found, preferring it would quietly change what
+    // gross_sales means; classSplitReconciles() checks the two agree instead.
+    gross_sales: ops.grossProductSales.taxedGrossSales + ops.grossProductSales.untaxedGrossSales,
     item_discounts: ops.discounts.itemDiscounts,
     order_discounts: ops.discounts.orderDiscounts,
     net_sales: ops.netSales.totalSales,

@@ -67,12 +67,20 @@ since the whole two-year P&L backfill is 72 calls. Paid tiers meter data
 *egress* rather than calls, so a future decision to upgrade is about volume
 pulled, not requests made.
 
-**Supplier bills are not tier-gated, but were not granted.** On 19 Aug 2026
-`accounting.invoices.read` was accepted by the consent screen, fresh tokens were
-stored for all three organisations, and `GET /Invoices` still returned 401. The
-consent screen had listed only "View your profit & loss reports", which turned
-out to be literally true rather than a summary. The remaining lead is the app's
-own permitted-scope configuration in the Xero developer portal — unresolved.
+**Supplier bills are not tier-gated, and are now loaded.** On 19 Aug 2026
+`GET /Invoices` returned 401 despite the scope being accepted; that was
+resolved, and bills have loaded for every venue since late August. Under the
+same `accounting.invoices` permission the job now also loads supplier credit
+notes (ACCPAYCREDIT, migration 031, stored negative) and, since 6 Oct 2026,
+**sales invoices and customer credits** (ACCREC / ACCRECCREDIT, migration 054,
+their own tables). No scope was added for either.
+
+**What the sales invoices turned out to be.** Each venue posts its daily POS
+takings to Xero as one sales invoice a day, so Sales - Food, Beverages and
+Service Charge match the ledger to the cent. Neon Pigeon's wholesale sushi is
+invoiced separately and also matches (Sales - Sushi, September 2026: 100%),
+which is what lets sushi sales show by the week. Invoices to sister venues
+are how a venue sends stock, coded to its OWN COGS accounts.
 
 **Payroll arrives through supplier BILLS, and had to be excluded at ingest.**
 Not requesting a payroll scope was necessary and not sufficient. This chart of
@@ -91,10 +99,24 @@ Neon Pigeon, June 2026: bills cover rent, utilities and food purchases at ~100%,
 and Public Relations / Marketing at **26%**, Commissions at 7%, Merchant fees at
 1%, COGS Beverages at 0%. Anything card- or bank-settled is invisible to
 `/Invoices` and needs `accounting.banktransactions.read` (free, already in the
-app's scope list). Four accounts came back ABOVE 100% -- COGS Food at 109% --
-which points at credit notes: ACCPAYCREDIT reduces the ledger and we do not
-ingest it, so bill-derived food cost is currently overstated. Never present a
+app's scope list). Four accounts once came back ABOVE 100% -- COGS Food at 109%
+-- because supplier credit notes were not loaded; they are now. Never present a
 supplier breakdown as complete without the coverage percentage beside it.
+
+**Cost definitions, settled with Khai on 6 Oct 2026** (BUILD_LOG 2.9, 2.10):
+- **Cost of sales only**, then food or drink by account name. `Kitchen
+  expenses` is not COGS.
+- **Sushi is its own line**, with its own sales from the ledger (monthly) and
+  from sales invoices (weekly), never in food & beverage sales or the food %.
+  `Transportation - Sushi` is in neither.
+- **Discounts are not cost.** The ledger files them as `COGS - Discounts - ...`;
+  they are shown separately as a % of sales, as the Monday report does.
+- **Stock between sister venues** (`sister_companies`, exact names): the
+  receiver keeps the cost; the sender's WEEKLY figure has it taken off. The
+  monthly P&L is not adjusted, because the sender's invoice already credits its
+  own COGS.
+- **Voided and deleted bills are never spend.** A weekly figure is
+  provisional until seven days after the week ends.
 
 **One authorization, one refresh token, three organisations — and rotation
 breaks all but one of them if you let it.** Xero issues a SINGLE token pair for
@@ -454,7 +476,7 @@ ever operates two outlets.
 ## Tech stack & key decisions
 
 - **Railway** — compute (backend, web app, self-hosted n8n). Holds static secrets as **sealed variables**.
-- **Supabase** — Postgres warehouse + Auth + **Row-Level Security**. Hosted free tier. **The project is in TOKYO (`ap-northeast-1`), not Singapore** — confirmed from the project settings on 5 Oct 2026; this line said "SEA region" until then. Every query from a Singapore server pays the Tokyo round trip, which is why a one-row lookup measured 110–700 ms in production (BUILD_LOG 5.13). Supabase cannot move a project's region in place; moving to Singapore means a new project and a data migration, and would also keep guest data in Singapore for PDPA. Railway's running region is reported at `/version`.
+- **Supabase** — Postgres warehouse + Auth + **Row-Level Security**. Hosted free tier. **The project is in TOKYO (`ap-northeast-1`), not Singapore** — confirmed from the project settings on 5 Oct 2026; this line said "SEA region" until then. Every query from a Singapore server pays the Tokyo round trip, which is why a one-row lookup measured 110–700 ms in production (BUILD_LOG 5.13). Supabase cannot move a project's region in place; moving to Singapore means a new project and a data migration, and would also keep guest data in Singapore for PDPA. **Decided 6 Oct 2026: stays in Tokyo for now**; revisit before onboarding a second operator. Railway's running region is reported at `/version`.
 - **Claude / Opus (Anthropic API)** — the chatbot + Insight & Recommendation Engine.
 - **n8n** — ingestion orchestration (Gmail triggers, scheduling, retries). Self-host on Railway.
 - **GitHub** — repo; Railway deploys from it.
@@ -740,7 +762,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 54 migrations, 25 query tools, 11 ingest sources, 1,463 tests.
+started.** 54 migrations, 25 query tools, 11 ingest sources, 1,465 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -846,7 +868,9 @@ StaffAny API grant method · Revel report frequency · Revel venue-key mapping (
 
 ### Role model: access level and function are two different things
 
-**Khai is mapping the roles and ranks. Do not change the schema until he has.**
+**Roles mapped by Khai on 6 Oct 2026 -- see "Decided 6 Oct 2026" below. No
+schema change was needed; revisit only if a function needs rights that no
+existing role has.**
 
 `user_venue_roles.role` is currently `owner | finance | manager | staff`, and it
 answers exactly one question: *what are you allowed to see*. Owners see every
@@ -907,13 +931,19 @@ what it withheld. `mentionsPayrollAmounts()` looks for a payroll word within a
 SENTENCE of a currency amount — so "labour is 44.8% of income" passes and
 "staff costs $63,118" does not, which is the line the rule actually draws.
 
-**Still open:** whether a restaurant manager sees other venues' figures.
-Benchmarking across venues is stated above as the product edge ("your food cost
-32% vs sister venue 28%"), while the security model says each venue sees only
-its own. Both cannot be true as written. Likely resolution is a third thing —
-own figures plus *comparative* figures (rank, group average, anonymised sister
-venue) but never another venue's raw P&L. Not decided. There are no GMs today,
-only restaurant managers.
+**Decided 6 Oct 2026: a restaurant manager cannot see another venue's figures.**
+The tools already scope every read to the caller's own venues, and the briefing
+withholds any recommendation naming another venue (`namesOtherVenues()`). What
+the briefing still says is comparative: a group average or a rank. **Whether
+even that is allowed is not yet confirmed** -- with three venues, a group
+average and your own figure together reveal the other two combined.
+
+**Function, decided the same day, needs no schema change:**
+- **Head chef**: the same rights as a manager, at their own venue -- a
+  `manager` grant on that venue.
+- **Marketing**: manager rights at ALL venues -- a `manager` grant on each.
+  The venue scope already gives a multi-venue grant exactly those venues.
+
 
 ## Working style — hard rules
 

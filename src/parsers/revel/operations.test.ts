@@ -17,7 +17,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOperationsReport, splitSections, paymentsReconcile } from './operations.js';
+import { parseOperationsReport, splitSections, paymentsReconcile, classSplitReconciles } from './operations.js';
 
 /**
  * The real file's shape, trimmed to the sections that matter here. CRLF line
@@ -262,4 +262,42 @@ test('a method with no brands cannot swallow the next method', () => {
   // And a zero row is never "proven" to be anything — it stays on the list.
   assert.equal(payments.find(p => p.type === 'House Account')!.isSubType, false);
   assert.ok(paymentsReconcile(payments)!.passed);
+});
+
+/**
+ * Revel's Total row. It was filtered out by the parser and then looked for by
+ * the ingest among the rows it had been removed from, so raw sales, voids and
+ * comps were NULL on every day ever loaded.
+ */
+test('the class Total row is returned, carrying voids and comps', () => {
+  const data = parseOperationsReport(REPORT);
+  assert.ok(data.salesByClassTotal, 'the Total row was dropped');
+  assert.equal(data.salesByClassTotal!.rawSales, 3723);
+  assert.equal(data.salesByClassTotal!.voidsAmount, 84);
+  assert.equal(data.salesByClassTotal!.compsAmount, 0);
+  assert.equal(data.salesByClass.length, 2, 'and is still not one of the classes');
+});
+
+test('the food/drink split is checked against the day', () => {
+  const data = parseOperationsReport(REPORT);
+  assert.deepEqual(classSplitReconciles(data), {
+    passed: true, foodAndBeverage: 3639, classesTotal: 3639, totalRow: 3639, grossProductSales: 3639, otherClasses: [],
+  });
+
+  // A class Revel adds that is neither food nor drink: everything still adds up,
+  // and food & beverage is short by exactly it.
+  const retail = { ...data.salesByClass[0], class: 'Retail', grossSales: 50 };
+  const withRetail = {
+    ...data,
+    salesByClass: [...data.salesByClass, retail],
+    salesByClassTotal: { ...data.salesByClassTotal!, grossSales: 3689 },
+    grossProductSales: { ...data.grossProductSales, taxedGrossSales: 3689 },
+  };
+  const r = classSplitReconciles(withRetail)!;
+  assert.equal(r.passed, false);
+  assert.deepEqual(r.otherClasses, ['Retail']);
+  assert.equal(r.foodAndBeverage, 3639);
+
+  // No Total row: not checked, rather than passed.
+  assert.equal(classSplitReconciles({ ...data, salesByClassTotal: null }), null);
 });

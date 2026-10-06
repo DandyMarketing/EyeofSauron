@@ -315,6 +315,41 @@ function parseTaxTotal(rows: string[][]): number {
   return 0;
 }
 
+/**
+ * Does the food/drink split add up to the day?
+ *
+ * The class rows (Food, Beverage, ...) are what every food and beverage figure
+ * is built from, so a class Revel adds next year -- "Retail", "Delivery" --
+ * would silently fall out of both. Two checks against the report's own totals:
+ * the class rows against their Total row, and that Total against the GROSS
+ * PRODUCT SALES section, which is what `gross_sales` is stored from.
+ *
+ * Null when the report has no Total row: an absent check is not a pass.
+ */
+export function classSplitReconciles(ops: OperationsData, tolerance = 0.01): {
+  passed: boolean;
+  /** Food + Beverage: what every food and drink figure is built from. */
+  foodAndBeverage: number;
+  classesTotal: number;
+  totalRow: number;
+  grossProductSales: number;
+  /** Classes with sales that are neither Food nor Beverage. */
+  otherClasses: string[];
+} | null {
+  if (!ops.salesByClassTotal) return null;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const isFoodOrBev = (c: string) => ['food', 'beverage'].includes(c.trim().toLowerCase());
+  const classesTotal = round2(ops.salesByClass.reduce((n, r) => n + r.grossSales, 0));
+  const foodAndBeverage = round2(ops.salesByClass.filter(r => isFoodOrBev(r.class)).reduce((n, r) => n + r.grossSales, 0));
+  const otherClasses = ops.salesByClass.filter(r => !isFoodOrBev(r.class) && r.grossSales !== 0).map(r => r.class);
+  const totalRow = round2(ops.salesByClassTotal.grossSales);
+  const grossProductSales = round2(ops.grossProductSales.taxedGrossSales + ops.grossProductSales.untaxedGrossSales);
+  const passed = Math.abs(classesTotal - totalRow) <= tolerance
+    && Math.abs(totalRow - grossProductSales) <= tolerance
+    && otherClasses.length === 0;
+  return { passed, foodAndBeverage, classesTotal, totalRow, grossProductSales, otherClasses };
+}
+
 export function parseOperationsReport(content: string): OperationsData {
   const rawSections = splitSections(content);
 
@@ -346,6 +381,10 @@ export function parseOperationsReport(content: string): OperationsData {
 
   return {
     salesByClass: salesByClass.filter(r => r.class.toLowerCase() !== 'total'),
+    // Returned, not dropped. It used to be filtered out here and then looked for
+    // by the ingest among the rows it had been filtered out of, so raw sales,
+    // voids and comps were stored as NULL for every day ever loaded.
+    salesByClassTotal: totalRow ?? null,
 
     grossProductSales: {
       taxedGrossSales: findKV(grossSection, 'Taxed Gross Sales'),

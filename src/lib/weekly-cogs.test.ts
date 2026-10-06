@@ -16,6 +16,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine, transferTotals, type TransferLine, type AccountNames, type AccountInfo, sushiSalesOf } from './weekly-cogs.js';
 
 const names = new Map([
@@ -117,15 +118,22 @@ describe('a line whose account cannot be named', () => {
   });
 });
 
-test('the purchases-not-consumption caveat is always there, and says why weekly is worse', () => {
+test('the purchases-not-consumption warning is always on the panel, and says why weekly is worse', () => {
   /**
    * Monthly, delivery timing mostly averages out. Weekly it does not: one large
    * delivery lands entirely in the week it was invoiced against sales spread
    * over the next three, and a single week can read 55% or 18% with nothing
    * wrong at all.
+   *
+   * Said ONCE, in the weekly panel's own note. It used to be a caveat here as
+   * well, and the panel printed the same explanation twice in different words.
    */
+  const page = readFileSync('public/index.html', 'utf8');
+  const panel = page.slice(page.indexOf('function periodCostPanel('), page.indexOf('function costPanel('));
+  assert.match(panel, /what was BOUGHT, not what was used/);
+  assert.match(panel, /read the direction over several weeks/);
   const r = weeklyCogs([bill('acc-food', 1)], names, { food_sales: 10, beverage_sales: 10 }, { food: 100, beverage: 100 });
-  assert.ok(r.caveats.some(c => /weekly, that does not average out/i.test(c)), r.caveats.join('\n'));
+  assert.ok(!r.caveats.some(c => /not consumption/i.test(c)), 'and not repeated as a caveat');
 });
 
 describe('coverageFor', () => {
