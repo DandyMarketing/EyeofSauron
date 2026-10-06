@@ -133,7 +133,7 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
       .limit(10),
     supabase
       .from('ingestion_log')
-      .select('venue_id, venue_key, report_type, business_date, created_at')
+      .select('venue_id, venue_key, report_type, business_date, filename, created_at')
       .eq('status', 'success')
       .gte('created_at', cutoff.toISOString()),
   ]);

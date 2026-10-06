@@ -41,6 +41,8 @@ export interface LoggedRun {
    * id, because that lookup can itself fail on the failure path.
    */
   venue_key?: string | null;
+  /** The file itself. Failures logged before 3 Oct 2026 carry nothing else. */
+  filename?: string | null;
   report_type?: string | null;
   business_date?: string | null;
   created_at: string;
@@ -78,6 +80,21 @@ export function resolutionFor(failure: LoggedRun, successes: LoggedRun[]): Resol
     return (s.venue_id ?? null) === null && (s.venue_key ?? null) === null;
   };
   const sameType = (s: LoggedRun) => (s.report_type ?? null) === (failure.report_type ?? null);
+
+  /**
+   * THE SAME FILE LOADED LATER is the plainest proof there is, and for the
+   * oldest failures the only one. Until 3 Oct 2026 a file that could not be
+   * read was logged with its filename and nothing else -- no venue, no date --
+   * so Neon Pigeon's 30 Sep failure stayed red after the very same file loaded
+   * cleanly on 4 Oct. A filename carries the venue key, report type and date
+   * within it, so an exact match cannot resolve the wrong thing.
+   */
+  if (failure.filename) {
+    const sameFile = successes
+      .filter(s => after(s) && s.filename === failure.filename)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    if (sameFile) return { at: sameFile.created_at, because: 'the same file loaded successfully afterwards' };
+  }
 
   const candidates = successes
     .filter(s => after(s) && sameVenue(s) && sameType(s))

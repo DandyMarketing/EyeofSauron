@@ -118,3 +118,25 @@ test('a PARSE failure, logged with only the report key, is resolved by that key'
   const anonymous = { ...success, venue_id: null, venue_key: null };
   assert.equal(resolutionFor(failure, [anonymous]), null);
 });
+
+test('a failure logged before venue and date were recorded is resolved by the SAME FILE', () => {
+  /**
+   * Until 3 Oct 2026 a file that could not be read was logged with its
+   * filename and nothing else. Neon Pigeon's 30 Sep failure stayed red after
+   * the very same file loaded cleanly on 4 Oct, because there was no venue or
+   * date to match on. The filename carries all three.
+   */
+  const file = 'Operations_Report_neon-pigeon_neon-pigeon_2026-09-29_2026-09-30.csv';
+  const failure = { filename: file, created_at: '2026-09-30T04:26:00Z' };
+  const success = { filename: file, venue_id: 'v-np', report_type: 'operations', business_date: '2026-09-29', created_at: '2026-10-04T00:54:00Z' };
+  const r = resolutionFor(failure, [success]);
+  assert.ok(r);
+  assert.match(r!.because, /same file loaded successfully/);
+
+  // A different file — another day — does not resolve it.
+  const otherDay = { ...success, filename: file.replace('2026-09-29_2026-09-30', '2026-09-30_2026-10-01') };
+  assert.equal(resolutionFor(failure, [otherDay]), null);
+
+  // Nor does the same file loaded BEFORE the failure.
+  assert.equal(resolutionFor(failure, [{ ...success, created_at: '2026-09-29T00:00:00Z' }]), null);
+});
