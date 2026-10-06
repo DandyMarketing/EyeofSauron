@@ -572,7 +572,7 @@ attention as a real finding, and spends it on nothing.
 **Symptom.** Neon Pigeon's July 2026 food cost read **301%** on the cost trend.
 **Root cause.** Food cost is Xero's cost of sales over food sales for the same
 month, and food sales came from Revel's class split (`sales_by_class`) and
-nothing else. Revel's daily files began on 29 July. Every earlier day's
+nothing else. Revel's daily files began in late July (three July days carry a Revel split). Every earlier day's
 food/drink split exists only on the Monday board (`meal_periods`), so it counted
 as **$0**. Measured 6 Oct 2026 across all three venues: January to June had 0
 days with a Revel split, July had 3, August and September every day. July
