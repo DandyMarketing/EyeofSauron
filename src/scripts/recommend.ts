@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { selectAll } from '../lib/paged.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
@@ -81,6 +82,7 @@ console.log(`Latest settled P&L month: ${closedMonth}. Anything later is provisi
 
 await requireSchema(RECOMMENDATION_SCHEMA);
 
+// row-cap: one row per venue.
 const { data: allVenues, error: venueError } = await supabase
   .from('venues')
   .select('id, name, slug')
@@ -120,7 +122,7 @@ if (venues.length === 0) {
  * "20 Craig Road" -- tell a reader nothing about the venue, so a leak through
  * one of them would not be caught by eye.
  */
-const { data: entities } = await supabase.from('xero_connections').select('venue_id, tenant_name');
+const { data: entities } = await supabase.from('xero_connections').select('venue_id, tenant_name');  // row-cap: one per venue
 const forbiddenFor = (venueId: string) => [
   ...(venues as any[]).filter(v => v.id !== venueId).map(v => v.name),
   ...((entities ?? []) as any[]).filter(e => e.venue_id !== venueId && e.tenant_name).map(e => e.tenant_name),
@@ -153,6 +155,7 @@ for (const venue of venues as any[]) {
   // What we have already told them. The brief asks the model not to repeat
   // these; suppressRepeats() is what actually enforces it.
   const since = new Date(Date.now() - SUPPRESSION_DAYS * 86400000).toISOString();
+  // row-cap: at most three a week per venue over the suppression window.
   const { data: recent } = await supabase
     .from('recommendations')
     .select('headline, fingerprint')
@@ -170,6 +173,7 @@ for (const venue of venues as any[]) {
    * nothing consumed it -- so a briefing could be written on figures that
    * changed the next day, frozen, and never revisited.
    */
+  // row-cap: one venue's open alerts in one review period.
   const { data: openAlerts } = await supabase
     .from('reconciliation_alerts')
     .select('alert_type, business_date')
@@ -194,11 +198,13 @@ for (const venue of venues as any[]) {
    * Checked on the weekly run because that is the thing that runs; the data is
    * monthly and already in the warehouse, so it costs one query.
    */
-  const { data: feeRows } = await supabase
+  // Paged: from January last year is ~2,000 ledger lines, and a read cut off at
+  // 1,000 judged this year's fees against half of last year.
+  const { data: feeRows } = await selectAll(() => supabase
     .from('profit_and_loss')
     .select('period_start, account_name, amount, is_summary')
     .eq('venue_id', venue.id)
-    .gte('period_start', new Date(new Date(periodEnd).getFullYear() - 1, 0, 1).toISOString().slice(0, 10));
+    .gte('period_start', new Date(new Date(periodEnd).getFullYear() - 1, 0, 1).toISOString().slice(0, 10)));
 
   const feePeriods = new Map<string, number>();
   for (const r of (feeRows ?? []) as any[]) {
@@ -223,6 +229,7 @@ for (const venue of venues as any[]) {
    * a decision about ONE venue's month and there is no reason another venue's
    * should ever be in scope.
    */
+  // row-cap: a handful of acknowledged fee anomalies per venue.
   const { data: ackRows } = await supabase
     .from('fee_acknowledgements')
     .select('period_start, account_name, reason')

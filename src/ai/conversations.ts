@@ -9,6 +9,7 @@
  * with a user's own key.
  */
 
+import { selectAll } from '../lib/paged.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabaseAdmin } from '../auth/session.js';
 import { modelFor } from './model-policy.js';
@@ -188,6 +189,7 @@ export function cleanTitle(raw: string): string {
 
 /** Somebody's own threads, newest first. */
 export async function listConversations(userId: string, limit = 50): Promise<ConversationSummary[]> {
+  // row-cap: a deliberate top-N, the newest `limit` threads (50 by default).
   const { data, error } = await supabaseAdmin
     .from('conversations')
     .select('id, title, created_at, updated_at')
@@ -228,11 +230,11 @@ export async function readConversation(
   }
   if (!convo) return null;
 
-  const { data: rows, error: msgError } = await supabaseAdmin
+  const { data: rows, error: msgError } = await selectAll(() => supabaseAdmin
     .from('conversation_messages')
     .select('role, content, charts, venue_slugs, domains, created_at')
     .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true }));
 
   if (msgError) {
     console.error(`[conversations] could not read messages of ${conversationId}: ${msgError.message}`);

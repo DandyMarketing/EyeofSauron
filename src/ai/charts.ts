@@ -237,7 +237,7 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
 
   if (RETENTION_METRICS.includes(input.metric)) return buildRetentionChart(input, meta);
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return { error: 'No venues found' };
 
   const venues = input.venue_slugs?.length
@@ -563,7 +563,7 @@ export async function buildComposition(
   const meta = COMPOSITION_META[input.metric];
   if (!meta) return { error: `Unknown composition metric: ${input.metric}` };
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return { error: 'No venues found' };
 
   // Scope is applied HERE and not trusted to the caller's slug, the hole
@@ -755,7 +755,7 @@ async function buildRetentionChart(
   input: BuildChartInput,
   meta: { label: string; unit: ChartSpec['unit']; source: string },
 ): Promise<ChartSpec | { error: string }> {
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return { error: 'No venues found' };
 
   const venues = input.venue_slugs?.length

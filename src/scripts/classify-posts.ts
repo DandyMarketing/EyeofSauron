@@ -75,6 +75,7 @@ console.log(captionOnly
 
 await requireSchema(SOCIAL_SCHEMA);
 
+// row-cap: a batch of `--limit` unclassified posts; the rest are picked up next run.
 let query = supabase
   .from('social_posts')
   .select('id, post_id, caption, media_type, permalink, published_at, venue_id, venues(name, slug)')
@@ -88,7 +89,7 @@ if (onlySlug) {
   if (!venue) {
     // Name the valid answers. A slug is an internal identifier nobody
     // memorises, and a bare rejection leaves someone guessing at it.
-    const { data: all } = await supabase.from('venues').select('name, slug').order('name');
+    const { data: all } = await supabase.from('venues').select('name, slug').order('name');  // row-cap: one row per venue
     console.error(`No venue with slug "${onlySlug}". The venues in this warehouse are:`);
     for (const v of (all ?? []) as any[]) console.error(`  --venue=${v.slug}    (${v.name})`);
     process.exit(1);

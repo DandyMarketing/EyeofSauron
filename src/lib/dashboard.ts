@@ -39,6 +39,7 @@ import {
 } from './retention-month.js';
 import { costRatios, costCaveats, costBucket, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
+import { readAllPages, selectAll } from './paged.js';
 import { weeklyCogs, coverageFor, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
@@ -91,6 +92,9 @@ async function readOperations(venueIds: string[], start: string, end: string): P
       .gte('business_date', start)
       .lte('business_date', end)
       .order('business_date', { ascending: true })
+      // Three venues share every date, so the date alone is not a unique order
+      // and offset paging over it can repeat or skip a row (BUILD_LOG 1.3).
+      .order('id', { ascending: true })
       .range(offset, offset + PAGE - 1);
 
     if (error) throw new Error(`dashboard: ${error.message}`);
@@ -289,6 +293,7 @@ export async function buildDashboard(
   // last history while the new one loads. The book it is applied to is live.
   const forecastC = track('forecast', forecastCache.get(scope, token,
     () => loadForecastInputs([...ids].sort(), day, hour)));
+  // row-cap: the next five days hold at most a handful of holidays.
   const holidaysP = supabaseAdmin.from('public_holidays').select('holiday_date, name')
     .gt('holiday_date', day).lte('holiday_date', addDays(day, SERVICE_FORWARD));
   const momentsP = Promise.all(venues.map(v => getDayMoments(v.id, day)));
@@ -702,6 +707,7 @@ async function loadRetentionInputs(month: { start: string; end: string }): Promi
     supabaseAdmin.rpc('guest_retention', {
       p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
     }),
+    // row-cap: one row per venue.
     supabaseAdmin.from('venues').select('id'),
   ]);
   // Named, not swallowed: an unapplied migration otherwise looks exactly like a
@@ -831,16 +837,16 @@ async function buildCosts(
 
     const perVenue = await Promise.all(venues.map(async v => {
       const [{ data: pl }, { data: ops }, accountMap] = await Promise.all([
-        supabaseAdmin.from('profit_and_loss')
+        selectAll(() => supabaseAdmin.from('profit_and_loss')
           .select('section, account_name, amount, is_summary')
           .eq('venue_id', v.id)
           .gte('period_start', month.start)
-          .lte('period_end', month.end),
-        supabaseAdmin.from('daily_operations')
+          .lte('period_end', month.end)),
+        selectAll(() => supabaseAdmin.from('daily_operations')
           .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', month.start)
-          .lte('business_date', month.end),
+          .lte('business_date', month.end)),
         fetchAccountMap(v.id),
       ]);
 
@@ -914,29 +920,35 @@ async function buildPeriodCosts(
     const out: Record<string, WeeklyCogs> = {};
 
     await Promise.all(venues.map(async v => {
-      const [{ data: pl }, { data: windowLines }, { data: monthLines }, { data: ops }, accountMap] = await Promise.all([
+      const [{ data: pl }, windowLines, monthLines, { data: ops }, accountMap] = await Promise.all([
         // The P&L is read for TWO things: the account_id -> name map, and the
         // ledger totals coverage is measured against.
-        supabaseAdmin.from('profit_and_loss')
+        selectAll(() => supabaseAdmin.from('profit_and_loss')
           .select('account_id, account_name, section, amount, is_summary')
           .eq('venue_id', v.id)
           .gte('period_start', month.start)
-          .lte('period_end', month.end),
-        supabaseAdmin.from('supplier_bill_lines')
-          .select('account_id, line_amount, supplier_bills!inner(bill_date, status)')
+          .lte('period_end', month.end)),
+        // PAGED. A month of bill lines is over 1,000 at every venue, and a single
+        // read stops there without saying so -- see src/lib/paged.ts.
+        readAllPages<any>((from, to) => supabaseAdmin.from('supplier_bill_lines')
+          .select('id, account_id, line_amount, supplier_bills!inner(bill_date, status)')
           .eq('venue_id', v.id)
           .gte('supplier_bills.bill_date', start)
-          .lte('supplier_bills.bill_date', end),
-        supabaseAdmin.from('supplier_bill_lines')
-          .select('account_id, line_amount, supplier_bills!inner(bill_date, status)')
+          .lte('supplier_bills.bill_date', end)
+          .order('id')
+          .range(from, to)),
+        readAllPages<any>((from, to) => supabaseAdmin.from('supplier_bill_lines')
+          .select('id, account_id, line_amount, supplier_bills!inner(bill_date, status)')
           .eq('venue_id', v.id)
           .gte('supplier_bills.bill_date', month.start)
-          .lte('supplier_bills.bill_date', month.end),
-        supabaseAdmin.from('daily_operations')
+          .lte('supplier_bills.bill_date', month.end)
+          .order('id')
+          .range(from, to)),
+        selectAll(() => supabaseAdmin.from('daily_operations')
           .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', start)
-          .lte('business_date', end),
+          .lte('business_date', end)),
         fetchAccountMap(v.id),
       ]);
 
@@ -974,7 +986,7 @@ async function buildPeriodCosts(
         toLines(windowLines),
         names,
         sales,
-        coverageFor(toLines(monthLines ?? []), names, ledger),
+        coverageFor(toLines(monthLines), names, ledger),
       );
     }));
 
@@ -1014,16 +1026,16 @@ async function buildCostTrend(
 
     await Promise.all(venues.map(async v => {
       const [{ data: pl }, { data: ops }, accountMap] = await Promise.all([
-        supabaseAdmin.from('profit_and_loss')
+        selectAll(() => supabaseAdmin.from('profit_and_loss')
           .select('period_start, section, account_name, amount, is_summary')
           .eq('venue_id', v.id)
           .gte('period_start', spanStart)
-          .lte('period_start', spanEnd),
-        supabaseAdmin.from('daily_operations')
+          .lte('period_start', spanEnd)),
+        selectAll(() => supabaseAdmin.from('daily_operations')
           .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', spanStart)
-          .lte('business_date', spanEnd),
+          .lte('business_date', spanEnd)),
         fetchAccountMap(v.id),
       ]);
 

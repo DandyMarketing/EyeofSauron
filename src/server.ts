@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { selectAll, readAllPages } from './lib/paged.js';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -823,6 +824,7 @@ app.post('/api/events', async (c) => {
     return c.json({ error: 'The end date is before the start date.' }, 400);
   }
 
+  // row-cap: one row per venue.
   const { data: allVenues } = await supabaseAdmin.from('venues').select('id, slug, name');
   const mayUse = user.isOwner
     ? (allVenues ?? [])
@@ -1162,10 +1164,12 @@ app.get('/admin/api/notes', async (c) => {
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
   const status = c.req.query('status');
-  let query = supabaseAdmin.from('venue_notes').select(NOTE_FIELDS);
-  if (status) query = query.eq('status', status);
-
-  const { data } = await query.order('created_at', { ascending: false });
+  // row-cap: paged by selectAll below.
+  const notesQuery = () => {
+    const q = supabaseAdmin.from('venue_notes').select(NOTE_FIELDS);
+    return (status ? q.eq('status', status) : q).order('created_at', { ascending: false });
+  };
+  const { data } = await selectAll(notesQuery);
 
   // Flag notes past their re-confirmation date so the admin screen can show a
   // review list without duplicating the staleness rule in the front end.
@@ -1287,6 +1291,7 @@ app.get('/api/dashboard', async (c) => {
    * A failed read is not cached, and degrades exactly as an uncached one did.
    */
   const allVenues = await venuesCache.get('all', new Date().toISOString().slice(0, 13), async () => {
+    // row-cap: one row per venue.
     const { data, error } = await supabaseAdmin.from('venues').select('id, name, slug');
     if (error) throw new Error(error.message);
     return (data ?? []) as Array<{ id: string; name: string; slug: string }>;
@@ -1508,6 +1513,7 @@ app.get('/admin/api/venues', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
+  // row-cap: one row per venue.
   const { data } = await supabaseAdmin.from('venues').select('id, name, slug');
   return c.json({ venues: data ?? [] });
 });
@@ -1532,10 +1538,10 @@ app.get('/admin/api/fee-acknowledgements', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await selectAll(() => supabaseAdmin
     .from('fee_acknowledgements')
     .select('id, venue_id, period_start, account_name, reason, created_at, venues(name)')
-    .order('period_start', { ascending: false });
+    .order('period_start', { ascending: false }));
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ acknowledgements: data ?? [] });
@@ -1585,10 +1591,11 @@ app.get('/admin/api/account-map', async (c) => {
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
   const [{ data: mappings }, { data: venues }] = await Promise.all([
-    supabaseAdmin
+    selectAll(() => supabaseAdmin
       .from('account_map')
       .select('id, venue_id, account_name, canonical_account, business_line, notes, confirmed_at')
-      .order('account_name', { ascending: true }),
+      .order('account_name', { ascending: true })),
+    // row-cap: one row per venue.
     supabaseAdmin.from('venues').select('id, name, slug'),
   ]);
 
@@ -1607,9 +1614,14 @@ app.get('/admin/api/account-map', async (c) => {
    * Same cap as BUILD_LOG 1.x, and as the comment on fetchAccountMap() that
    * says it has cost this project data four times.
    */
-  let { data: ledger, error: ledgerError } = await supabaseAdmin
+  // A view with no id column, so paged on its own unique pair instead.
+  let { data: ledger, error: ledgerError } = await readAllPages<any>((from, to) => supabaseAdmin
     .from('profit_and_loss_accounts')
-    .select('venue_id, account_name');
+    .select('venue_id, account_name')
+    .order('venue_id').order('account_name')
+    .range(from, to))
+    .then(data => ({ data, error: null as { message: string } | null }),
+          (e: any) => ({ data: null as any[] | null, error: { message: String(e?.message ?? e) } }));
 
   /**
    * FALLS BACK IF THE VIEW IS NOT THERE YET, loudly.
@@ -1632,10 +1644,10 @@ app.get('/admin/api/account-map', async (c) => {
       'Run migration 049. Falling back to a direct read, which PostgREST caps at ' +
       '1,000 rows — the unmapped list below may be INCOMPLETE until then.',
     );
-    const fallback = await supabaseAdmin
+    const fallback = await selectAll(() => supabaseAdmin
       .from('profit_and_loss')
       .select('venue_id, account_name')
-      .eq('is_summary', false);
+      .eq('is_summary', false));
     ledger = fallback.data;
   }
 
@@ -1898,6 +1910,7 @@ app.get('/admin/api/staffany/sections', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
+  // row-cap: a few dozen roster sections across the group.
   const { data, error } = await supabaseAdmin
     .from('staffany_sections')
     .select('staffany_section_id, section_name, section_tag, venue_id, area, confirmed_at')
@@ -1999,6 +2012,7 @@ app.post('/admin/api/meta/probe-metrics', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
+  // row-cap: a handful of social accounts per venue.
   const { data: accounts } = await supabaseAdmin
     .from('social_accounts')
     .select('platform, account_id, account_name')
@@ -2151,6 +2165,7 @@ app.post('/admin/api/meta/ingest', async (c) => {
   const until = new Date().toISOString().slice(0, 10);
   const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 
+  // row-cap: a handful of social accounts per venue.
   const { data: accounts } = await supabaseAdmin
     .from('social_accounts')
     .select('platform, account_id, account_name, venue_id')
@@ -2183,6 +2198,7 @@ app.get('/admin/api/xero/connections', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
+  // row-cap: one Xero organisation per venue.
   const { data } = await supabaseAdmin
     .from('xero_connections')
     .select('id, tenant_id, tenant_name, venue_id, status, last_error, connected_at, last_refreshed_at, venues(name, slug)')
@@ -2288,16 +2304,17 @@ app.get('/admin/api/summary', async (c) => {
   const unresolvedIngestionErrors = async (sinceISO: string): Promise<number> => {
     try {
       const [{ data: failures }, { data: successes }] = await Promise.all([
-        supabaseAdmin
+        selectAll(() => supabaseAdmin
           .from('ingestion_log')
           .select('venue_id, venue_key, report_type, business_date, filename, created_at')
           .not('status', 'in', '(success,closed)')
-          .gte('created_at', sinceISO),
-        supabaseAdmin
+          .gte('created_at', sinceISO)),
+        // Every hourly sync writes a success row, so this passes 1,000 within days.
+        selectAll(() => supabaseAdmin
           .from('ingestion_log')
           .select('venue_id, venue_key, report_type, business_date, filename, created_at')
           .eq('status', 'success')
-          .gte('created_at', sinceISO),
+          .gte('created_at', sinceISO)),
       ]);
       return countUnresolved(failures ?? [], successes ?? []);
     } catch (e: any) {
@@ -2345,11 +2362,11 @@ app.get('/admin/api/alerts', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
-  const { data } = await supabaseAdmin
+  const { data } = await selectAll(() => supabaseAdmin
     .from('reconciliation_alerts')
     .select('id, venue_id, business_date, alert_type, monday_gross, revel_gross, difference, old_meal_periods, new_meal_periods, created_at, venues(name)')
     .eq('resolved', false)
-    .order('business_date', { ascending: false });
+    .order('business_date', { ascending: false }));
 
   // One card per finding, not per row.
   //

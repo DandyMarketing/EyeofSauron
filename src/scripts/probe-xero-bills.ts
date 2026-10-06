@@ -32,6 +32,7 @@ const until = process.argv.find(a => a.startsWith('--until='))?.split('=')[1] ??
 
 console.log(`Probing Xero supplier bills — ${venueSlug}, ${since} to ${until}. Read-only, nothing is stored.\n`);
 
+// row-cap: one Xero organisation per venue.
 const { data: conns } = await supabase
   .from('xero_connections')
   .select('tenant_id, tenant_name, venue_id, venues(name, slug)')

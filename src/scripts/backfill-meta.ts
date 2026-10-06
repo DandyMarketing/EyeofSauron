@@ -56,6 +56,7 @@ console.log('Run by hand only. Safe to stop and restart: days already stored are
 // Before a single call to Meta, for the same reason as the post backfill.
 await requireSchema(SOCIAL_SCHEMA);
 
+// row-cap: a handful of social accounts per venue.
 const { data: accounts, error } = await supabase
   .from('social_accounts')
   .select('platform, account_id, account_name, venue_id, venues(name, slug)')

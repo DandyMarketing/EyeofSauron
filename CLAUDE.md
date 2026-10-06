@@ -456,6 +456,7 @@ ever operates two outlets.
 - **Warehouse-first**: the LLM queries the prepared Supabase warehouse, it does NOT call source APIs live per question. (Faster, resilient, and the only way to answer historical/trend questions.)
 - **Anti-hallucination is non-negotiable**: the LLM never states a number from memory. Every figure comes from a query tool; every suggestion and chart is built on real warehouse data. A reconciliation gate checks figures (line items sum to totals; Revel sales CSV reconciles with revenue CSV) before data is trusted.
 - Postgres is correct at this scale — do NOT over-engineer with a big analytics warehouse.
+- **Every database read is bounded, and a test enforces it.** The API returns at most 1,000 rows per request and says nothing when it stops, and `.limit(5000)` is silently 1,000. Read anything that can grow with `selectAll()` from `src/lib/paged.ts`. A read that can never come close (one row per venue, one day of one venue) gets a `// row-cap: <why>` comment directly above it. `src/lib/paged.test.ts` fails on anything else. Do not raise the cap in Supabase instead (BUILD_LOG 1.1).
 
 ### Every page is built for the load, not just for the features
 
@@ -731,7 +732,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 52 migrations, 25 query tools, 11 ingest sources, 1,408 tests.
+started.** 52 migrations, 25 query tools, 11 ingest sources, 1,423 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse

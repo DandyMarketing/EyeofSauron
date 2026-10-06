@@ -58,6 +58,7 @@ if (!freshness.ok) {
   console.warn('');
 }
 
+// row-cap: a handful of social accounts per venue.
 const { data: accounts, error } = await supabase
   .from('social_accounts')
   .select('platform, account_id, account_name, venue_id, venues(name)')

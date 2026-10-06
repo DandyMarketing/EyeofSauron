@@ -57,6 +57,40 @@ returns. See `pagedSelect()` in `src/ai/charts.ts` and `getCovers()` in
 **Recurs?** **Every customer.** This is a property of the database layer, not of
 any one venue. Every new read path is a fresh chance to reintroduce it.
 
+**It did recur, repeatedly, and is now enforced rather than remembered.** On
+6 Oct 2026 Firangi's cost panel withheld its food cost as "only 52% on bills"
+when the bills explained 91%. The coverage check read September's bill lines in
+one request, and every venue had more than 1,000 that month (Firangi 1,556, Fat
+Prince 1,102, Neon Pigeon 1,001). An audit then found **88 reads** with no
+bound at all, and a second form of the same bug: **`.limit(5000)`,
+`.limit(10000)` and `.limit(2000)`**, which look like bounds and are not,
+because the database returns 1,000 whatever is asked for. Live casualties
+included:
+- the chat's top sellers, ranked on about twelve days of a month;
+- labour beyond about two months;
+- the recommendation engine's fee check, which read half of last year;
+- the Xero backfill's "what do we already hold";
+- "resolved by a later success" on System Health.
+
+The fix has three layers, because each catches what the others miss:
+1. **`selectAll()`** (`src/lib/paged.ts`) reads every page, ordered by the
+   unique `id` so pages cannot repeat or skip a row (1.3). It returns the same
+   `{ data, error }` shape, so a call site changes by one wrap.
+2. **`src/lib/paged.test.ts` reads the whole codebase.** Every read must be one
+   row, a count, paged, a deliberate top-N of at most 500, or carry a
+   `// row-cap: <why>` comment saying why it can never come close. Any `.limit()`
+   of 1,000 or more fails outright. `selectAll` on a table without an `id` fails
+   too. That one was caught in testing, where wrapping `school_calendar` would
+   have broken the school-holiday tool.
+3. **`rowCapFetch`**, on both database clients, logs `[row-cap] <table>` to
+   Railway whenever an unpaged request comes back at exactly the cap. The test
+   reads source text and a query built some way it does not recognise could get
+   past it; the alarm watches what actually came back.
+
+**Raising the cap was considered and rejected.** It is a Supabase setting, but
+it moves the cliff rather than removing it, and the cap is also what stops one
+bad query from pulling a whole table across the Tokyo link.
+
 ### 1.2 API result ceiling returned an error instead of a page
 **Symptom.** HTTP 400 fetching twelve months of SevenRooms reservations.
 **Root cause.** SevenRooms enforces a hard 4,000-result ceiling per query and

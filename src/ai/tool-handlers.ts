@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { selectAll } from '../lib/paged.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
 import { buildChart, buildComposition, earliestBookedDate, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
@@ -158,25 +159,29 @@ async function querySocialPerformance(input: Record<string, any>): Promise<strin
     return JSON.stringify({ error: 'start_date and end_date are required' });
   }
 
-  let socialQuery = supabase
-    .from('social_daily')
-    .select('business_date, platform, metric, value')
-    .eq('venue_id', venueId)
-    .gte('business_date', input.start_date)
-    .lte('business_date', input.end_date)
-    .order('business_date', { ascending: true });
-
-  if (input.metric) socialQuery = socialQuery.eq('metric', input.metric);
+  // Every metric for every day is easily over 1,000 rows for a few months.
+  const socialQuery = () => {
+    // row-cap: paged by selectAll below.
+    let q = supabase
+      .from('social_daily')
+      .select('business_date, platform, metric, value')
+      .eq('venue_id', venueId)
+      .gte('business_date', input.start_date)
+      .lte('business_date', input.end_date)
+      .order('business_date', { ascending: true });
+    if (input.metric) q = q.eq('metric', input.metric);
+    return q;
+  };
 
   const [{ data: social, error: socialError }, { data: trading, error: tradingError }] = await Promise.all([
-    socialQuery,
-    supabase
+    selectAll(socialQuery),
+    selectAll(() => supabase
       .from('daily_operations')
       .select('business_date, gross_sales, total_guests, total_transactions')
       .eq('venue_id', venueId)
       .gte('business_date', input.start_date)
       .lte('business_date', input.end_date)
-      .order('business_date', { ascending: true }),
+      .order('business_date', { ascending: true })),
   ]);
 
   if (socialError) return JSON.stringify({ error: socialError.message });
@@ -386,14 +391,14 @@ async function queryPostPatterns(input: Record<string, any>): Promise<string> {
 
   // Stories are excluded and not offered. They reach only existing followers,
   // so grouping them beside posts would compare content against audience.
-  const { data, error } = await supabase
+  // Paged: this said `.limit(2000)`, which the database treats as 1,000.
+  const { data, error } = await selectAll(() => supabase
     .from('social_posts')
     .select('business_date, media_type, media_product_type, collaborator_count, hashtags, mentions, caption_length, has_question, posted_hour, metrics, category, shows_people, has_call_to_action, is_repost, is_trend, shows_process')
     .eq('venue_id', venueId)
     .eq('content_type', 'post')
     .gte('business_date', input.start_date)
-    .lte('business_date', input.end_date)
-    .limit(2000);
+    .lte('business_date', input.end_date));
 
   if (error) return JSON.stringify({ error: error.message });
 
@@ -438,12 +443,12 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
   }
 
-  const { data: pl, error } = await supabase
+  const { data: pl, error } = await selectAll(() => supabase
     .from('profit_and_loss')
     .select('period_start, period_end, section, account_name, amount, is_summary')
     .eq('venue_id', venueId)
     .gte('period_start', input.start_date)
-    .lte('period_end', input.end_date);
+    .lte('period_end', input.end_date));
 
   if (error) return JSON.stringify({ error: error.message });
   if (!pl || pl.length === 0) {
@@ -487,6 +492,7 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
       .eq('venue_id', venueId)
       .gte('business_date', coveredStart)
       .lte('business_date', coveredEnd)
+      .order('id')   // offset paging needs a unique order or it repeats and skips rows (BUILD_LOG 1.3)
       .range(offset, offset + 999);
     if (!data || data.length === 0) break;
     ops.push(...data);
@@ -545,18 +551,21 @@ async function queryProfitAndLoss(input: Record<string, any>): Promise<string> {
     return JSON.stringify({ error: 'start_date and end_date are required' });
   }
 
-  let query = supabase
-    .from('profit_and_loss')
-    .select('period_start, period_end, section, account_name, amount, is_summary, sort_order')
-    .eq('venue_id', venueId)
-    .gte('period_start', input.start_date)
-    .lte('period_end', input.end_date)
-    .order('sort_order', { ascending: true });
+  // row-cap: paged by selectAll below. Two years of a ledger is ~2,400 lines.
+  const query = () => {
+    let q = supabase
+      .from('profit_and_loss')
+      .select('period_start, period_end, section, account_name, amount, is_summary, sort_order')
+      .eq('venue_id', venueId)
+      .gte('period_start', input.start_date)
+      .lte('period_end', input.end_date)
+      .order('sort_order', { ascending: true });
+    if (input.section) q = q.eq('section', input.section);
+    if (input.summary_only === true) q = q.eq('is_summary', true);
+    return q;
+  };
 
-  if (input.section) query = query.eq('section', input.section);
-  if (input.summary_only === true) query = query.eq('is_summary', true);
-
-  const { data, error } = await query;
+  const { data, error } = await selectAll(query);
   if (error) return JSON.stringify({ error: error.message });
 
   if (!data || data.length === 0) {
@@ -708,12 +717,12 @@ async function querySupplierBills(input: Record<string, any>): Promise<string> {
    * a three-line bill would count its total three times. Migration 022 splits
    * the tables so that mistake is unavailable, and this keeps it that way.
    */
-  const { data: bills, error: billError } = await supabase
+  const { data: bills, error: billError } = await selectAll(() => supabase
     .from('supplier_bills')
     .select('id, invoice_number, supplier_name, bill_date, status, total')
     .eq('venue_id', venueId)
     .gte('bill_date', input.start_date)
-    .lte('bill_date', input.end_date);
+    .lte('bill_date', input.end_date));
 
   if (billError) return JSON.stringify({ error: billError.message });
 
@@ -733,23 +742,31 @@ async function querySupplierBills(input: Record<string, any>): Promise<string> {
     });
   }
 
-  const { data: lines, error: lineError } = await supabase
+  /**
+   * Filtered by the bill's DATE through the join, not by a list of bill ids. A
+   * month at Firangi is ~400 bills, and an `in (...)` of 400 UUIDs is a URL
+   * too long to send. Paged, because the same month is over 1,500 lines.
+   */
+  const { data: allLines, error: lineError } = await selectAll(() => supabase
     .from('supplier_bill_lines')
-    .select('bill_id, description, quantity, unit_amount, line_amount, account_code, account_id')
+    .select('bill_id, description, quantity, unit_amount, line_amount, account_code, account_id, supplier_bills!inner(bill_date)')
     .eq('venue_id', venueId)
-    .in('bill_id', [...billById.keys()]);
+    .gte('supplier_bills.bill_date', input.start_date)
+    .lte('supplier_bills.bill_date', input.end_date));
 
   if (lineError) return JSON.stringify({ error: lineError.message });
+  // Only lines of bills that are spend: a voided bill's lines are dropped here.
+  const lines = allLines.filter((l: any) => billById.has(l.bill_id));
 
   // Account NAMES live only in the P&L; a bill line carries a code and a UUID.
   // This is also the denominator for coverage.
-  const { data: plRows } = await supabase
+  const { data: plRows } = await selectAll(() => supabase
     .from('profit_and_loss')
     .select('account_id, account_name, amount, is_summary')
     .eq('venue_id', venueId)
     .gte('period_start', input.start_date)
     .lte('period_end', input.end_date)
-    .not('account_id', 'is', null);
+    .not('account_id', 'is', null));
 
   // Canonical names here too, so a marketing breakdown at Fat Prince and one at
   // Neon Pigeon carry the same label and can be compared.
@@ -1035,7 +1052,7 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     ? { from: dateFilter.single, to: dateFilter.single }
     : { from: dateFilter.start, to: dateFilter.end };
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
   const venues = input.venue_slug
     ? allVenues.filter(v => v.slug === input.venue_slug)
@@ -1066,12 +1083,12 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       // should look. If it took nothing, the venue was closed and there is
       // nothing to chase -- Firangi Superstar is shut every Sunday, so treating
       // those as failures would cry wolf weekly.
-      const { data: posRows } = await supabase
+      const { data: posRows } = await selectAll(() => supabase
         .from('daily_operations')
         .select('business_date, gross_sales, total_guests')
         .eq('venue_id', venue.id)
         .gte('business_date', range.from)
-        .lte('business_date', range.to);
+        .lte('business_date', range.to));
 
       const posGross = (posRows ?? []).reduce((a: number, o: any) => a + Number(o.gross_sales ?? 0), 0);
       const posGuests = (posRows ?? []).reduce((a: number, o: any) => a + Number(o.total_guests ?? 0), 0);
@@ -1174,12 +1191,12 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     }
 
     // Revel's paid-guest count over the same range, for the SOP variance check.
-    const { data: ops } = await supabase
+    const { data: ops } = await selectAll(() => supabase
       .from('daily_operations')
       .select('total_guests')
       .eq('venue_id', venue.id)
       .gte('business_date', range.from)
-      .lte('business_date', range.to);
+      .lte('business_date', range.to));
     const revelGuests = (ops ?? []).reduce((a: number, o: any) => a + Number(o.total_guests ?? 0), 0);
 
     results.push({
@@ -1246,17 +1263,23 @@ async function queryProductMix(input: Record<string, any>): Promise<string> {
   const cls = input.class ?? 'all';
   const limit = input.limit ?? 20;
 
-  let query = supabase
-    .from('product_mix')
-    .select('name, row_type, class, category, subcategory, qty, sales, pct_total, parent_product, business_date')
-    .eq('venue_id', venueId)
-    .limit(10000);
+  /**
+   * This said `.limit(10000)`, which the database ignores: it returns 1,000
+   * rows whatever is asked for. At ~80 lines a day, "top sellers last month"
+   * was ranked on the first twelve days.
+   */
+  const query = () => {
+    // row-cap: paged by selectAll below.
+    let q = applyDateFilter(supabase
+      .from('product_mix')
+      .select('name, row_type, class, category, subcategory, qty, sales, pct_total, parent_product, business_date')
+      .eq('venue_id', venueId), dateFilter);
+    if (rowType !== 'all') q = q.eq('row_type', rowType);
+    if (cls !== 'all') q = q.eq('class', cls);
+    return q;
+  };
 
-  query = applyDateFilter(query, dateFilter);
-  if (rowType !== 'all') query = query.eq('row_type', rowType);
-  if (cls !== 'all') query = query.eq('class', cls);
-
-  const { data, error } = await query;
+  const { data, error } = await selectAll(query);
   if (error) return JSON.stringify({ error: error.message });
   if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No product mix data found.' });
 
@@ -1324,15 +1347,14 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   const venueId = await getVenueId(input.venue_slug);
   const dateFilter = getDateFilter(input);
 
-  let query = supabase
+  // row-cap: one row for a single date (maybeSingle), paged by selectAll for a range.
+  const query = () => applyDateFilter(supabase
     .from('daily_operations')
     .select('*')
-    .eq('venue_id', venueId);
-
-  query = applyDateFilter(query, dateFilter);
+    .eq('venue_id', venueId), dateFilter);
 
   if ('single' in dateFilter) {
-    const { data, error } = await query.maybeSingle();
+    const { data, error } = await query().maybeSingle();
     if (error) return JSON.stringify({ error: error.message });
     if (!data) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No operations data found for this venue and date.' });
 
@@ -1390,7 +1412,7 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   }
 
   // Date range — return daily breakdown + totals
-  const { data, error } = await query.order('business_date', { ascending: true });
+  const { data, error } = await selectAll(() => query().order('business_date', { ascending: true }));
   if (error) return JSON.stringify({ error: error.message });
   if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date_range: dateLabel(dateFilter), message: 'No operations data found for this venue and date range.' });
 
@@ -1538,7 +1560,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
   const dateFilter = getDateFilter(input);
   let venueFilter: string[] | undefined = input.venue_slugs;
 
-  const { data: venues } = await supabase.from('venues').select('id, name, slug');
+  const { data: venues } = await supabase.from('venues').select('id, name, slug');  // row-cap: one row per venue
   if (!venues) return JSON.stringify({ error: 'No venues found' });
 
   const targetVenues = scopeVenues(
@@ -1548,14 +1570,10 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
 
   const results = [];
   for (const venue of targetVenues) {
-    let query = supabase
+    const { data: rows } = await selectAll(() => applyDateFilter(supabase
       .from('daily_operations')
       .select('gross_sales, net_sales, item_discounts, order_discounts, tax_total, tips_total, net_to_account_for, total_transactions, total_guests, avg_check, avg_sale_per_guest, sales_by_class, meal_periods')
-      .eq('venue_id', venue.id);
-
-    query = applyDateFilter(query, dateFilter);
-    query = query.limit(1000);
-    const { data: rows } = await query;
+      .eq('venue_id', venue.id), dateFilter));
     if (!rows || rows.length === 0) continue;
 
     // `grossSales` here is the FOOD + BEVERAGE basis -- it is what the discount
@@ -1699,7 +1717,7 @@ async function queryLabour(input: Record<string, any>): Promise<string> {
   const callerRole: Role | undefined = input[CALLER_ROLE];
   const showCost = !callerRole || mayRead(callerRole, 'payroll');
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const targetVenues = scopeVenues(
@@ -1729,19 +1747,24 @@ async function queryLabour(input: Record<string, any>): Promise<string> {
   const venueIds = targetVenues.map(v => v.id);
   const nameById = new Map(targetVenues.map(v => [v.id, v.name]));
 
-  let query = supabase
-    .from('labour_daily')
-    .select('venue_id, business_date, area, staffany_section_id, scheduled_hours, actual_hours, overtime_hours, basic_cost, overtime_cost, weekend_cost, event_cost, other_cost, total_cost, staff_count');
+  /**
+   * This said `.limit(5000)`, which the database ignores -- every request stops
+   * at 1,000 rows. Labour is a row per venue, day and section, so anything past
+   * about two months lost its tail.
+   */
+  const query = () => {
+    // row-cap: paged by selectAll below.
+    const q = supabase
+      .from('labour_daily')
+      .select('venue_id, business_date, area, staffany_section_id, scheduled_hours, actual_hours, overtime_hours, basic_cost, overtime_cost, weekend_cost, event_cost, other_cost, total_cost, staff_count');
+    // A NULL venue_id is group staff. `.in()` never matches NULL, so the venue
+    // branch excludes them structurally rather than by remembering to.
+    return applyDateFilter(wantsGroup
+      ? q.or(`venue_id.in.(${venueIds.join(',')}),venue_id.is.null`)
+      : q.in('venue_id', venueIds), dateFilter);
+  };
 
-  // A NULL venue_id is group staff. `.in()` never matches NULL, so the venue
-  // branch excludes them structurally rather than by remembering to.
-  query = wantsGroup
-    ? query.or(`venue_id.in.(${venueIds.join(',')}),venue_id.is.null`)
-    : query.in('venue_id', venueIds);
-
-  query = applyDateFilter(query, dateFilter).limit(5000);
-
-  const { data: rows, error } = await query;
+  const { data: rows, error } = await selectAll(query);
   if (error) return JSON.stringify({ error: error.message });
   if (!rows || rows.length === 0) {
     return JSON.stringify({
@@ -1760,12 +1783,10 @@ async function queryLabour(input: Record<string, any>): Promise<string> {
    * charge in the denominator and report labour about 10% lower than it is,
    * which reads as an improvement.
    */
-  let salesQuery = supabase
+  const { data: salesRows } = await selectAll(() => applyDateFilter(supabase
     .from('daily_operations')
     .select('venue_id, business_date, gross_sales, item_discounts, order_discounts, net_sales')
-    .in('venue_id', venueIds);
-  salesQuery = applyDateFilter(salesQuery, dateFilter).limit(5000);
-  const { data: salesRows } = await salesQuery;
+    .in('venue_id', venueIds), dateFilter));
 
   const salesByVenueDate = new Map<string, number>();
   for (const s of salesRows ?? []) {
@@ -1797,7 +1818,7 @@ async function queryLabour(input: Record<string, any>): Promise<string> {
 }
 
 async function listAvailableData(input: Record<string, any>): Promise<string> {
-  const { data: venues } = await supabase.from('venues').select('id, name, slug');
+  const { data: venues } = await supabase.from('venues').select('id, name, slug');  // row-cap: one row per venue
   if (!venues) return JSON.stringify({ error: 'No venues found' });
 
   const venueFilter = input.venue_slug
@@ -1813,23 +1834,31 @@ async function listAvailableData(input: Record<string, any>): Promise<string> {
       .order('business_date', { ascending: false })
       .limit(30);
 
-    const { data: pmDates } = await supabase
+    /**
+     * The last 30 DATES, like operations above. These tables carry many rows a
+     * day (~80 product lines, 24 hours), and asked for `.limit(5000)` and
+     * `.limit(1000)` -- both 1,000 in practice, which listed about twelve days
+     * of product mix as if that were all there was. Read over a 45-day window,
+     * every page, then cut to 30 dates.
+     */
+    const since = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10);
+    const { data: pmDates } = await selectAll(() => supabase
       .from('product_mix')
       .select('business_date')
       .eq('venue_id', venue.id)
-      .order('business_date', { ascending: false })
-      .limit(5000);
+      .gte('business_date', since)
+      .order('business_date', { ascending: false }));
 
-    const uniquePmDates = [...new Set((pmDates ?? []).map(r => r.business_date))];
+    const uniquePmDates = [...new Set((pmDates ?? []).map((r: any) => r.business_date))].slice(0, 30);
 
-    const { data: hsDates } = await supabase
+    const { data: hsDates } = await selectAll(() => supabase
       .from('hourly_sales')
       .select('business_date')
       .eq('venue_id', venue.id)
-      .order('business_date', { ascending: false })
-      .limit(1000);
+      .gte('business_date', since)
+      .order('business_date', { ascending: false }));
 
-    const uniqueHsDates = [...new Set((hsDates ?? []).map(r => r.business_date))];
+    const uniqueHsDates = [...new Set((hsDates ?? []).map((r: any) => r.business_date))].slice(0, 30);
 
     results.push({
       venue: venue.name,
@@ -1847,15 +1876,11 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
   const venueId = await getVenueId(input.venue_slug);
   const dateFilter = getDateFilter(input);
 
-  let query = supabase
+  // Paged: `.limit(5000)` was ignored at 1,000 rows, about six weeks of hours.
+  const { data, error } = await selectAll(() => applyDateFilter(supabase
     .from('hourly_sales')
     .select('business_date, meal_period, transactions, items, sales')
-    .eq('venue_id', venueId)
-    .limit(5000);
-
-  query = applyDateFilter(query, dateFilter);
-
-  const { data, error } = await query;
+    .eq('venue_id', venueId), dateFilter));
   if (error) return JSON.stringify({ error: error.message });
   if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No hourly sales data found. This data comes from the Hourly Sales Report.' });
 
@@ -1942,6 +1967,7 @@ async function queryHourlySales(input: Record<string, any>): Promise<string> {
   const businessDate = input.business_date;
   if (!businessDate) return JSON.stringify({ error: 'business_date is required for hourly sales query' });
 
+  // row-cap: one venue, one day: 24 hourly rows at most.
   const { data, error } = await supabase
     .from('hourly_sales')
     .select('hour, time_label, transactions, items, avg_check, sales, pct_sales, meal_period')
@@ -1983,7 +2009,7 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
 
   const lookback = Number(input.lookback_days) > 0 ? Math.floor(Number(input.lookback_days)) : 365;
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug
@@ -2148,7 +2174,7 @@ async function queryGuestCohorts(input: Record<string, any>): Promise<string> {
   const windowDays = Number(input.window_days) > 0 ? Math.floor(Number(input.window_days)) : 365;
   const from = typeof input.from_date === 'string' ? input.from_date : '2022-01-01';
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug
@@ -2239,7 +2265,7 @@ async function checkBookingChannels(input: Record<string, any>): Promise<string>
   to.setUTCMonth(to.getUTCMonth() + 1);
   to.setUTCDate(0);   // last day of the month being checked
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug
@@ -2330,12 +2356,12 @@ async function queryCityEvents(input: Record<string, any>): Promise<string> {
 
   // Overlapping, not contained: a three-day weekend that began yesterday is the
   // whole story for today, and `start_date >= period start` would miss it.
-  const { data, error } = await supabase
+  const { data, error } = await selectAll(() => supabase
     .from('city_events')
     .select('name, start_date, end_date, category, location, part_of, ticket_price_low, ticket_price_high, currency, audience, effect_notes, source_url, confirmed')
     .lte('start_date', input.end_date)
     .gte('end_date', input.start_date)
-    .order('start_date', { ascending: true });
+    .order('start_date', { ascending: true }));
 
   if (error) {
     return JSON.stringify({
@@ -2415,7 +2441,7 @@ async function queryCityEvents(input: Record<string, any>): Promise<string> {
  * there is one figure for one night rather than two that drift.
  */
 async function queryEvents(input: Record<string, any>): Promise<string> {
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const visible = scopeVenues(allVenues, input);
@@ -2474,13 +2500,12 @@ async function queryEvents(input: Record<string, any>): Promise<string> {
 
   if (all.length > 0) {
     const dates = all.flatMap(e => [e.start_date, e.end_date]).sort();
-    const { data: ops } = await supabase
+    const { data: ops } = await selectAll(() => supabase
       .from('daily_operations')
       .select('venue_id, business_date, net_sales, total_guests')
       .in('venue_id', [...visibleIds])
       .gte('business_date', dates[0])
-      .lte('business_date', dates[dates.length - 1])
-      .limit(5000);
+      .lte('business_date', dates[dates.length - 1]));
 
     for (const o of (ops ?? []) as any[]) {
       sales.set(dayKey(o.venue_id, o.business_date), {
@@ -2625,6 +2650,8 @@ async function querySchoolCalendar(input: Record<string, any>): Promise<string> 
   // the whole story for a week in December, and `start_date >= period start`
   // would miss it entirely.
   let query = supabase
+    // row-cap: MOE's calendar is a few dozen rows a year. Not paged because the
+    // table has no id column for selectAll to order on.
     .from('school_calendar')
     .select('start_date, end_date, name, category, level, origin')
     .lte('start_date', input.end_date)
@@ -2731,13 +2758,12 @@ async function tillTotalsFor(
     totals.set(id, { transactions: 0, net_to_account_for: 0, food_bev_sales: 0, days: 0 });
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await selectAll(() => supabase
     .from('daily_operations')
     .select('venue_id, gross_sales, item_discounts, order_discounts, net_sales, net_to_account_for, total_transactions')
     .in('venue_id', venueIds)
     .gte('business_date', start)
-    .lte('business_date', end)
-    .limit(5000);
+    .lte('business_date', end));
 
   if (error) return { error: error.message };
 
@@ -2758,7 +2784,7 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
   }
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug
@@ -2884,6 +2910,7 @@ async function queryPublicHolidays(input: Record<string, any>): Promise<string> 
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
   }
 
+  // row-cap: about fifteen public holidays a year.
   const { data, error } = await supabase
     .from('public_holidays')
     .select('holiday_date, name, weekday, is_observed')
@@ -2953,7 +2980,7 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
   }
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug
@@ -3014,7 +3041,7 @@ async function queryVisitDistribution(input: Record<string, any>): Promise<strin
     return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
   }
 
-  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');
+  const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
 
   const venues = input.venue_slug

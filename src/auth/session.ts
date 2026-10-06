@@ -1,11 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
+import { selectAll } from '../lib/paged.js';
+import { rowCapFetch } from '../lib/paged.js';
 import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
 import { SessionCache, SingleFlight } from './session-cache.js';
 import { describeLastSeen } from './last-seen.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabaseAdmin = createClient(url, serviceKey);
+// rowCapFetch logs any unpaged read that comes back at the 1,000-row cap.
+const supabaseAdmin = createClient(url, serviceKey, { global: { fetch: rowCapFetch } });
 
 export interface SessionUser {
   id: string;
@@ -113,6 +116,7 @@ async function loadSession(accessToken: string): Promise<SessionUser | null> {
    * Three round trips became one, on every request that misses the cache.
    */
   const [{ data: roles }, { data: profile }, termsResult] = await Promise.all([
+    // row-cap: one user's roles, a handful of rows.
     supabaseAdmin
       .from('user_venue_roles')
       .select('venue_id, role, venues(slug)')
@@ -122,6 +126,7 @@ async function loadSession(accessToken: string): Promise<SessionUser | null> {
       .select('full_name')
       .eq('id', user.id)
       .maybeSingle(),
+    // row-cap: one user's acceptances, one per terms version.
     supabaseAdmin
       .from('terms_acceptances')
       .select('terms_version, accepted_at')
@@ -219,15 +224,15 @@ async function lastSignIns(): Promise<Map<string, string | null>> {
 }
 
 export async function listUsers() {
-  const { data: profiles } = await supabaseAdmin
+  const { data: profiles } = await selectAll(() => supabaseAdmin
     .from('profiles')
-    .select('id, email, full_name, created_at');
+    .select('id, email, full_name, created_at'));
 
   const signedIn = await lastSignIns();
 
-  const { data: allRoles } = await supabaseAdmin
+  const { data: allRoles } = await selectAll(() => supabaseAdmin
     .from('user_venue_roles')
-    .select('id, user_id, venue_id, role, venues(name, slug)');
+    .select('id, user_id, venue_id, role, venues(name, slug)'));
 
   /**
    * Acceptances, so the console can answer "has everybody signed?"
@@ -240,9 +245,9 @@ export async function listUsers() {
    * before migration 042 is run this table does not exist, and a missing audit
    * column must not take down the user list.
    */
-  const { data: acceptances, error: termsError } = await supabaseAdmin
+  const { data: acceptances, error: termsError } = await selectAll(() => supabaseAdmin
     .from('terms_acceptances')
-    .select('user_id, terms_version, accepted_at');
+    .select('user_id, terms_version, accepted_at'));
 
   if (termsError) {
     console.error(`[terms] cannot read acceptances for the user list: ${termsError.message}`);

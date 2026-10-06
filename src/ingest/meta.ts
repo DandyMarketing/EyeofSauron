@@ -502,6 +502,7 @@ export async function discoverAccounts(
 
   // Existing mappings, so the list says what is already done rather than
   // making someone cross-reference two screens.
+  // row-cap: a handful of social accounts per venue.
   const { data: mapped } = await supabase
     .from('social_accounts')
     .select('platform, account_id, venues(name)');

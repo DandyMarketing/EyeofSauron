@@ -184,6 +184,7 @@ export async function getDayMoments(
   venueId: string,
   date: string,
 ): Promise<{ moments: ReservationMoment[]; synced_at: string | null }> {
+  // row-cap: one venue's reservations for one date, a few hundred at most.
   const { data, error } = await supabase
     .from('reservations')
     .select('party_size, status_simple, arrival_time, seated_at, left_at, ingested_at')

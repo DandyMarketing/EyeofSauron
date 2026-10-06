@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { selectAll } from '../lib/paged.js';
 import { explainIngestError, describeStatus } from '../lib/explain-error.js';
 import { isExpectedClosure } from './closures.js';
 import { resolutionFor } from './resolved.js';
@@ -56,7 +57,7 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   }>;
   open_alerts: Array<{ venue: string; date: string; type: string; detail: string; since: string }>;
 }> {
-  const { data: venues } = await supabase.from('venues').select('id, name, slug, closed_weekdays');
+  const { data: venues } = await supabase.from('venues').select('id, name, slug, closed_weekdays');  // row-cap: one row per venue
   if (!venues) return { missing: [], recent_errors: [], open_alerts: [] };
 
   const today = new Date();
@@ -131,11 +132,13 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
       .gte('created_at', cutoff.toISOString())
       .order('created_at', { ascending: false })
       .limit(10),
-    supabase
+    // Every hourly sync writes a success row, so this passes 1,000 within days
+    // and "resolved by a later success" would miss the latest ones.
+    selectAll(() => supabase
       .from('ingestion_log')
       .select('venue_id, venue_key, report_type, business_date, filename, created_at')
       .eq('status', 'success')
-      .gte('created_at', cutoff.toISOString()),
+      .gte('created_at', cutoff.toISOString())),
   ]);
 
   // Unresolved reconciliation alerts -- data problems, as distinct from the

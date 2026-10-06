@@ -71,6 +71,7 @@ for (const s of sections) {
  * HAVE decided about sitting in the unmapped list for ever, looking exactly
  * like the one nobody had touched.
  */
+// row-cap: a few dozen roster sections across the group.
 const { data: mapRows, error: mapErr } = await supabase
   .from('staffany_sections')
   .select('staffany_section_id, section_name, venue_id, area')

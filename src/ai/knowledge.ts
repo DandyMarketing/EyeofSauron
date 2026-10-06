@@ -188,6 +188,7 @@ export async function knowledgeHealth(): Promise<{
 export async function fetchNotes(allowedVenueSlugs: string[] | null): Promise<KnowledgeNote[]> {
   // Fetch one past the limit so hitting the ceiling is detectable rather than
   // a silent truncation (BUILD_LOG section 1).
+  // row-cap: NOTE_FETCH_LIMIT + 1 = 501, under the cap, and reaching it is detected.
   const { data, error } = await supabase
     .from('venue_notes')
     .select('note, category, confidence, created_at, review_by, author_id, venues(slug, name)')
@@ -225,6 +226,7 @@ export async function fetchNotes(allowedVenueSlugs: string[] | null): Promise<Kn
   const authorIds = [...new Set(rows.map(r => r.author_id).filter(Boolean))];
   const names = new Map<string, string>();
   if (authorIds.length > 0) {
+    // row-cap: bounded by the author ids just collected.
     const { data: profiles } = await supabase
       .from('profiles')
       .select('id, full_name')

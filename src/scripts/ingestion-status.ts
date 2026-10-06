@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { selectAll } from '../lib/paged.js';
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance } from '../lib/covers.js';
 
@@ -35,6 +36,7 @@ function daysAgo(n: number): string {
 const windowDays = Number(process.argv[process.argv.indexOf('--days') + 1]) || 7;
 
 async function recentRuns(reportType: string, label: string, staleAfterHours: number, limit = 6) {
+  // row-cap: a deliberate top-N, the last few runs.
   const { data } = await supabase
     .from('ingestion_log')
     .select('*')
@@ -76,11 +78,11 @@ async function main() {
   await recentRuns('operations', 'REVEL OPERATIONS — nightly ~4:26am SGT (Gmail -> n8n)', 30);
   await recentRuns('product_mix', 'REVEL PRODUCT MIX — nightly ~4:26am SGT (Gmail -> n8n)', 30, 3);
 
-  const { data: alerts } = await supabase
+  const { data: alerts } = await selectAll(() => supabase
     .from('reconciliation_alerts')
     .select('*')
     .eq('resolved', false)
-    .order('business_date', { ascending: false });
+    .order('business_date', { ascending: false }));
 
   console.log(`\nUNRESOLVED RECONCILIATION ALERTS: ${alerts?.length ?? 0}`);
   for (const a of (alerts ?? []) as any[]) {
@@ -94,19 +96,19 @@ async function main() {
   const from = daysAgo(windowDays);
   const to = daysAgo(0);
 
-  const { data: venues } = await supabase.from('venues').select('id, name').order('name');
+  const { data: venues } = await supabase.from('venues').select('id, name').order('name');  // row-cap: one row per venue
   console.log(`\nRECENT DATES (${from} .. ${to})`);
   console.log('  venue           date         revenue  lock       covers  revel  diff');
 
   for (const v of (venues ?? []) as any[]) {
     const coversMap = await getCovers(v.id, from, to);
-    const { data: ops } = await supabase
+    const { data: ops } = await selectAll(() => supabase
       .from('daily_operations')
       .select('business_date, gross_sales, total_guests, locked_at')
       .eq('venue_id', v.id)
       .gte('business_date', from)
       .lte('business_date', to)
-      .order('business_date', { ascending: false });
+      .order('business_date', { ascending: false }));
 
     for (const o of (ops ?? []) as any[]) {
       const c = coversMap.get(o.business_date);

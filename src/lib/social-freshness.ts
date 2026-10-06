@@ -137,6 +137,7 @@ export async function socialFreshness(
   maxAgeHours: number = MAX_SOCIAL_AGE_HOURS,
   nowMs: number = Date.now(),
 ): Promise<SocialFreshness> {
+  // row-cap: a handful of social accounts per venue.
   const { data: accounts, error } = await supabase
     .from('social_accounts')
     .select('platform, account_id, venues(name)')

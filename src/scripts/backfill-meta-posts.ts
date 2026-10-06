@@ -61,6 +61,7 @@ console.log(fieldsOnly
 // this failed on 18 Aug 2026, twice.
 await requireSchema(SOCIAL_SCHEMA);
 
+// row-cap: a handful of social accounts per venue.
 const { data: accounts, error } = await supabase
   .from('social_accounts')
   .select('platform, account_id, account_name, venue_id, venues(name, slug)')

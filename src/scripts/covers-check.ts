@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { selectAll } from '../lib/paged.js';
 import { supabase } from '../lib/supabase.js';
 import { getCovers, coversVariance } from '../lib/covers.js';
 
@@ -32,7 +33,7 @@ console.log(`=== Covers SOP Check: ${from} .. ${to} ===\n`);
 console.log('SevenRooms is the system of record for covers.');
 console.log('Revel guest count is shown only to detect data-entry gaps.\n');
 
-const { data: venues } = await supabase.from('venues').select('id, name, slug').order('name');
+const { data: venues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
 if (!venues || venues.length === 0) {
   console.error('No venues found.');
   process.exit(1);
@@ -44,13 +45,13 @@ const worst: Array<{ venue: string; date: string; variance: number }> = [];
 for (const venue of venues) {
   const coversMap = await getCovers(venue.id, from, to);
 
-  const { data: ops } = await supabase
+  const { data: ops } = await selectAll(() => supabase
     .from('daily_operations')
     .select('business_date, total_guests, gross_sales')
     .eq('venue_id', venue.id)
     .gte('business_date', from)
     .lte('business_date', to)
-    .order('business_date', { ascending: false });
+    .order('business_date', { ascending: false }));
 
   if (!ops || ops.length === 0) continue;
 

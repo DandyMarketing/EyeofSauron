@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { selectAll } from '../lib/paged.js';
 import { supabase } from '../lib/supabase.js';
 import { ingestProfitAndLoss } from '../ingest/xero-pl.js';
 import { ingestSupplierBills, ingestCreditNotes } from '../ingest/xero-bills.js';
@@ -78,6 +79,7 @@ if (withBills) console.log('Also pulling supplier bills. Paginated — Xero retu
 
 await requireSchema(XERO_SCHEMA);
 
+// row-cap: one Xero organisation per venue.
 const { data: connections, error } = await supabase
   .from('xero_connections')
   .select('tenant_id, tenant_name, venue_id, venues(name, slug)')
@@ -137,10 +139,12 @@ for (const t of targets as any[]) {
 
   // What we already hold, and when we fetched it. One query per venue rather
   // than one per month.
-  const { data: held } = await supabase
+  // Paged: two years of a ledger is ~2,400 lines, and a cut-off read here made
+  // months that ARE held look missing, and the reverse.
+  const { data: held } = await selectAll(() => supabase
     .from('profit_and_loss')
     .select('period_start, period_end, fetched_at')
-    .eq('venue_id', t.venue_id);
+    .eq('venue_id', t.venue_id));
 
   const heldBy = new Map<string, string>();
   for (const row of held ?? []) {

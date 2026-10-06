@@ -373,6 +373,7 @@ export async function getAccessToken(tenantId: string): Promise<string> {
    * two genuinely separate authorizations apart, which matching on "all rows"
    * would not.
    */
+  // row-cap: one Xero organisation per venue.
   const { data: allConnections } = await supabase
     .from('xero_connections')
     .select('tenant_id, refresh_token_encrypted');
