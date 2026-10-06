@@ -568,6 +568,36 @@ from not being on the report.
 describes a correct state in the language of an error costs exactly as much
 attention as a real finding, and spends it on nothing.
 
+### 2.8 A 301% food cost: the sales side read one source, and history lives in another
+**Symptom.** Neon Pigeon's July 2026 food cost read **301%** on the cost trend.
+**Root cause.** Food cost is Xero's cost of sales over food sales for the same
+month, and food sales came from Revel's class split (`sales_by_class`) and
+nothing else. Revel's daily files began on 29 July. Every earlier day's
+food/drink split exists only on the Monday board (`meal_periods`), so it counted
+as **$0**. Measured 6 Oct 2026 across all three venues: January to June had 0
+days with a Revel split, July had 3, August and September every day. July
+divided a full month of cost by three days of sales: Neon Pigeon $7,496 against
+$69,486 on the board, about a ninth, and 301% instead of about 32%.
+**Why it was invisible.** The rows existed. "No sales found" only fired when
+there were no rows at all, and a row carrying $0 of food looks like a row. For
+January to June the ratio came out null ("unavailable") rather than wrong, so
+six months of history were simply missing, and missing looks like a gap
+nobody filled. Only the one month with a little Revel data produced a number
+loud enough to notice. The chat's `query_cost_ratios` had the same blind spot.
+**Fix.** `classSplitOf` falls back to the board on any day Revel did not split,
+and says which it used (`split_basis`). `sumClassSplits` counts days per source.
+Every cost figure names the board days, and **any day that carried sales with
+no split from either source withholds every percentage**: the cost is still
+shown, the ratio is not. A cost over short sales reads high by exactly the
+missing share. Tests use July's real figures.
+**Found on the way:** comparing the two sources for August and September exposed
+1.12, a sync that had been keeping stale board figures for two months. The
+fallback is only sound because that was fixed first.
+**Recurs?** **Every customer**, and especially at onboarding. A new operator's
+history will almost always sit in a different system from their live feed. Any
+figure that sums a field must also count the rows where the field was absent,
+and a sum with absent rows must not be divided.
+
 ---
 
 ## 3. Analysis that misleads

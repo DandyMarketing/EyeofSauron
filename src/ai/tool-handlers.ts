@@ -9,7 +9,7 @@ import { coverageByAccount } from '../lib/bill-coverage.js';
 import { isPayrollAccount } from '../lib/payroll-accounts.js';
 import { fetchAccountMap, resolveAccount, unmappedAccounts } from '../lib/account-map.js';
 import { costRatios, costCaveats } from '../lib/cost-ratios.js';
-import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf, FIGURE_DEFINITIONS } from '../lib/sales.js';
+import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf, sumClassSplits, FIGURE_DEFINITIONS } from '../lib/sales.js';
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
@@ -483,7 +483,7 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
   for (let offset = 0; ; offset += 1000) {
     const { data } = await supabase
       .from('daily_operations')
-      .select('business_date, gross_sales, sales_by_class')
+      .select('business_date, gross_sales, sales_by_class, meal_periods')
       .eq('venue_id', venueId)
       .gte('business_date', coveredStart)
       .lte('business_date', coveredEnd)
@@ -493,14 +493,8 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
     if (data.length < 1000) break;
   }
 
-  let food = 0, bev = 0;
-  for (const o of ops) {
-    const split = classSplitOf(o);
-    food += split.food_sales;
-    bev += split.beverage_sales;
-  }
-
-  const ratios = costRatios(rows as any, { food_sales: food, beverage_sales: bev });
+  const sales = sumClassSplits(ops);
+  const ratios = costRatios(rows as any, sales);
   const caveats = costCaveats(ratios, periods.length);
 
   if (subLines.length > 0 && !input.business_line) {
@@ -526,7 +520,9 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
      */
     periods_measured: periods,
     months: periods.length,
-    sales_basis: 'Revel food and beverage sales, before discounts and excluding service charge. Service charge is neither food nor drink; measuring a cost against a figure carrying it reads about 9% low.',
+    sales_basis: 'Food and beverage sales, before discounts and excluding service charge -- from Revel, or from the Monday board on days Revel did not split. Service charge is neither food nor drink; measuring a cost against a figure carrying it reads about 9% low.',
+    sales_days_by_source: { revel: sales.days.revel, monday_board: sales.days.monday_board, no_split: sales.days.none },
+    ...(sales.unsplit_dates.length > 0 ? { days_without_a_split: sales.unsplit_dates } : {}),
     cost_basis: 'Xero profit and loss, cost of sales section, section totals excluded.',
     food_cost: ratios.food,
     beverage_cost: ratios.beverage,
@@ -1549,7 +1545,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
   for (const venue of targetVenues) {
     let query = supabase
       .from('daily_operations')
-      .select('gross_sales, net_sales, item_discounts, order_discounts, tax_total, tips_total, net_to_account_for, total_transactions, total_guests, avg_check, avg_sale_per_guest, sales_by_class')
+      .select('gross_sales, net_sales, item_discounts, order_discounts, tax_total, tips_total, net_to_account_for, total_transactions, total_guests, avg_check, avg_sale_per_guest, sales_by_class, meal_periods')
       .eq('venue_id', venue.id);
 
     query = applyDateFilter(query, dateFilter);

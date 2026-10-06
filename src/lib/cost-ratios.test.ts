@@ -220,3 +220,38 @@ describe('a ratio that is not a ratio', () => {
     assert.ok(!costCaveats(r, 1).some(x => /not a cost ratio a kitchen produces/.test(x)));
   });
 });
+
+/**
+ * Neon Pigeon, July 2026, as it was reported: a full month of Xero food cost
+ * over three days of Revel food sales, 301%. On the whole month's sales, from
+ * the Monday board for the days Revel did not split, it is about 32%.
+ */
+describe('cost over short sales', () => {
+  const cogs: PLRow[] = [{
+    account_name: 'COGS - Food', canonical_account: 'COGS - Food', business_line: 'main',
+    section: 'Cost of Sales', amount: 22563, is_summary: false,
+  }];
+
+  test('the reported 301% was three days of sales', () => {
+    assert.equal(costRatios(cogs, { food_sales: 7496, beverage_sales: 0 }).food.pct, 301);
+  });
+
+  test('on the whole month, it is a kitchen figure', () => {
+    const r = costRatios(cogs, { food_sales: 69486, beverage_sales: 30000, days: { monday_board: 28, none: 0 } });
+    assert.equal(r.food.pct, 32.47);
+    assert.equal(r.board_days, 28);
+    assert.ok(costCaveats(r, 1).some(c => /Monday board/.test(c)), 'the board days are named');
+  });
+
+  test('any day with sales and no split withholds every percentage', () => {
+    const r = costRatios(cogs, { food_sales: 60000, beverage_sales: 25000, days: { monday_board: 0, none: 2 } });
+    assert.equal(r.food.pct, null);
+    assert.equal(r.beverage.pct, null);
+    assert.equal(r.combined.pct, null);
+    assert.equal(r.food.cogs, 22563, 'the cost is still real and still reported');
+    const caveats = costCaveats(r, 1);
+    assert.ok(caveats.some(c => /WITHHELD/.test(c)));
+    assert.ok(!caveats.some(c => /has no sales in the period/.test(c)),
+      'a withheld ratio must not be explained as a venue with no sales');
+  });
+});

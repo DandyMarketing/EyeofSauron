@@ -100,7 +100,7 @@ function side(cogs: number, sales: number, coverage: number | null): WeeklyCogsS
 export function weeklyCogs(
   lines: BillLine[],
   names: AccountNames,
-  sales: { food_sales: number; beverage_sales: number },
+  sales: { food_sales: number; beverage_sales: number; days?: { monday_board: number; none: number } },
   coverage: { food: number | null; beverage: number | null },
 ): WeeklyCogs {
   let food = 0, bev = 0, unknown = 0;
@@ -145,6 +145,23 @@ export function weeklyCogs(
         'Do not quote this percentage — use the monthly ledger figure.',
       );
     }
+  }
+
+  // Short sales make every percentage read high by the missing share -- the
+  // 301% defect. Withheld, never shown, and the reason given.
+  const short = sales.days?.none ?? 0;
+  if (short > 0) {
+    out.food.pct = null;
+    out.beverage.pct = null;
+    out.caveats.push(
+      `${short} day(s) in this window carried sales with no food/drink split from Revel or the Monday board, ` +
+      'so the sales side is short and the percentages are withheld.',
+    );
+  }
+  if ((sales.days?.monday_board ?? 0) > 0) {
+    out.caveats.push(
+      `Food and drink sales for ${sales.days!.monday_board} day(s) come from the Monday board rather than Revel.`,
+    );
   }
 
   if (out.unknown_account_total !== 0) {

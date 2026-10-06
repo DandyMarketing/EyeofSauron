@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  netSalesOf, serviceChargeOf, totalDiscountsOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf,
+  netSalesOf, serviceChargeOf, totalDiscountsOf, foodAndBevSalesOf, grossSalesOf, salesFiguresOf, classSplitOf, sumClassSplits,
 } from './sales.js';
 
 /**
@@ -368,4 +368,73 @@ test('both sales tools return the split from the shared splitter', () => {
     (src.match(/classSplitOf\(/g) ?? []).length >= 4,
     'classSplitOf has lost call sites — query_sales (both paths), its totals and compare_venues all need it',
   );
+});
+
+/**
+ * The 301% defect. Days before Revel's daily files carry the food/drink split
+ * only on the Monday board, and the splitter read Revel alone -- so those days
+ * counted as no food and no drink, silently, because the row existed.
+ */
+describe('a day without a Revel split falls back to the Monday board', () => {
+  const board = {
+    lunch: { food_sales: 1581, bev_sales: 275, covers: 43 },
+    dinner: { food_sales: 4865, bev_sales: 1714.69, covers: 90 },
+  };
+
+  test('a board-only day is read from the board, and says so', () => {
+    const s = classSplitOf({ sales_by_class: null, meal_periods: board });
+    assert.equal(s.food_sales, 6446);
+    assert.equal(s.beverage_sales, 1989.69);
+    assert.equal(s.split_basis, 'monday_board');
+  });
+
+  test('Revel wins wherever it has a split', () => {
+    const s = classSplitOf({
+      sales_by_class: [{ class: 'Food', grossSales: 6400 }, { class: 'Beverage', grossSales: 2000 }],
+      meal_periods: board,
+    });
+    assert.equal(s.food_sales, 6400);
+    assert.equal(s.split_basis, 'revel');
+  });
+
+  test('an empty Revel array is not a split', () => {
+    assert.equal(classSplitOf({ sales_by_class: [], meal_periods: board }).split_basis, 'monday_board');
+  });
+
+  test('neither source is "none", not zero sales from a source', () => {
+    assert.equal(classSplitOf({}).split_basis, 'none');
+  });
+
+  // Neon Pigeon, July 2026: three Revel days and twenty-eight board-only days.
+  // Revel's three days were the ENTIRE denominator before this fix.
+  test('a month that is part Revel, part board sums both and counts each', () => {
+    const rows = [
+      ...Array.from({ length: 28 }, (_, i) => ({
+        business_date: `2026-07-${String(i + 1).padStart(2, '0')}`, gross_sales: 3000,
+        sales_by_class: null, meal_periods: { dinner: { food_sales: 2200, bev_sales: 800 } },
+      })),
+      ...[29, 30, 31].map(d => ({
+        business_date: `2026-07-${d}`, gross_sales: 3500,
+        sales_by_class: [{ class: 'Food', grossSales: 2498.67 }, { class: 'Beverage', grossSales: 1001.33 }],
+        meal_periods: null,
+      })),
+    ];
+    const t = sumClassSplits(rows);
+    assert.deepEqual(t.days, { revel: 3, monday_board: 28, none: 0 });
+    assert.equal(t.food_sales, 28 * 2200 + 3 * 2498.67);
+    assert.deepEqual(t.unsplit_dates, []);
+  });
+
+  test('a day with sales and no split from either source is counted, with its date', () => {
+    const t = sumClassSplits([{ business_date: '2026-07-14', gross_sales: 4200, sales_by_class: null, meal_periods: null }]);
+    assert.equal(t.days.none, 1);
+    assert.deepEqual(t.unsplit_dates, ['2026-07-14']);
+    assert.equal(t.food_sales, 0);
+  });
+
+  test('an empty row with no sales is not a hole', () => {
+    // A closed day's row must not withhold a whole month's cost percentage.
+    const t = sumClassSplits([{ business_date: '2026-07-13', gross_sales: 0, sales_by_class: null, meal_periods: null }]);
+    assert.equal(t.days.none, 0);
+  });
 });

@@ -67,6 +67,14 @@ export interface CostRatios {
    */
   unclassified: Array<{ account: string; amount: number }>;
   unclassified_total: number;
+  /** Days whose food/drink split came from the Monday board rather than Revel. */
+  board_days: number;
+  /**
+   * Days that carried sales with no split from either source. Any at all and
+   * every percentage is null: a cost over short sales reads high by exactly the
+   * missing share, which is how Neon Pigeon's July read 301%.
+   */
+  short_sales_days: number;
 }
 
 /**
@@ -124,7 +132,10 @@ function ratio(cogs: number, sales: number, accounts: string[]): CostRatio {
   };
 }
 
-export function costRatios(rows: PLRow[], sales: SalesSplit): CostRatios {
+export function costRatios(
+  rows: PLRow[],
+  sales: SalesSplit & { days?: { monday_board: number; none: number } },
+): CostRatios {
   /**
    * SUMMARY ROWS ARE EXCLUDED. "Total Cost of Sales" sits in the same section
    * as the lines beneath it, and including it doubles every figure. The
@@ -153,14 +164,23 @@ export function costRatios(rows: PLRow[], sales: SalesSplit): CostRatios {
     }
   }
 
-  return {
+  const short = sales.days?.none ?? 0;
+  const out: CostRatios = {
     food: ratio(foodCogs, sales.food_sales, foodAccounts.sort()),
     beverage: ratio(bevCogs, sales.beverage_sales, bevAccounts.sort()),
     combined: ratio(foodCogs + bevCogs, sales.food_sales + sales.beverage_sales,
                     [...foodAccounts, ...bevAccounts].sort()),
     unclassified: unclassified.sort((a, b) => b.amount - a.amount),
     unclassified_total: round2(unclassified.reduce((n, u) => n + u.amount, 0)),
+    board_days: sales.days?.monday_board ?? 0,
+    short_sales_days: short,
   };
+  if (short > 0) {
+    out.food.pct = null;
+    out.beverage.pct = null;
+    out.combined.pct = null;
+  }
+  return out;
 }
 
 /**
@@ -188,7 +208,7 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
     );
   }
 
-  if (r.food.pct === null || r.beverage.pct === null) {
+  if (r.short_sales_days === 0 && (r.food.pct === null || r.beverage.pct === null)) {
     out.push('One of the two has no sales in the period, so its percentage is unavailable rather than zero.');
   }
 
@@ -220,6 +240,22 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
         'before reading this as a cost problem.',
       );
     }
+  }
+
+  if (r.short_sales_days > 0) {
+    out.push(
+      `${r.short_sales_days} day(s) in this period carried sales with no food/drink split from either Revel or the ` +
+      'Monday board, so the sales side is short and every percentage is WITHHELD rather than shown high. ' +
+      'The cost figures are real; the ratios are not computable until those days are filled.',
+    );
+  }
+
+  if (r.board_days > 0) {
+    out.push(
+      `Food and drink sales for ${r.board_days} day(s) come from the Monday board, which the venue fills in by hand ` +
+      'each night, and the rest from Revel. The two agree to the cent on food plus drink; before Revel\'s daily ' +
+      'files began in late July 2026 the board is the only food/drink split there is.',
+    );
   }
 
   if (monthsCovered > 1) {

@@ -201,6 +201,16 @@ export interface SalesFigures {
  * saying why. Same rule as the payment methods one file over: the sum is the
  * check on the list.
  */
+/**
+ * Where a day's food/drink split came from.
+ *
+ * `revel` is the POS's own class split. `monday_board` is the food and drink
+ * figures the venue types into the Monday board each night, which is the only
+ * split that exists before Revel's daily files began (late July 2026). `none`
+ * means the day carries sales and neither source split them.
+ */
+export type SplitBasis = 'revel' | 'monday_board' | 'none';
+
 export interface ClassSplit {
   food_sales: number;
   beverage_sales: number;
@@ -210,12 +220,35 @@ export interface ClassSplit {
   /** Present only when a class other than Food or Beverage carried sales. */
   other_sales?: number;
   other_classes?: string[];
+  split_basis: SplitBasis;
 }
 
 interface ClassRow { class?: string; grossSales?: number | string | null }
 
-export function classSplitOf(row: { sales_by_class?: unknown }): ClassSplit {
+/**
+ * THE MONDAY BOARD IS THE FALLBACK, NOT AN ALTERNATIVE.
+ *
+ * This read `sales_by_class` and nothing else, so every day that predates
+ * Revel's daily files -- January to late July 2026, at every venue -- counted
+ * as NO food and NO drink. Silently: the row existed, so nothing said the
+ * sales were missing. A month with three Revel days then divided a full month
+ * of Xero food cost by three days of food sales, and Neon Pigeon's July came
+ * out at 301%. On the full month's sales the same cost is about 32%.
+ *
+ * Revel wins wherever it has a split. The board is used only on a day Revel did
+ * not split, and the day says so in `split_basis`. The two agree to the cent on
+ * food plus drink (`reconcileMondayVsRevel`, zero tolerance), and after the
+ * Monday sync fix of 6 Oct 2026 (BUILD_LOG 1.12) they agreed on the food/drink
+ * split itself on all but two Fat Prince days in August and September.
+ */
+export function classSplitOf(row: { sales_by_class?: unknown; meal_periods?: unknown }): ClassSplit {
   const rows: ClassRow[] = Array.isArray(row.sales_by_class) ? row.sales_by_class : [];
+  const hasRevelSplit = rows.some(r => (r.class ?? '').trim().toLowerCase() !== 'total');
+
+  if (!hasRevelSplit) {
+    const board = mondayBoardSplit(row.meal_periods);
+    if (board) return board;
+  }
 
   let food = 0, bev = 0, other = 0;
   const otherClasses: string[] = [];
@@ -241,6 +274,7 @@ export function classSplitOf(row: { sales_by_class?: unknown }): ClassSplit {
     beverage_sales: round2(bev),
     food_pct: base > 0 ? round2(food / base * 100) : null,
     beverage_pct: base > 0 ? round2(bev / base * 100) : null,
+    split_basis: hasRevelSplit ? 'revel' : 'none',
   };
 
   if (other !== 0 || otherClasses.length > 0) {
@@ -248,6 +282,73 @@ export function classSplitOf(row: { sales_by_class?: unknown }): ClassSplit {
     split.other_classes = otherClasses;
   }
   return split;
+}
+
+/** Food and drink from the board's meal periods, or null if it has none. */
+function mondayBoardSplit(mealPeriods: unknown): ClassSplit | null {
+  if (!mealPeriods || typeof mealPeriods !== 'object' || Array.isArray(mealPeriods)) return null;
+
+  let food = 0, bev = 0, any = false;
+  for (const p of Object.values(mealPeriods as Record<string, any>)) {
+    if (!p || typeof p !== 'object') continue;
+    if (p.food_sales != null || p.bev_sales != null) any = true;
+    food += n(p.food_sales);
+    bev += n(p.bev_sales);
+  }
+  if (!any) return null;
+
+  const base = round2(food + bev);
+  return {
+    food_sales: round2(food),
+    beverage_sales: round2(bev),
+    food_pct: base > 0 ? round2(food / base * 100) : null,
+    beverage_pct: base > 0 ? round2(bev / base * 100) : null,
+    split_basis: 'monday_board',
+  };
+}
+
+export interface SplitTotals {
+  food_sales: number;
+  beverage_sales: number;
+  /** How many days each source supplied. */
+  days: Record<SplitBasis, number>;
+  /** Days that carried sales and no split from either source. */
+  unsplit_dates: string[];
+}
+
+/**
+ * Food and drink summed over a run of days, with a count of where each came from.
+ *
+ * The count is the point. A total that is part Revel and part board is fine and
+ * must say so; a total missing days is short, and a cost measured against it
+ * reads high by exactly the missing share -- which is how a 301% got onto a
+ * chart. A day counts as unsplit only if it carried SALES, so a closed day's
+ * empty row is not mistaken for a hole.
+ */
+export function sumClassSplits(
+  rows: Array<{ business_date?: string; gross_sales?: unknown; sales_by_class?: unknown; meal_periods?: unknown }>,
+): SplitTotals {
+  const out: SplitTotals = {
+    food_sales: 0, beverage_sales: 0,
+    days: { revel: 0, monday_board: 0, none: 0 },
+    unsplit_dates: [],
+  };
+  for (const r of rows) {
+    const s = classSplitOf(r);
+    if (s.split_basis === 'none') {
+      if (!n(r.gross_sales as number | string | null | undefined)) continue;
+      out.days.none++;
+      if (r.business_date) out.unsplit_dates.push(String(r.business_date));
+      continue;
+    }
+    out.days[s.split_basis]++;
+    out.food_sales += s.food_sales;
+    out.beverage_sales += s.beverage_sales;
+  }
+  out.food_sales = round2(out.food_sales);
+  out.beverage_sales = round2(out.beverage_sales);
+  out.unsplit_dates.sort();
+  return out;
 }
 
 /**

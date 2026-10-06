@@ -21,7 +21,7 @@
  */
 
 import { supabaseAdmin } from '../auth/session.js';
-import { salesFiguresOf, classSplitOf, foodAndBevSalesOf } from './sales.js';
+import { salesFiguresOf, classSplitOf, sumClassSplits, foodAndBevSalesOf } from './sales.js';
 import { getCovers, getDayMoments } from './covers.js';
 import { serviceDays, serviceNote, syncAge, sgtClock, sgtToday } from './service-day.js';
 import { HourlyCache, settleWithin, type CacheState } from './hourly-cache.js';
@@ -68,6 +68,7 @@ interface SalesRowFromDb {
   order_discounts: unknown;
   total_transactions: unknown;
   sales_by_class: unknown;
+  meal_periods: unknown;
 }
 
 /**
@@ -85,7 +86,7 @@ async function readOperations(venueIds: string[], start: string, end: string): P
   for (let offset = 0; ; offset += PAGE) {
     const { data, error } = await supabaseAdmin
       .from('daily_operations')
-      .select('venue_id, business_date, gross_sales, net_sales, item_discounts, order_discounts, total_transactions, sales_by_class')
+      .select('venue_id, business_date, gross_sales, net_sales, item_discounts, order_discounts, total_transactions, sales_by_class, meal_periods')
       .in('venue_id', venueIds)
       .gte('business_date', start)
       .lte('business_date', end)
@@ -836,7 +837,7 @@ async function buildCosts(
           .gte('period_start', month.start)
           .lte('period_end', month.end),
         supabaseAdmin.from('daily_operations')
-          .select('gross_sales, sales_by_class')
+          .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', month.start)
           .lte('business_date', month.end),
@@ -848,14 +849,7 @@ async function buildCosts(
         return { ...r, amount: Number(r.amount), canonical_account, business_line };
       });
 
-      let food = 0, bev = 0;
-      for (const o of ops ?? []) {
-        const split = classSplitOf(o as any);
-        food += split.food_sales;
-        bev += split.beverage_sales;
-      }
-
-      return { slug: v.slug, rows, sales: { food_sales: food, beverage_sales: bev } };
+      return { slug: v.slug, rows, sales: sumClassSplits(ops ?? []) };
     }));
 
     for (const v of perVenue) {
@@ -873,8 +867,15 @@ async function buildCosts(
        */
       const allRows = perVenue.flatMap(v => v.rows);
       const allSales = perVenue.reduce(
-        (t, v) => ({ food_sales: t.food_sales + v.sales.food_sales, beverage_sales: t.beverage_sales + v.sales.beverage_sales }),
-        { food_sales: 0, beverage_sales: 0 });
+        (t, v) => ({
+          food_sales: t.food_sales + v.sales.food_sales,
+          beverage_sales: t.beverage_sales + v.sales.beverage_sales,
+          days: {
+            monday_board: t.days.monday_board + v.sales.days.monday_board,
+            none: t.days.none + v.sales.days.none,
+          },
+        }),
+        { food_sales: 0, beverage_sales: 0, days: { monday_board: 0, none: 0 } });
       const ratios = costRatios(allRows, allSales);
       out.group = { month, ratios, caveats: costCaveats(ratios, 1), available: allRows.length > 0 };
     }
@@ -932,7 +933,7 @@ async function buildPeriodCosts(
           .gte('supplier_bills.bill_date', month.start)
           .lte('supplier_bills.bill_date', month.end),
         supabaseAdmin.from('daily_operations')
-          .select('gross_sales, sales_by_class')
+          .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', start)
           .lte('business_date', end),
@@ -962,17 +963,11 @@ async function buildPeriodCosts(
       const toLines = (rows: any[]): BillLine[] =>
         rows.map(r => ({ account_id: r.account_id, line_amount: Number(r.line_amount), bill_date: '' }));
 
-      let food = 0, bev = 0;
-      for (const o of ops ?? []) {
-        const split = classSplitOf(o as any);
-        food += split.food_sales;
-        bev += split.beverage_sales;
-      }
-
+      const sales = sumClassSplits(ops ?? []);
       out[v.slug] = weeklyCogs(
         toLines(windowLines),
         names,
-        { food_sales: food, beverage_sales: bev },
+        sales,
         coverageFor(toLines(monthLines ?? []), names, ledger),
       );
     }));
@@ -1019,7 +1014,7 @@ async function buildCostTrend(
           .gte('period_start', spanStart)
           .lte('period_start', spanEnd),
         supabaseAdmin.from('daily_operations')
-          .select('business_date, gross_sales, sales_by_class')
+          .select('business_date, gross_sales, sales_by_class, meal_periods')
           .eq('venue_id', v.id)
           .gte('business_date', spanStart)
           .lte('business_date', spanEnd),

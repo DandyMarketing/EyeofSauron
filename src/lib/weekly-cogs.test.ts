@@ -164,3 +164,19 @@ test('the low-coverage warning explains the account it is printed under', () => 
   assert.ok(!/drink/i.test(food), `the food warning talks about drink: ${food}`);
   assert.match(food, /paid by card or bank transfer/);
 });
+
+describe('short sales in the window', () => {
+  test('a day with sales and no split withholds the weekly percentages', () => {
+    const out = weeklyCogs([], new Map(), { food_sales: 9000, beverage_sales: 3000, days: { monday_board: 0, none: 1 } },
+      { food: 95, beverage: 90 });
+    assert.equal(out.food.pct, null);
+    assert.equal(out.beverage.pct, null);
+    assert.ok(out.caveats.some(c => /withheld/.test(c)));
+  });
+
+  test('board days are named, not hidden', () => {
+    const out = weeklyCogs([], new Map(), { food_sales: 9000, beverage_sales: 3000, days: { monday_board: 2, none: 0 } },
+      { food: 95, beverage: 90 });
+    assert.ok(out.caveats.some(c => /Monday board/.test(c)));
+  });
+});
