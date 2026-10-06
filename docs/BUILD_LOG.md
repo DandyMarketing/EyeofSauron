@@ -312,6 +312,31 @@ code-block version with the reason attached.
 **Recurs?** **Every customer.** An instruction that describes the goal without
 naming the form leaves the form to the model.
 
+### 1.11 A report Gmail filed as spam, so n8n never saw it
+**Symptom.** Fat Prince's Operations report for Monday 5 Oct 2026 never loaded.
+System Health showed a data gap and nothing in the ingestion log: no failure,
+because Sauron was never sent anything to fail on.
+**Root cause.** Revel sends each report to two addresses, Khai@ and Reports@.
+In Reports@, the mailbox n8n reads, Gmail filed the 3:00 am email as **Spam**.
+n8n reads the inbox, so that night's run carried 8 of the 9 files, and the
+missing one was exactly this one. In Khai@ the same email sat in the inbox with
+the file attached.
+**Why it was hard to see.** Every Revel email is near-identical ("See report(s)
+in attachment" plus a file), so the spam filter judges each one on its own and
+can catch any of them on any night. It looks random because it is. Two wrong
+leads cost time on the way: Gmail threading (every night threads the same way
+and the other nights loaded) and "Revel failed to send" (it had sent; the copy
+had been read in the other mailbox).
+**Fix.** "Not spam" on the email, and a Gmail filter in Reports@:
+`from:noreply@revelsystems.com` → **Never send it to Spam**. Re-delivering the
+file is harmless, because the operations report upserts on
+`(venue_id, business_date)`.
+**Next time a file is missing with no error logged**, check in this order: the
+n8n run's item count for that night (it should be 9: three venues × three
+reports), then **Spam in the mailbox n8n actually reads**, then the sender.
+**Recurs?** **Every customer** whose reports arrive by email. The "never send
+to Spam" filter belongs in onboarding, next to the venue-key mapping.
+
 ---
 
 ## 2. Data that is valid but wrong
@@ -1241,7 +1266,8 @@ Ordered by how much damage the absence causes.
 3. **A customer onboarding checklist.** Every *per-customer* item above:
    enumerate the actual shift names from their data, map venue keys, confirm
    trading days per venue, verify credential length after paste (see below),
-   confirm which feeds are live.
+   confirm which feeds are live, and add a "never send to Spam" filter for the
+   report sender in the mailbox n8n reads (1.11).
 4. ~~**A test that every table in `public` has RLS enabled.**~~ **Built 3 Sep
    2026** — migration 035, `npm run audit:rls`, and a card on the admin console.
    Section 4.4 has the detail. It stays on this list as an onboarding STEP
