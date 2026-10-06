@@ -538,6 +538,9 @@ async function queryFoodBeverageCost(input: Record<string, any>): Promise<string
     beverage_cost: ratios.beverage,
     combined_cost: ratios.combined,
     sushi_cost: ratios.sushi,
+    // Discounts the ledger files under cost of sales. Never food or drink cost;
+    // quote them as a % of sales, as the Monday weekly report does.
+    discounts_not_in_cost: { amount: ratios.discounts_excluded, pct_of_food_and_beverage_sales: ratios.discounts_pct },
     unclassified_cost_of_sales: ratios.unclassified,
     unclassified_total: ratios.unclassified_total,
     business_line: input.business_line ?? 'all',

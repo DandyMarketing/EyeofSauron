@@ -1224,13 +1224,21 @@ function costPanel(payload, v) {
     (x.pct === null ? money(x.cogs) + ' — no sales' : money(x.cogs) + ' — ' + pct(x.pct)) +
     '</td></tr>';
 
+  // Discounts on their own line, as Monday's weekly report has them: the ledger
+  // files them under cost of sales, and they are not food or drink cost.
+  const discountRow = r.discounts_excluded
+    ? '<tr><td>Discounts</td><td>' + money(r.discounts_excluded) +
+      (r.discounts_pct === null || r.discounts_pct === undefined ? '' : ' \u2014 ' + pct(r.discounts_pct) + ' of sales') +
+      ' <span class="cov">not in cost</span></td></tr>'
+    : '';
+
   const unmapped = r.unclassified.length
     ? '<tr><td>Not food or beverage</td><td>' + money(r.unclassified_total) + ' — excluded</td></tr>'
     : '';
 
   return '<div class="panel"><h2>Cost of sales</h2>' +
     '<table><tbody>' +
-      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + unmapped +
+      row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + discountRow + unmapped +
     '</tbody></table>' +
     (r.unclassified.length
       ? '<p class="figure-note">Excluded from both percentages: ' +

@@ -14,7 +14,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCogs, costRatios, costCaveats, costBucket, isSushiSales, type PLRow } from './cost-ratios.js';
+import { classifyCogs, costRatios, costCaveats, costBucket, isSushiSales, isDiscountAccount, type PLRow } from './cost-ratios.js';
 
 const line = (canonical: string, amount: number, over: Partial<PLRow> = {}): PLRow => ({
   account_name: canonical,
@@ -348,5 +348,36 @@ describe('sushi is reported on its own and kept out of food cost', () => {
     assert.equal(isSushiSales({ section: 'Less Cost of Sales', account_name: 'COGS - Sushi' }), false);
     assert.equal(isSushiSales({ section: 'Less Operating Expenses', account_name: 'Transportation - Sushi' }), false);
     assert.equal(isSushiSales({ section: 'Income', account_name: 'Sales - Food' }), false);
+  });
+});
+
+/**
+ * Discounts posted to cost-of-sales accounts. The daily sales invoices code them
+ * to "COGS - Discounts - Food" and "COGS - Discounts - Beverages", which classify
+ * as food and drink by name. Khai, 6 Oct 2026: the Monday COGS board leaves
+ * discounts out and reports them on their own card.
+ */
+describe('discounts are not food or drink cost', () => {
+  test('a discount account in cost of sales has no bucket', () => {
+    assert.equal(costBucket({ canonical: 'COGS - Discounts - Food', section: 'Less Cost of Sales' }), null);
+    assert.equal(costBucket({ canonical: 'COGS - Discounts - Beverages', section: 'Less Cost of Sales' }), null);
+    assert.equal(isDiscountAccount({ canonical: 'COGS - Food', raw: 'COGS - Discount - Food' }), true);
+    assert.equal(isDiscountAccount({ canonical: 'COGS - Food' }), false);
+  });
+
+  test('the monthly figure leaves them out, and reports them on their own line', () => {
+    const r = costRatios([
+      line('COGS - Food', 9000),
+      line('COGS - Discounts - Food', 3000),
+      line('COGS - Alcohol', 4000),
+      line('COGS - Discounts - Beverages', 1000),
+    ], { food_sales: 40000, beverage_sales: 40000 });
+    assert.equal(r.food.cogs, 9000);
+    assert.equal(r.food.pct, 22.5);
+    assert.equal(r.beverage.cogs, 4000);
+    assert.equal(r.discounts_excluded, 4000);
+    assert.equal(r.discounts_pct, 5);
+    assert.deepEqual(r.unclassified, [], 'not "unclassified" either: they are known and deliberately excluded');
+    assert.ok(costCaveats(r, 1).some(c => /\$4000\.00 of discounts/.test(c)));
   });
 });

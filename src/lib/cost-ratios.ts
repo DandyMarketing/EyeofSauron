@@ -68,6 +68,14 @@ export interface CostRatios {
   unclassified: Array<{ account: string; amount: number }>;
   unclassified_total: number;
   /**
+   * Discounts posted to cost-of-sales accounts, NOT counted as cost. See
+   * `isDiscountAccount`. Reported so the ledger's cost-of-sales total can still
+   * be reconciled with what is shown.
+   */
+  discounts_excluded: number;
+  /** Those discounts as a % of food & beverage sales -- Monday's "Discount %" card. */
+  discounts_pct: number | null;
+  /**
    * Sushi, reported on its own and kept out of every food and beverage figure.
    *
    * Its SALES come from the ledger (`Sales - Sushi`), because sushi is sold
@@ -158,6 +166,7 @@ export function costBucket(a: {
   business_line?: string | null;
 }): CostBucket | null {
   if (!/cost of sales/i.test(a.section ?? '')) return null;
+  if (isDiscountAccount(a)) return null;
 
   const sushi = a.business_line === 'sushi'
     || /\bsushi\b/i.test(a.canonical)
@@ -165,6 +174,21 @@ export function costBucket(a: {
   if (sushi) return 'sushi';
 
   return classifyCogs(a.canonical);
+}
+
+/**
+ * A discount account that the ledger files under cost of sales.
+ *
+ * The daily sales are posted to Xero as invoices, and their discount lines are
+ * coded to `COGS - Discounts - Food` and `COGS - Discounts - Beverages` -- names
+ * that classify as food and drink, so discounts were being counted as food and
+ * beverage COST: about 7 points on Neon Pigeon's September food cost. A discount
+ * is money not collected, not stock bought, and the dashboard already shows it
+ * as a share of sales. Khai, 6 Oct 2026: the Monday COGS board "doesn't include
+ * discounts", so neither does this.
+ */
+export function isDiscountAccount(a: { canonical: string; raw?: string | null }): boolean {
+  return /\bdiscounts?\b/i.test(a.canonical) || /\bdiscounts?\b/i.test(a.raw ?? '');
 }
 
 /**
@@ -204,7 +228,7 @@ export function costRatios(
    */
   const lines = rows.filter(r => !r.is_summary);
 
-  let foodCogs = 0, bevCogs = 0, sushiCogs = 0, sushiSales = 0;
+  let foodCogs = 0, bevCogs = 0, sushiCogs = 0, sushiSales = 0, discounts = 0;
   const foodAccounts: string[] = [], bevAccounts: string[] = [], sushiAccounts: string[] = [];
   const sushiSalesAccounts: string[] = [];
   const unclassified: Array<{ account: string; amount: number }> = [];
@@ -228,6 +252,8 @@ export function costRatios(
     } else if (!/cost of sales/i.test(r.section)) {
       // Operating expenses, other income: not a cost of sales and not shown here.
       continue;
+    } else if (isDiscountAccount({ canonical: name, raw: r.account_name })) {
+      discounts += Number(r.amount);
     } else if (kind === 'food') {
       foodCogs += Number(r.amount);
       if (!foodAccounts.includes(name)) foodAccounts.push(name);
@@ -249,6 +275,9 @@ export function costRatios(
                     [...foodAccounts, ...bevAccounts].sort()),
     unclassified: unclassified.sort((a, b) => b.amount - a.amount),
     unclassified_total: round2(unclassified.reduce((n, u) => n + u.amount, 0)),
+    discounts_excluded: round2(discounts),
+    discounts_pct: sales.food_sales + sales.beverage_sales > 0 && discounts !== 0
+      ? round2(discounts / (sales.food_sales + sales.beverage_sales) * 100) : null,
     sushi: {
       cogs: round2(sushiCogs),
       accounts: sushiAccounts.sort(),
@@ -264,6 +293,7 @@ export function costRatios(
     out.food.pct = null;
     out.beverage.pct = null;
     out.combined.pct = null;
+    out.discounts_pct = null;
   }
   return out;
 }
@@ -332,6 +362,13 @@ export function costCaveats(r: CostRatios, monthsCovered: number): string[] {
       `${r.short_sales_days} day(s) in this period carried sales with no food/drink split from either Revel or the ` +
       'Monday board, so the sales side is short and every percentage is WITHHELD rather than shown high. ' +
       'The cost figures are real; the ratios are not computable until those days are filled.',
+    );
+  }
+
+  if (r.discounts_excluded !== 0) {
+    out.push(
+      `$${r.discounts_excluded.toFixed(2)} of discounts sits in cost-of-sales accounts in the ledger and is NOT counted ` +
+      'as food or beverage cost: a discount is sales not collected, not stock bought, and the Monday COGS board leaves it out too.',
     );
   }
 
