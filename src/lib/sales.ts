@@ -369,7 +369,7 @@ export function sumClassSplits(
  * Phrased for an operator to read verbatim, not for a model to paraphrase.
  */
 export const FIGURE_DEFINITIONS = {
-  gross_sales: 'Food + beverage, before discounts. The service charge is NOT in here',
+  gross_sales: 'Food + beverage, before discounts. The service charge is NOT in here. Monday\'s weekly report labels food + beverage + service charge (+ delivery) as "Gross Sales", so it reads about 10% higher; if someone quotes a Monday gross, say so rather than calling either figure wrong. Net sales agrees between the two',
   food_bev_sales: 'The same figure as gross sales. Named separately because every cost percentage and spend per head divides by it',
   net_sales: 'Gross less discounts, plus the 10% service charge — so it is larger than gross. What "sales" means when nobody says which',
   service_charge: 'The 10% charged on the discounted amount. Inside net sales, NOT inside gross — never add it to net',

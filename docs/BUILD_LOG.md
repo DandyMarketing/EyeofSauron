@@ -297,6 +297,17 @@ path spread the raw row — so asking about a day and asking about a one-day ran
 returned different figures for the same question. `salesFiguresOf()` builds the
 block once and both paths spread it. That part was real and is unaffected.
 
+**Settled again, 6 Oct 2026, the other way round.** Khai compared the dashboard
+with Monday's NP Weekly Report and the gross figures differed. The cause is
+Monday's own formula: `Gross Sales Exc. Sushi = Food + Bev + Delivery + Service
+Charge`. For 28 Sep – 4 Oct that is $17,286 + $16,312 + $0 + $3,204.98 =
+$36,803, against Sauron's $33,598. Net agreed to the dollar ($35,255). Khai's
+decision: **keep gross as food + beverage** and say on the dashboard and in
+`FIGURE_DEFINITIONS` that Monday's weekly report includes service charge. So
+the daily board's food and bev columns, which Revel reconciles against, follow
+the house definition, and the weekly report's "Gross Sales" label does not. A
+reader comparing the two needs to be told, and both places now say it.
+
 ### 1.10 A table drawn with spaces, in a code block
 **Symptom.** The same answer's table arrived as fixed-width ASCII with a row of
 dashes under the header, inside a code block.
