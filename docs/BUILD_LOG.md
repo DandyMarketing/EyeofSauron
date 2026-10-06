@@ -337,6 +337,41 @@ reports), then **Spam in the mailbox n8n actually reads**, then the sender.
 **Recurs?** **Every customer** whose reports arrive by email. The "never send
 to Spam" filter belongs in onboarding, next to the venue-key mapping.
 
+### 1.12 Every correction on the Monday board was skipped, hourly, for two months
+**Symptom.** Neon Pigeon's July food cost read 301%. Chasing it showed that
+months before Revel's daily files carry no food/drink split (a separate
+defect, being fixed next), and comparing the two sources for August and
+September turned up something worse. Fat Prince's food on the Monday board ran
+up to 6% below Revel's, and on 17 Aug Sauron held **$1,744** of food against
+**$6,468** on the board and in Revel. The board was right and matched Revel to
+the cent on all but two days. Sauron was holding an old copy.
+**Root cause.** The sync runs hourly and skips any day whose fingerprint
+matches the stored one. The fingerprint was
+`JSON.stringify(mealPeriods, Object.keys(mealPeriods).sort())`. An array as
+`JSON.stringify`'s second argument is an **allow-list of property names applied
+at every depth**, so the nested figures were filtered out and every day hashed
+as `{"dinner":{},"lunch":{}}`. Whatever the board showed the first time Sauron
+saw a day was kept. A correction only got through if a whole meal period was
+added or removed. Fat Prince enters dinner in stages, so it was hit hardest.
+The same hash drove the "changed after close" alert, so that could never fire
+either.
+**Why it was invisible.** 18 successful runs a day, `status = success`,
+`row_count = 0`. A sync that has nothing to do and one that cannot see changes
+log identically. The figures were plausible, just short, and the only thing
+that exposed them was putting a second source beside them.
+**Fix.** Whether a day changed is now decided by comparing the figures to the
+cent (`figuresChanged`, the same rule the alert uses to describe a change), and
+never by the stored hash. The hash is kept as a record and now covers every
+figure. Open months update on the next run. Closed months (Jan–Aug at the time)
+raise one "changed after close" alert per differing day and are not
+overwritten. That turns the backlog into an audit, to be applied deliberately.
+Tests use Fat Prince's real 16 Sep figures. A structural test fails if a
+decision compares the stored hash again.
+**Recurs?** **Every customer.** Two rules. *A change-detector must be tested
+with a change*: this one was only ever exercised on unchanged data, where a
+detector that sees nothing passes. And *an "unchanged, skipped" count of 100%
+for weeks is a finding*, not a quiet week.
+
 ---
 
 ## 2. Data that is valid but wrong

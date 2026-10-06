@@ -1,7 +1,8 @@
 import '../tests/env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDate, summarisePostLockChange, cleanFinanceNote } from './monday.js';
+import { readFileSync } from 'node:fs';
+import { parseDate, summarisePostLockChange, cleanFinanceNote, hashMealPeriods, figuresChanged } from './monday.js';
 
 /**
  * BUILD_LOG 2.1. A Monday.com item was literally named "2925-12-30 Tuesday".
@@ -169,5 +170,55 @@ describe('summarisePostLockChange', () => {
     assert.deepEqual(summarisePostLockChange(null, null), []);
     assert.deepEqual(summarisePostLockChange(undefined, undefined), []);
     assert.equal(summarisePostLockChange(null, locked).length, 4);
+  });
+});
+
+/**
+ * BUILD_LOG 1.12. The hourly sync skipped every correction made on the board
+ * after it first saw a day, because the fingerprint it compared covered the
+ * period NAMES and none of the figures. These are Fat Prince's real 16 Sep
+ * 2026 figures: what Sauron stored, and what the board said three weeks later.
+ */
+describe('a correction on the board reaches the warehouse', () => {
+  const full = { covers: 0, discounts: 0, service_charge: 0, reservations: 0, cancellations: 0, reductions: 0, walk_ins: 0 };
+  const stored = {
+    lunch: { ...full, food_sales: 1581, bev_sales: 275 },
+    dinner: { ...full, food_sales: 3410, bev_sales: 967 },
+  };
+  const board = {
+    lunch: { ...full, food_sales: 1581, bev_sales: 275 },
+    dinner: { ...full, food_sales: 4865, bev_sales: 1714.69 },
+  };
+
+  test('a changed figure changes the fingerprint', () => {
+    assert.notEqual(hashMealPeriods(stored), hashMealPeriods(board));
+  });
+
+  test('the fingerprint does not depend on key order', () => {
+    const reordered = { dinner: { ...board.dinner }, lunch: { bev_sales: 275, food_sales: 1581, ...full } };
+    assert.equal(hashMealPeriods(reordered), hashMealPeriods(board));
+  });
+
+  test('a changed figure is a change', () => {
+    assert.equal(figuresChanged(stored, board), true);
+  });
+
+  test('an untouched day is not a change, so it is not rewritten', () => {
+    assert.equal(figuresChanged(board, structuredClone(board)), false);
+  });
+
+  test('a day never stored before is a change', () => {
+    assert.equal(figuresChanged(null, board), true);
+  });
+
+  test('the sync decides on the figures, never on the stored hash', () => {
+    // Every closed day carries a hash in the broken format. Deciding on it
+    // would raise a "changed after close" alert for the whole of history on
+    // the first run, or -- as before -- skip every real correction.
+    const src = readFileSync(new URL('./monday.ts', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('export async function ingestMondayItems'));
+    assert.doesNotMatch(body, /meal_periods_hash\s*[!=]==/, 'a decision still compares the stored hash');
+    assert.equal((body.match(/figuresChanged\(existing\.meal_periods, mealPeriods\)/g) ?? []).length, 2,
+      'both the closed-period check and the update check must compare figures');
   });
 });

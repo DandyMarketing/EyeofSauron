@@ -237,9 +237,44 @@ function deriveTotals(mealPeriods: Record<string, MealPeriodData>, totalScManual
   return { grossSales, netSales, totalCovers, totalDiscounts, effectiveSC };
 }
 
+/**
+ * A fingerprint of every figure on the day, for the audit trail.
+ *
+ * IT USED TO FINGERPRINT NOTHING BUT THE PERIOD NAMES. This was
+ * `JSON.stringify(mealPeriods, Object.keys(mealPeriods).sort())`, and an array
+ * passed as the second argument is an ALLOW-LIST applied at every depth -- so
+ * `food_sales`, `bev_sales` and the rest were filtered out of the nested
+ * objects and the input was `{"dinner":{},"lunch":{}}` whatever the figures
+ * said. Every correction made on the board after Sauron first saw a day
+ * hashed the same as the original, and the sync skipped it as unchanged, hourly,
+ * for two months. Fat Prince 17 Aug sat at $1,744 of food against $6,468 on the
+ * board. BUILD_LOG 1.12.
+ *
+ * The hash is now a RECORD, not the decision. Whether a day changed is decided
+ * by comparing the figures themselves (`figuresChanged`), so a hash format
+ * change -- this one included -- can never again make a day look edited or
+ * unedited.
+ */
 export function hashMealPeriods(mealPeriods: Record<string, MealPeriodData>): string {
-  const sorted = JSON.stringify(mealPeriods, Object.keys(mealPeriods).sort());
-  return createHash('sha256').update(sorted).digest('hex');
+  const canonical = Object.keys(mealPeriods).sort().map(period => {
+    const p = mealPeriods[period] as unknown as Record<string, number>;
+    return [period, Object.keys(p).sort().map(k => [k, p[k]])];
+  });
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+/**
+ * Whether any figure on the day differs from what is stored.
+ *
+ * Compared value by value, to the cent, with the same rule the post-close alert
+ * uses to describe the change -- one definition of "changed", so the decision
+ * and the alert cannot disagree about whether anything moved.
+ */
+export function figuresChanged(
+  stored: Record<string, Partial<MealPeriodData>> | null | undefined,
+  incoming: Record<string, Partial<MealPeriodData>>,
+): boolean {
+  return summarisePostLockChange(stored, incoming).length > 0;
 }
 
 export interface FieldChange {
@@ -500,7 +535,10 @@ export async function ingestMondayItems(
     // Only an EXISTING row is frozen. A closed month with no row at all is a
     // gap, and filling a gap is not the same as changing a settled figure.
     if (existing && isPeriodClosed(date)) {
-      if (existing.meal_periods_hash !== newHash) {
+      // Decided on the FIGURES, never the stored hash. Every closed day carries
+      // a hash from the broken format, and comparing against it would raise a
+      // "changed after close" alert for the whole of history on the first run.
+      if (figuresChanged(existing.meal_periods, mealPeriods)) {
         if (!options.dryRun) {
           await raiseAlert({
             venue_id: venueId,
@@ -570,7 +608,7 @@ export async function ingestMondayItems(
 
     } else if (existing && (existing.data_source === 'monday' || existing.data_source === 'both')) {
       // ── UPDATE: Monday/both row exists — overwrite meal periods ──
-      if (existing.meal_periods_hash === newHash) {
+      if (!figuresChanged(existing.meal_periods, mealPeriods)) {
         // The figures have not moved, but the note may have. Someone writing an
         // explanation days later is exactly when we most want it, so it is
         // stored on its own rather than waiting for a figure to change.
