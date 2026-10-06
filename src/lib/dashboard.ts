@@ -37,10 +37,10 @@ import {
   historyHorizon, LIFETIME_LOOKBACK_DAYS,
   type RetentionCounts, type RetentionShares, type HistoryHorizon,
 } from './retention-month.js';
-import { costRatios, costCaveats, costBucket, type CostRatios, type PLRow } from './cost-ratios.js';
+import { costRatios, costCaveats, costBucket, isSushiSales, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { readAllPages, selectAll } from './paged.js';
-import { weeklyCogs, coverageFor, costSettlement, transferTotals, type TransferTotals, type WeeklyCogs, type BillLine, type AccountNames } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, transferTotals, sushiSalesOf, type TransferTotals, type WeeklyCogs, type BillLine, type AccountNames, type SalesLine } from './weekly-cogs.js';
 import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
@@ -963,6 +963,34 @@ async function readTransfers(start: string, end: string): Promise<Map<string, Tr
   })), namesByVenue);
 }
 
+/**
+ * Sales invoice lines for a window and for the coverage month, or null when the
+ * tables are not there (migration 054 not run) -- unknown, never zero.
+ */
+async function readSalesLines(
+  venueId: string, start: string, end: string, monthStart: string, monthEnd: string,
+): Promise<{ window: SalesLine[]; month: SalesLine[] } | null> {
+  const read = (from: string, to: string) => readAllPages<any>((a, b) => supabaseAdmin.from('sales_invoice_lines')
+    .select('id, account_id, net_amount, sales_invoices!inner(invoice_date, status)')
+    .eq('venue_id', venueId)
+    .gte('sales_invoices.invoice_date', from)
+    .lte('sales_invoices.invoice_date', to)
+    .order('id')
+    .range(a, b));
+  try {
+    const [w, m] = await Promise.all([read(start, end), read(monthStart, monthEnd)]);
+    const shape = (rows: any[]): SalesLine[] => rows.map(r => ({
+      account_id: r.account_id,
+      net_amount: Number(r.net_amount ?? 0),
+      status: r.sales_invoices?.status ?? null,
+    }));
+    return { window: shape(w), month: shape(m) };
+  } catch (e: any) {
+    console.warn(`[dashboard] sales invoices unreadable: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
 async function buildPeriodCosts(
   venues: Array<{ id: string; name: string; slug: string }>,
   start: string,
@@ -1023,7 +1051,8 @@ async function buildPeriodCosts(
        * bill reaches its P&L account without a chart-of-accounts lookup.
        */
       const names: AccountNames = new Map();
-      const ledger = { food: 0, beverage: 0 };
+      const ledger = { food: 0, beverage: 0, sushi: 0 };
+      let ledgerSushiSales = 0;
       for (const r of pl ?? []) {
         if (!r.account_id) continue;
         const { canonical_account: canonical, business_line } = resolveAccount(r.account_name, accountMap);
@@ -1033,6 +1062,10 @@ async function buildPeriodCosts(
         const kind = costBucket({ canonical, raw: r.account_name, section: r.section, business_line });
         if (kind === 'food') ledger.food += Number(r.amount);
         else if (kind === 'beverage') ledger.beverage += Number(r.amount);
+        else if (kind === 'sushi') ledger.sushi += Number(r.amount);
+        else if (isSushiSales({ section: r.section, business_line, canonical_account: canonical, account_name: r.account_name })) {
+          ledgerSushiSales += Number(r.amount);
+        }
       }
 
       const toLines = (rows: any[]): BillLine[] =>
@@ -1045,12 +1078,35 @@ async function buildPeriodCosts(
 
       const sales = sumClassSplits(ops ?? []);
       const transfers = await transfersRead;
+      const coverage = coverageFor(toLines(monthLines), names, ledger);
+
+      /**
+       * Sushi sales, only where the ledger has sushi sales to measure against --
+       * which also keeps two invoice reads off every venue without a sushi line.
+       * Coverage is the same check the bills get: what the month's invoices add
+       * up to against the ledger's Sales - Sushi for that month.
+       */
+      let sushiInput: Parameters<typeof weeklyCogs>[5];
+      if (ledgerSushiSales !== 0 || ledger.sushi !== 0) {
+        const salesLines = await readSalesLines(v.id, start, end, month.start, month.end);
+        sushiInput = salesLines === null
+          ? { sales: null, sales_coverage: null, cost_coverage: coverage.sushi }
+          : {
+              sales: sushiSalesOf(salesLines.window, names),
+              sales_coverage: ledgerSushiSales > 0
+                ? Math.round(sushiSalesOf(salesLines.month, names) / ledgerSushiSales * 10000) / 100
+                : null,
+              cost_coverage: coverage.sushi,
+            };
+      }
+
       const result = weeklyCogs(
         toLines(windowLines),
         names,
         sales,
-        coverageFor(toLines(monthLines), names, ledger),
+        coverage,
         transfers?.get(v.id),
+        sushiInput,
       );
       if (transfers === null) {
         result.caveats.push('Stock moved between sister venues could not be read, so any sent from this venue is still counted in its cost.');

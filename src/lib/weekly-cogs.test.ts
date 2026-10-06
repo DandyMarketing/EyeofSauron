@@ -16,7 +16,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine, transferTotals, type TransferLine, type AccountNames, type AccountInfo } from './weekly-cogs.js';
+import { weeklyCogs, coverageFor, costSettlement, USABLE_COVERAGE_PCT, type BillLine, transferTotals, type TransferLine, type AccountNames, type AccountInfo, sushiSalesOf } from './weekly-cogs.js';
 
 const names = new Map([
   ['acc-food', 'COGS - Food'],
@@ -225,7 +225,7 @@ describe('the week the panel read 38.2%', () => {
   test('a deleted bill is never spend, in the figure or in its coverage', () => {
     const withDeleted = weeklyCogs([line('food', 500, 'VOIDED')], names, { food_sales: 1000, beverage_sales: 0 }, { food: 95, beverage: 95 });
     assert.equal(withDeleted.food.cogs, 0);
-    assert.deepEqual(coverageFor([line('food', 500, 'DELETED')], names, { food: 1000, beverage: 0 }), { food: 0, beverage: null });
+    assert.deepEqual(coverageFor([line('food', 500, 'DELETED')], names, { food: 1000, beverage: 0 }), { food: 0, beverage: null, sushi: null });
   });
 });
 
@@ -322,5 +322,46 @@ describe('transfers between sister venues', () => {
       { in: { food: 0, beverage: 0, sushi: 0 }, out: { food: 0, beverage: 0 } });
     assert.equal(w.transfers, undefined);
     assert.ok(!w.caveats.some(c => /sister venues/.test(c)));
+  });
+});
+
+describe('weekly sushi: sales from invoices, cost from bills, both checked against the ledger', () => {
+  const names: AccountNames = new Map<string, AccountInfo>([
+    ['sushi-sales', { name: 'Sales - Food', raw: 'Sales - Sushi', section: 'Income', business_line: 'sushi' }],
+    ['food-sales', { name: 'Sales - Food', section: 'Income' }],
+    ['sushi-cogs', { name: 'COGS - Food', raw: 'COGS - Sushi', section: 'Less Cost of Sales', business_line: 'sushi' }],
+  ]);
+
+  test('only approved invoices on a sushi sales account count', () => {
+    assert.equal(sushiSalesOf([
+      { account_id: 'sushi-sales', net_amount: 1000, status: 'AUTHORISED' },
+      { account_id: 'sushi-sales', net_amount: 500, status: 'PAID' },
+      { account_id: 'sushi-sales', net_amount: -200, status: 'AUTHORISED' },  // a credit
+      { account_id: 'sushi-sales', net_amount: 900, status: 'DRAFT' },       // not in the ledger yet
+      { account_id: 'sushi-sales', net_amount: 900, status: 'VOIDED' },
+      { account_id: 'food-sales', net_amount: 4000, status: 'PAID' },        // not sushi
+    ], names), 1300);
+  });
+
+  const bills: BillLine[] = [{ account_id: 'sushi-cogs', line_amount: 400, bill_date: '2026-09-29', status: 'PAID' }];
+  const sales = { food_sales: 1, beverage_sales: 1 };
+
+  test('both sides well covered: the % is given', () => {
+    const w = weeklyCogs(bills, names, sales, { food: 95, beverage: 95 }, undefined,
+      { sales: 1000, sales_coverage: 98, cost_coverage: 92 });
+    assert.deepEqual(w.sushi, { cogs: 400, sales: 1000, pct: 40, cost_coverage_pct: 92, sales_coverage_pct: 98 });
+  });
+
+  test('either side under 70% covered: the amounts stay, the % is withheld', () => {
+    const w = weeklyCogs(bills, names, sales, { food: 95, beverage: 95 }, undefined,
+      { sales: 1000, sales_coverage: 98, cost_coverage: 40 });
+    assert.equal(w.sushi.pct, null);
+    assert.equal(w.sushi.sales, 1000);
+  });
+
+  test('sales invoices not loaded: sales unknown, not zero', () => {
+    const w = weeklyCogs(bills, names, sales, { food: 95, beverage: 95 });
+    assert.equal(w.sushi.sales, null);
+    assert.equal(w.sushi.pct, null);
   });
 });

@@ -3,7 +3,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   checkSchema, formatSchemaProblems, REQUIRED_SCHEMA,
-  SOCIAL_SCHEMA, XERO_SCHEMA, RECOMMENDATION_SCHEMA, APP_SCHEMA,
+  SOCIAL_SCHEMA, XERO_SCHEMA, SALES_INVOICE_SCHEMA, RECOMMENDATION_SCHEMA, APP_SCHEMA,
   type SchemaExpectation,
 } from './schema-check.js';
 
@@ -108,7 +108,7 @@ describe('the groups keep one job\'s missing migration off another job\'s back',
     // the only place that checks everything.
     assert.equal(
       REQUIRED_SCHEMA.length,
-      SOCIAL_SCHEMA.length + RECOMMENDATION_SCHEMA.length + XERO_SCHEMA.length + APP_SCHEMA.length,
+      SOCIAL_SCHEMA.length + RECOMMENDATION_SCHEMA.length + XERO_SCHEMA.length + SALES_INVOICE_SCHEMA.length + APP_SCHEMA.length,
     );
   });
 
@@ -117,7 +117,7 @@ describe('the groups keep one job\'s missing migration off another job\'s back',
     // twice -- and one nobody put in a group is silently never checked by any
     // job at all, which is this bug with the sign flipped.
     const key = (e: SchemaExpectation) => `${e.table}:${e.columns.join(',')}`;
-    const grouped = [...SOCIAL_SCHEMA, ...RECOMMENDATION_SCHEMA, ...XERO_SCHEMA, ...APP_SCHEMA].map(key);
+    const grouped = [...SOCIAL_SCHEMA, ...RECOMMENDATION_SCHEMA, ...XERO_SCHEMA, ...SALES_INVOICE_SCHEMA, ...APP_SCHEMA].map(key);
 
     assert.equal(new Set(grouped).size, grouped.length, 'an expectation appears in two groups');
     assert.deepEqual(new Set(REQUIRED_SCHEMA.map(key)), new Set(grouped));

@@ -131,6 +131,27 @@ export const XERO_SCHEMA: SchemaExpectation[] = [
 ];
 
 /**
+ * Sales invoices (migration 054), for sushi sales by the week.
+ *
+ * KEPT OUT OF XERO_SCHEMA on purpose: the Xero job REQUIRES that list and exits
+ * without it, and the P&L and bills must not stop because an optional table has
+ * not been created yet. The job checks this one itself and skips sales invoices,
+ * saying so, until it exists.
+ */
+export const SALES_INVOICE_SCHEMA: SchemaExpectation[] = [
+  {
+    table: 'sales_invoices',
+    columns: ['venue_id', 'tenant_id', 'invoice_id', 'document_type', 'customer_name', 'invoice_date', 'status', 'line_amount_types'],
+    migration: '054_sales_invoices.sql',
+  },
+  {
+    table: 'sales_invoice_lines',
+    columns: ['sales_invoice_id', 'venue_id', 'line_item_id', 'line_amount', 'tax_amount', 'net_amount', 'account_id'],
+    migration: '054_sales_invoices.sql',
+  },
+];
+
+/**
  * Written by the web app rather than by any scheduled job.
  *
  * These reach the database through a person clicking something, so the failure
@@ -166,6 +187,7 @@ export const REQUIRED_SCHEMA: SchemaExpectation[] = [
   ...SOCIAL_SCHEMA,
   ...RECOMMENDATION_SCHEMA,
   ...XERO_SCHEMA,
+  ...SALES_INVOICE_SCHEMA,
   ...APP_SCHEMA,
 ];
 

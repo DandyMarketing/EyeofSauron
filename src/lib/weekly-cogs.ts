@@ -34,8 +34,9 @@
  * this is the second place that could get it wrong.
  */
 
-import { costBucket, type CostBucket } from './cost-ratios.js';
+import { costBucket, isSushiSales, type CostBucket } from './cost-ratios.js';
 import { NON_SPEND_STATUSES } from '../parsers/xero/bills.js';
+import { COUNTED_SALES_STATUSES } from '../parsers/xero/sales-invoices.js';
 
 export interface BillLine {
   /** Xero's account UUID. Joins to profit_and_loss.account_id. */
@@ -194,6 +195,39 @@ export function transferTotals(
   return out;
 }
 
+export interface WeeklySushi {
+  cogs: number;
+  sales: number | null;
+  pct: number | null;
+  cost_coverage_pct: number | null;
+  sales_coverage_pct: number | null;
+}
+
+/** A sales invoice line, as the dashboard reads it. */
+export interface SalesLine {
+  account_id: string | null;
+  /** Ex-GST, credits already negative. */
+  net_amount: number;
+  status?: string | null;
+}
+
+/**
+ * Sushi sales in a set of sales invoice lines: lines coded to an income account
+ * that `isSushiSales` recognises, on invoices that are in the ledger
+ * (AUTHORISED or PAID -- a draft is not a sale yet).
+ */
+export function sushiSalesOf(lines: SalesLine[], names: AccountNames): number {
+  let total = 0;
+  for (const l of lines) {
+    if (!COUNTED_SALES_STATUSES.has(String(l.status ?? '').toUpperCase())) continue;
+    const info = l.account_id ? names.get(l.account_id) : undefined;
+    if (!info || typeof info === 'string') continue;
+    if (!isSushiSales({ section: info.section ?? '', business_line: info.business_line ?? undefined, canonical_account: info.name, account_name: info.raw ?? info.name })) continue;
+    total += Number(l.net_amount);
+  }
+  return round2(total);
+}
+
 export interface WeeklyCogs {
   /** Set by the caller, which knows the period and today. */
   settlement?: CostSettlement;
@@ -201,8 +235,14 @@ export interface WeeklyCogs {
   transfers?: TransferTotals;
   food: WeeklyCogsSide;
   beverage: WeeklyCogsSide;
-  /** Sushi purchases, kept out of both percentages. See `costBucket`. */
-  sushi: { cogs: number };
+  /**
+   * Sushi, on its own and out of both percentages. Cost from bills; SALES from
+   * Xero sales invoices (sushi is invoiced, never rung through Revel). Each side
+   * carries its coverage against the last complete month's ledger, and the % is
+   * given only when both are usable. `sales` is null when sales invoices are not
+   * loaded at all -- unknown, not zero.
+   */
+  sushi: WeeklySushi;
   /** Bill lines whose account could not be named at all. */
   unknown_account_total: number;
   caveats: string[];
@@ -243,6 +283,8 @@ export function weeklyCogs(
   sales: { food_sales: number; beverage_sales: number; days?: { monday_board: number; none: number } },
   coverage: { food: number | null; beverage: number | null },
   transfers?: TransferTotals,
+  /** Sushi sales for the window and the coverage of both sushi sides; absent if sales invoices are not loaded. */
+  sushiInput?: { sales: number | null; sales_coverage: number | null; cost_coverage: number | null },
 ): WeeklyCogs {
   let food = 0, bev = 0, sushi = 0, unknown = 0;
 
@@ -269,7 +311,20 @@ export function weeklyCogs(
   const out: WeeklyCogs = {
     food: side(food, sales.food_sales, coverage.food),
     beverage: side(bev, sales.beverage_sales, coverage.beverage),
-    sushi: { cogs: round2(sushi) },
+    sushi: (() => {
+      const cost_coverage_pct = sushiInput?.cost_coverage ?? null;
+      const sales_coverage_pct = sushiInput?.sales_coverage ?? null;
+      const salesFig = sushiInput?.sales ?? null;
+      const usable = (c: number | null) => c !== null && c >= USABLE_COVERAGE_PCT;
+      return {
+        cogs: round2(sushi),
+        sales: salesFig,
+        pct: salesFig !== null && salesFig > 0 && usable(cost_coverage_pct) && usable(sales_coverage_pct)
+          ? round2(sushi / salesFig * 100) : null,
+        cost_coverage_pct,
+        sales_coverage_pct,
+      };
+    })(),
     unknown_account_total: round2(unknown),
     caveats: [],
   };
@@ -354,19 +409,22 @@ export function weeklyCogs(
 export function coverageFor(
   billLinesInMonth: BillLine[],
   names: AccountNames,
-  ledgerByKind: { food: number; beverage: number },
-): { food: number | null; beverage: number | null } {
-  let food = 0, bev = 0;
+  ledgerByKind: { food: number; beverage: number; sushi?: number },
+): { food: number | null; beverage: number | null; sushi: number | null } {
+  let food = 0, bev = 0, sushi = 0;
   for (const l of billLinesInMonth) {
     if (!isSpend(l)) continue;
     const kind = bucketOfLine(l, names);
     if (kind === 'food') food += Number(l.line_amount);
     else if (kind === 'beverage') bev += Number(l.line_amount);
+    else if (kind === 'sushi') sushi += Number(l.line_amount);
   }
+  // Null, not zero, when the ledger has nothing to compare against: "we
+  // cannot tell" and "the bills explain none of it" are different answers.
+  const of = (part: number, whole: number | undefined) => (whole && whole > 0 ? round2(part / whole * 100) : null);
   return {
-    // Null, not zero, when the ledger has nothing to compare against: "we
-    // cannot tell" and "the bills explain none of it" are different answers.
-    food: ledgerByKind.food > 0 ? round2(food / ledgerByKind.food * 100) : null,
-    beverage: ledgerByKind.beverage > 0 ? round2(bev / ledgerByKind.beverage * 100) : null,
+    food: of(food, ledgerByKind.food),
+    beverage: of(bev, ledgerByKind.beverage),
+    sushi: of(sushi, ledgerByKind.sushi),
   };
 }

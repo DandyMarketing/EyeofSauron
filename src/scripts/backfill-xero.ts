@@ -2,9 +2,9 @@ import 'dotenv/config';
 import { selectAll } from '../lib/paged.js';
 import { supabase } from '../lib/supabase.js';
 import { ingestProfitAndLoss } from '../ingest/xero-pl.js';
-import { ingestSupplierBills, ingestCreditNotes } from '../ingest/xero-bills.js';
+import { ingestSupplierBills, ingestCreditNotes, ingestSalesInvoices, ingestCustomerCredits } from '../ingest/xero-bills.js';
 import { monthsBack, isStoredPeriodFinal } from '../lib/accounting-months.js';
-import { requireSchema, XERO_SCHEMA } from '../lib/schema-check.js';
+import { requireSchema, checkSchema, formatSchemaProblems, XERO_SCHEMA, SALES_INVOICE_SCHEMA } from '../lib/schema-check.js';
 
 /**
  * Monthly Profit & Loss for every connected Xero organisation.
@@ -71,6 +71,18 @@ const dryRun = process.argv.includes('--dry-run');
  */
 const withBills = process.argv.includes('--bills');
 
+/**
+ * Sales invoices ride along with bills: whenever a period's bills are pulled,
+ * its sales invoices and customer credits are too -- the open months every
+ * night, which is what the weekly sushi figure needs.
+ *
+ * `--sales-backfill` pulls them for EVERY period in range, once, for months
+ * whose bills are already held. Not automatic, because "no sales invoices this
+ * month" is a normal answer at two of the three venues, and treating it as
+ * missing would re-fetch those months every night forever.
+ */
+const salesBackfill = process.argv.includes('--sales-backfill');
+
 console.log(`Xero P&L — ${months} month(s) back, ${paceMs}ms between calls`);
 console.log(force
   ? 'FORCE — every month re-fetched, including ones already final.\n'
@@ -78,6 +90,14 @@ console.log(force
 if (withBills) console.log('Also pulling supplier bills. Paginated — Xero returns 100 per page and says nothing when there are more.\n');
 
 await requireSchema(XERO_SCHEMA);
+
+// Optional: without migration 054 the P&L and bills still run, and this says so.
+const salesProblems = withBills ? await checkSchema(SALES_INVOICE_SCHEMA) : [];
+const salesReady = withBills && salesProblems.length === 0;
+if (withBills && !salesReady) {
+  console.warn('Sales invoices SKIPPED this run -- the table is not there yet:');
+  console.warn(formatSchemaProblems(salesProblems));
+}
 
 // row-cap: one Xero organisation per venue.
 const { data: connections, error } = await supabase
@@ -127,6 +147,7 @@ let stored = 0;
 let skipped = 0;
 let billLines = 0;
 let creditLines = 0;
+let salesLines = 0;
 /** Periods whose P&L was already final but whose bills had never been fetched. */
 let billsBackfilled = 0;
 const findings: string[] = [];
@@ -183,7 +204,7 @@ for (const t of targets as any[]) {
       billsMissing = countError ? true : (count ?? 0) === 0;
     }
 
-    if (plFinal && !billsMissing) {
+    if (plFinal && !billsMissing && !(salesReady && salesBackfill)) {
       skipped++;
       continue;
     }
@@ -207,6 +228,20 @@ for (const t of targets as any[]) {
             `${label} ${period.label}: ${(r as any).stale_removed} stale P&L row(s) removed — lines an earlier report produced that this one did not`,
           );
         }
+      }
+
+      if (salesReady && (r.stored || billsMissing || salesBackfill)) {
+        const si = await ingestSalesInvoices(t.tenant_id, period.start, period.end, paceMs);
+        const sc = await ingestCustomerCredits(t.tenant_id, period.start, period.end, paceMs);
+        salesLines += si.lines + sc.lines;
+        if (si.bills + sc.bills > 0) {
+          console.log(`  ${period.label}: ${si.bills} sales invoice(s), ${sc.bills} customer credit(s), ${si.lines + sc.lines} line(s)`);
+        }
+        // The same guards run on sales as on bills; if one ever fires here it is
+        // a surprise worth seeing.
+        const pay = si.payroll_lines_excluded + sc.payroll_lines_excluded;
+        if (pay > 0) findings.push(`${label} ${period.label}: ${pay} SALES invoice line(s) excluded as personal pay — never stored, and unexpected on a sales invoice`);
+        if (si.unusable + sc.unusable > 0) findings.push(`${label} ${period.label}: ${si.unusable + sc.unusable} sales document(s) had no id or no readable date and were skipped`);
       }
 
       if (withBills && (r.stored || billsMissing)) {
@@ -289,6 +324,9 @@ if (withBills) {
    * today and it looked exactly like the second.
    */
   console.log(`${creditLines} credit note line(s) stored (negative — they net against bills).`);
+  console.log(salesReady
+    ? `${salesLines} sales invoice line(s) stored (customer credits negative).`
+    : 'Sales invoices not fetched: migration 054 has not been run.');
   // Reported because it is the number that was silently zero before: months
   // whose P&L was already final and whose bills had never been fetched.
   if (billsBackfilled > 0) {
@@ -324,7 +362,7 @@ if (errors.length > 0) {
  */
 // billsBackfilled counts too: a run where every P&L was already final and the
 // only work was filling in missing bills is a successful run, not an empty one.
-const storedNothing = stored === 0 && skipped === 0 && billsBackfilled === 0;
+const storedNothing = stored === 0 && skipped === 0 && billsBackfilled === 0 && salesLines === 0;
 if (storedNothing) {
   console.error('\nNothing was stored and nothing was skipped — no period succeeded. Treating as a failed run.');
 }

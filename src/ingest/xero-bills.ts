@@ -2,6 +2,9 @@ import { supabase } from '../lib/supabase.js';
 import { getAccessToken } from './xero.js';
 import { toBillRow, toBillLineRows, isSpend, type BillRow, type BillLineRow } from '../parsers/xero/bills.js';
 import { toCreditNoteRow, toCreditNoteLineRows } from '../parsers/xero/credit-notes.js';
+import {
+  toSalesInvoiceRow, toSalesInvoiceLineRows, toCustomerCreditRow, toCustomerCreditLineRows,
+} from '../parsers/xero/sales-invoices.js';
 import { payrollAccountIds, looksLikePersonalPay } from '../lib/payroll-accounts.js';
 
 /**
@@ -159,7 +162,28 @@ interface DocumentSource {
   label: string;
   toRow: (raw: any) => BillRow | null;
   toLines: (raw: any) => BillLineRow[];
+  /** Where the documents and their lines are written. */
+  headerTable: string;
+  lineTable: string;
+  /** The lines' column holding the parent row's id. */
+  parentKey: string;
+  /**
+   * The shared row in this table's column names. Bills are stored as parsed;
+   * a sales invoice's contact is a CUSTOMER and its date an invoice date, and
+   * calling them supplier_name and bill_date in a sales table would mislead
+   * every query written against it.
+   */
+  toRecord?: (row: BillRow) => Record<string, unknown>;
 }
+
+const BILL_TABLES = { headerTable: 'supplier_bills', lineTable: 'supplier_bill_lines', parentKey: 'bill_id' };
+const SALES_TABLES = {
+  headerTable: 'sales_invoices',
+  lineTable: 'sales_invoice_lines',
+  parentKey: 'sales_invoice_id',
+  toRecord: ({ supplier_name, bill_date, ...rest }: BillRow) =>
+    ({ ...rest, customer_name: supplier_name, invoice_date: bill_date }),
+};
 
 const BILLS: DocumentSource = {
   xeroType: 'ACCPAY',
@@ -169,6 +193,7 @@ const BILLS: DocumentSource = {
   label: 'bills',
   toRow: toBillRow,
   toLines: toBillLineRows,
+  ...BILL_TABLES,
 };
 
 /**
@@ -191,7 +216,59 @@ const CREDIT_NOTES: DocumentSource = {
   label: 'credit notes',
   toRow: toCreditNoteRow,
   toLines: toCreditNoteLineRows,
+  ...BILL_TABLES,
 };
+
+/**
+ * Sales invoices, for sushi sales by the week (see sales-invoices.ts).
+ *
+ * THROUGH THE SAME PATH AS BILLS, payroll guards included. A sales invoice
+ * should never carry somebody's pay; a staff recharge or a reimbursement coded
+ * oddly could, and one path means the guards cannot be forgotten here.
+ *
+ * NO NEW SCOPE: ACCREC is the same /Invoices endpoint and the same
+ * `accounting.invoices` permission that bills already use.
+ */
+const SALES_INVOICES: DocumentSource = {
+  xeroType: 'ACCREC',
+  endpoint: 'Invoices',
+  responseKey: 'Invoices',
+  documentType: 'ACCREC',
+  label: 'sales invoices',
+  toRow: toSalesInvoiceRow,
+  toLines: toSalesInvoiceLineRows,
+  ...SALES_TABLES,
+};
+
+/** Customer credit notes: refunds that reduce sales. Stored negative. */
+const CUSTOMER_CREDITS: DocumentSource = {
+  xeroType: 'ACCRECCREDIT',
+  endpoint: 'CreditNotes',
+  responseKey: 'CreditNotes',
+  documentType: 'ACCRECCREDIT',
+  label: 'customer credit notes',
+  toRow: toCustomerCreditRow,
+  toLines: toCustomerCreditLineRows,
+  ...SALES_TABLES,
+};
+
+export function ingestSalesInvoices(
+  tenantId: string,
+  fromDate: string,
+  toDate: string,
+  paceMs = 1100,
+): Promise<BillIngestResult> {
+  return ingestDocuments(SALES_INVOICES, tenantId, fromDate, toDate, paceMs);
+}
+
+export function ingestCustomerCredits(
+  tenantId: string,
+  fromDate: string,
+  toDate: string,
+  paceMs = 1100,
+): Promise<BillIngestResult> {
+  return ingestDocuments(CUSTOMER_CREDITS, tenantId, fromDate, toDate, paceMs);
+}
 
 export function ingestSupplierBills(
   tenantId: string,
@@ -307,7 +384,7 @@ async function ingestDocuments(
       if (!isSpend(bill)) nonSpend++;
 
       pageBills.push({
-        ...bill,
+        ...(source.toRecord ? source.toRecord(bill) : bill),
         venue_id: venueId,
         tenant_id: tenantId,
         document_type: source.documentType,
@@ -342,11 +419,11 @@ async function ingestDocuments(
 
     if (pageBills.length > 0) {
       const { data: storedBills, error } = await supabase
-        .from('supplier_bills')
+        .from(source.headerTable)
         .upsert(pageBills, { onConflict: 'tenant_id,invoice_id' })
         .select('id, invoice_id');
 
-      if (error) throw new Error(`supplier_bills upsert failed: ${error.message}`);
+      if (error) throw new Error(`${source.headerTable} upsert failed: ${error.message}`);
       bills += storedBills?.length ?? 0;
 
       // Keyed by the invoice id we sent, never by position: an upsert makes no
@@ -354,14 +431,14 @@ async function ingestDocuments(
       // wrong bill would be spend filed against the wrong supplier.
       const idOf = new Map((storedBills ?? []).map(b => [b.invoice_id, b.id]));
 
-      const lineRows = [];
+      const lineRows: Record<string, unknown>[] = [];
       for (const [invoiceId, invoiceLines] of linesByInvoice) {
         const billId = idOf.get(invoiceId);
         if (!billId) continue;
         for (const line of invoiceLines) {
           lineRows.push({
             ...line,
-            bill_id: billId,
+            [source.parentKey]: billId,
             venue_id: venueId,
             fetched_at: new Date().toISOString(),
           });
@@ -370,9 +447,9 @@ async function ingestDocuments(
 
       if (lineRows.length > 0) {
         const { error: lineError } = await supabase
-          .from('supplier_bill_lines')
-          .upsert(lineRows, { onConflict: 'bill_id,line_item_id' });
-        if (lineError) throw new Error(`supplier_bill_lines upsert failed: ${lineError.message}`);
+          .from(source.lineTable)
+          .upsert(lineRows, { onConflict: `${source.parentKey},line_item_id` });
+        if (lineError) throw new Error(`${source.lineTable} upsert failed: ${lineError.message}`);
         lines += lineRows.length;
       }
     }

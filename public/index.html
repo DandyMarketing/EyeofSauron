@@ -99,6 +99,7 @@
   .tile .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
   .tile .value { font-size: 24px; font-weight: 600; line-height: 1.25; margin-top: 2px; }
   .tile .delta { font-size: 12px; margin-top: 2px; }
+  .tile .hint { font-size: 11px; line-height: 1.35; color: var(--text-muted); margin-top: 6px; }
   .up { color: var(--success); }
   .down { color: var(--error); }
   .flat, .unknown { color: var(--text-muted); }
@@ -508,8 +509,9 @@ function esc(s) {
 function delta(m, kind) {
   if (!m || m.direction === 'unknown') return '<span class="unknown">no comparison</span>';
   const sign = m.pct > 0 ? '+' : '';
+  // The sign goes before the currency: "$-3,095" reads as a typo.
   const body = kind === 'money'
-    ? sign + money(m.delta) + ' (' + sign + m.pct.toFixed(1) + '%)'
+    ? (m.delta < 0 ? '\u2212' + money(-m.delta) : sign + money(m.delta)) + ' (' + sign + m.pct.toFixed(1) + '%)'
     : sign + m.pct.toFixed(1) + '%';
   const arrow = m.direction === 'up' ? '▲' : m.direction === 'down' ? '▼' : '■';
   return '<span class="' + m.direction + '">' + arrow + ' ' + body + '</span>';
@@ -570,9 +572,15 @@ function draw(recData) {
 
   const tiles =
     '<div class="tiles">' +
-      tile('Net sales', money(v.net_sales), delta(v.change.net_sales, 'money')) +
-      tile('Covers', num(v.covers), delta(v.change.covers)) +
-      tile('Spend per head', v.avg_spend_per_head === null ? '—' : money2(v.avg_spend_per_head), delta(v.change.avg_spend_per_head)) +
+      // Each tile says what it is made of. Khai, 6 Oct 2026: net sales "needs a
+      // small descriptor telling what is included" -- three tiles, three bases
+      // (Revel, SevenRooms, and a ratio of the two), none of them obvious.
+      tile('Net sales', money(v.net_sales), delta(v.change.net_sales, 'money'),
+        'Food &amp; drink, less discounts, plus service charge. From Revel.') +
+      tile('Covers', num(v.covers), delta(v.change.covers),
+        'Guests seated, bookings and walk-ins. From SevenRooms.') +
+      tile('Spend per head', v.avg_spend_per_head === null ? '—' : money2(v.avg_spend_per_head), delta(v.change.avg_spend_per_head),
+        'Food &amp; drink ÷ covers. No service charge.') +
     '</div>';
 
   const rows = [
@@ -617,7 +625,7 @@ function draw(recData) {
 
   document.getElementById('app').innerHTML =
     adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
-    table + servicePanel(v, w) + forecastPanel(payload, v) + periodCostPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
+    table + servicePanel(v, w) + forecastPanel(payload, v) + periodCostPanel(payload, v, w) + sushiWeekPanel(payload, v, w) + monthlySection(payload, v) + askBar(v);
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
@@ -683,10 +691,11 @@ async function switchPeriod(kind, recData) {
   draw(recData);
 }
 
-function tile(label, value, deltaHtml) {
+function tile(label, value, deltaHtml, hint) {
   return '<div class="tile"><div class="label">' + label + '</div>' +
          '<div class="value">' + value + '</div>' +
-         '<div class="delta">' + deltaHtml + '</div></div>';
+         '<div class="delta">' + deltaHtml + '</div>' +
+         (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>';
 }
 
 /**
@@ -1140,12 +1149,32 @@ function settlementNote(s) {
   return '<p class="figure-note provisional">' + text + '</p>';
 }
 
-// Sushi is sold wholesale outside Revel, so its cost has no sales figure here to
-// divide by and is kept out of the food %. Shown as an amount, and only when
-// there is some.
-function sushiRow(sushi) {
-  if (!sushi || !sushi.cogs) return '';
-  return '<tr><td>Sushi</td><td>' + money(sushi.cogs) + ' <span class="cov">kept out of food %</span></td></tr>';
+/**
+ * Sushi for the period on screen, on its own card. Sales from Xero sales
+ * invoices (sushi is invoiced, never rung through Revel), cost from supplier
+ * bills -- neither is in Food & beverage sales or the food %. Each side shows
+ * how much of the ledger it explains on the last complete month, and the % is
+ * only given when both are usable, as with food and drink.
+ */
+function sushiWeekPanel(payload, v, w) {
+  const c = payload.period_costs && payload.period_costs[v.slug];
+  const s = c && c.sushi;
+  if (!s || (!s.cogs && !s.sales)) return '';
+  const cov = (x) => '<span class="cov">' + (x === null || x === undefined ? 'coverage unknown' : pct(x) + ' covered') + '</span>';
+  const sales = s.sales === null || s.sales === undefined
+    ? '<td class="unusable">not loaded yet</td>'
+    : '<td>' + money(s.sales) + ' ' + cov(s.sales_coverage_pct) + '</td>';
+  const share = s.pct !== null && s.pct !== undefined
+    ? ' \u2014 ' + pct(s.pct) + ' of sushi sales'
+    : (s.sales ? ' \u2014 % withheld, coverage too low' : '');
+  return '<div class="panel"><h2>Sushi \u00b7 wholesale \u00b7 ' + esc(w.label.toLowerCase()) + '</h2>' +
+    '<table><tbody>' +
+      '<tr><td style="white-space:nowrap">Sushi sales</td>' + sales + '</tr>' +
+      '<tr><td style="white-space:nowrap">Sushi cost</td><td>' + money(s.cogs) + share + ' ' + cov(s.cost_coverage_pct) + '</td></tr>' +
+    '</tbody></table>' +
+    '<p class="figure-note">Not included in Food &amp; beverage sales or the food % above. Sales from sushi invoices in Xero, cost from supplier bills, both dated in this period. ' +
+    'Coverage is what the ledger says they explain, measured on the last complete month. Sushi delivery is not included.</p>' +
+    '</div>';
 }
 
 function periodCostPanel(payload, v, w) {
@@ -1167,7 +1196,7 @@ function periodCostPanel(payload, v, w) {
 
   return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
     settlementNote(c.settlement) +
-    '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + sushiRow(c.sushi) + '</tbody></table>' +
+    '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
     '<p class="figure-note">From supplier invoices, which carry a date \u2014 so this follows the period above, where the P&amp;L only closes monthly. ' +
     'Coverage is what the ledger says those invoices actually explain, measured on the last complete month. ' +
     'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches an invoice.</p>' +
@@ -1242,8 +1271,8 @@ function sushiPanel(payload, v) {
   if (!s || (!s.sales && !s.cogs)) return '';
   return '<div class="panel"><h2>Sushi \u00b7 wholesale</h2>' +
     '<table><tbody>' +
-      '<tr><td>Sushi sales</td><td>' + money(s.sales) + '</td></tr>' +
-      '<tr><td>Sushi cost</td><td>' + money(s.cogs) +
+      '<tr><td style="white-space:nowrap">Sushi sales</td><td>' + money(s.sales) + '</td></tr>' +
+      '<tr><td style="white-space:nowrap">Sushi cost</td><td>' + money(s.cogs) +
         (s.pct === null ? ' \u2014 no sushi sales' : ' \u2014 ' + pct(s.pct) + ' of sushi sales') + '</td></tr>' +
     '</tbody></table>' +
     '<p class="figure-note">Not included in Food &amp; beverage sales or the food % above: sushi is sold wholesale and invoiced in Xero, not rung through Revel. ' +
