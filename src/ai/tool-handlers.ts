@@ -1504,14 +1504,18 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
       // Only present when the venue actually wrote something. A key reading
       // "NA" on every day trains the reader to skip the field.
       finance_notes: d.finance_notes || undefined,
-      avg_check: d.avg_check,
+      // Net sales ÷ bills, the dashboard's basis -- not Revel's own figure,
+      // which divides something else and disagreed with the dashboard.
+      avg_check: Number(d.total_transactions) > 0 ? Number((netSalesOf(d) / Number(d.total_transactions)).toFixed(2)) : null,
       avg_spend_per_head: dayCovers ? Number((dayGross / dayCovers).toFixed(2)) : null,
       transactions: d.total_transactions,
     };
   });
 
+  // Net sales ÷ bills: the dashboard's average check (7 Oct 2026). It was net
+  // to account for, which carries GST and tips, so the two never agreed.
   const avgCheck = totals.total_transactions > 0
-    ? Number((totals.net_to_account_for / totals.total_transactions).toFixed(2))
+    ? Number((totals.net_sales / totals.total_transactions).toFixed(2))
     : 0;
   const avgSpendPerHead = totals.covers > 0
     ? Number((totals.gross_sales / totals.covers).toFixed(2))
@@ -1611,7 +1615,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
 
     const totalDisc = itemDisc + orderDisc;
     const discRate = grossSales > 0 ? (totalDisc / grossSales * 100) : 0;
-    const avgCheck = transactions > 0 ? Number((netToAccount / transactions).toFixed(2)) : 0;
+    // Net sales ÷ bills, the dashboard's basis (7 Oct 2026).
+    const avgCheck = transactions > 0 ? Number((netSales / transactions).toFixed(2)) : 0;
 
     // Covers from SevenRooms, revenue from Revel. See src/lib/covers.ts.
     const range = 'single' in dateFilter
@@ -1960,6 +1965,10 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
     days_covered: sortedDates.length,
     covers_matched_days: coversDatesMatched,
     coverage_note: `These figures cover only the ${sortedDates.length} day(s) that have hourly sales data, not the whole requested range. Covers are counted over the same days, so avg_spend_per_cover is like-for-like. State the actual dates when reporting.`,
+    // Not the dashboard's average check (net sales ÷ bills). Revel's hourly
+    // report has its own Sales column and there is no service charge by meal
+    // period to rebuild net sales from, so this one is labelled, not converted.
+    avg_check_basis: 'avg_check here is Revel\'s HOURLY report sales ÷ bills for that meal period. It is NOT the dashboard\'s average check (net sales ÷ bills) and must not be compared with it or with query_sales. Compare meal periods with each other only, and say which basis you used.',
     total_sales: totalSales,
     periods: result,
   });
@@ -2758,7 +2767,7 @@ async function tillTotalsFor(
 ): Promise<{ totals: Map<string, TillTotals> } | { error: string }> {
   const totals = new Map<string, TillTotals>();
   for (const id of venueIds) {
-    totals.set(id, { transactions: 0, net_to_account_for: 0, food_bev_sales: 0, days: 0 });
+    totals.set(id, { transactions: 0, net_sales: 0, food_bev_sales: 0, days: 0 });
   }
 
   const { data, error } = await selectAll(() => supabase
@@ -2775,7 +2784,7 @@ async function tillTotalsFor(
     if (!t) continue;
     t.days += 1;
     t.transactions += Number(row.total_transactions ?? 0);
-    t.net_to_account_for += Number(row.net_to_account_for ?? 0);
+    t.net_sales += netSalesOf(row as any);
     t.food_bev_sales += foodAndBevSalesOf(row as any);
   }
 

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { fingerprint, parseRecommendations, suppressRepeats, analysisBrief, recommendationTool, chartMenu, MAX_PER_RUN, RECOMMENDATION_DOMAINS, namesOtherVenues, lastCompleteWeek, unsettledWeekNote } from './recommendation.js';
+import { fingerprint, parseRecommendations, suppressRepeats, analysisBrief, recommendationTool, chartMenu, MAX_PER_RUN, RECOMMENDATION_DOMAINS, namesOtherVenues, ranksAmongVenues, lastCompleteWeek, unsettledWeekNote } from './recommendation.js';
 
 const rec = (over: Partial<{ headline: string; body: string; domain: string; confidence: number }> = {}) => ({
   headline: over.headline ?? 'Move the Tuesday set menu to Wednesday',
@@ -197,7 +197,7 @@ test('a legal entity name counts as naming the venue', () => {
 test('an anonymised comparison passes — that is the whole point', () => {
   // CLAUDE.md's likely resolution: comparative figures yes, identity no.
   const found = namesOtherVenues(
-    'Your food cost is 32%, four points above the group average and third of three.',
+    'Your food cost is 32%, four points above the group average.',
     ['Fat Prince', 'Firangi Superstar'],
   );
   assert.deepEqual(found, []);
@@ -596,4 +596,30 @@ test('the tool requires the chart list, so omitting it is a visible choice', () 
    */
   assert.doesNotMatch(d, /usually empty/i);
   assert.match(d, /shows the claim/i);
+});
+
+/**
+ * No ranking among the venues. Khai, 6 Oct 2026: "no ranking required" -- with
+ * three venues a position is nearly a figure.
+ */
+test('a recommendation ranking this venue among the others is caught', () => {
+  for (const text of [
+    'You are third of three on spend per head.',
+    'Spend per head is the lowest in the group this month.',
+    'Food cost ranks worst across the sister venues.',
+    'Second out of three venues on covers.',
+  ]) {
+    assert.ok(ranksAmongVenues(text), `not caught: ${text}`);
+  }
+});
+
+test('comparing a venue with its own history, or with the group average, is not ranking', () => {
+  for (const text of [
+    'Your food cost is four points above the group average.',
+    'The lowest Tuesday in eight weeks, and the third quiet Tuesday in a row.',
+    'Covers were the highest of the month on Saturday.',
+    'Move the Tuesday set menu to Wednesday, where it draws twice the covers.',
+  ]) {
+    assert.equal(ranksAmongVenues(text), null, `wrongly caught: ${text}`);
+  }
 });

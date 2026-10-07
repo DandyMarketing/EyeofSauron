@@ -379,7 +379,7 @@ export const FIGURE_DEFINITIONS = {
   beverage_sales: 'Beverage alone, before discounts and service charge',
   food_pct: 'Food as a share of food & beverage sales. Beverage is the rest, so the two sum to 100',
   avg_spend_per_head: 'Food & beverage ÷ SevenRooms covers. Revenue per PERSON. Deliberately not Revel\'s "Average Sale Per Guest", which uses a different numerator and denominator',
-  avg_check: 'Revenue per BILL, not per person. It rises when parties are larger, so it describes table mix as much as selling',
+  avg_check: 'Net sales ÷ bills: food and drink after discounts, plus service charge, per BILL -- the same figure the dashboard shows. Not per person: it rises when parties are larger, so it describes table mix as much as selling',
   net_to_account_for: 'Total cash + card collected, including GST. The only figure here that carries tax',
 } as const;
 

@@ -16,6 +16,7 @@ import {
   parseRecommendations,
   suppressRepeats,
   namesOtherVenues,
+  ranksAmongVenues,
   fingerprint,
   lastCompleteWeek,
   unsettledWeekNote,
@@ -507,6 +508,16 @@ for (const venue of venues as any[]) {
          * every run, because a brief being ignored is worth knowing about.
          */
         const line = `${venue.name}: WITHHELD "${candidate.headline}" — names ${leaked.join(', ')}, which this venue is not cleared to see`;
+        console.error(`  ${line}`);
+        notices.push(line);
+        continue;
+      }
+      // No ranking among the venues (decided 6 Oct 2026). Withheld and
+      // counted the same way, for the same reason: a brief being ignored.
+      const rank = ranksAmongVenues(`${candidate.headline}\n${candidate.body}`);
+      if (rank) {
+        withheldTotal++;
+        const line = `${venue.name}: WITHHELD "${candidate.headline}" — ranks the venue among the others ("${rank}")`;
         console.error(`  ${line}`);
         notices.push(line);
         continue;

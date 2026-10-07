@@ -346,8 +346,13 @@ export function decompose(
 export interface TillTotals {
   /** Bills closed in the period. */
   transactions: number;
-  /** Revel's net-to-account-for, summed. The basis average check divides. */
-  net_to_account_for: number;
+  /**
+   * Net sales, summed: food and drink after discounts, plus service charge.
+   * The basis average check divides -- the dashboard's, since 7 Oct 2026. It
+   * used to be net-to-account-for, which also carries GST and tips, so the
+   * chat and the dashboard gave two different average checks for one week.
+   */
+  net_sales: number;
   /** Food + beverage, before discounts and excluding service charge. */
   food_bev_sales: number;
   /**
@@ -385,7 +390,7 @@ export interface TillComparison {
  */
 export const TILL_BASIS: Record<string, string> = {
   transactions: 'Bills closed. A COUNT, so it scales with trading days.',
-  avg_check: 'Net to account for ÷ bills. Revenue per BILL, so it moves with party size as much as with what people order.',
+  avg_check: 'Net sales ÷ bills: food and drink after discounts, plus service charge, per BILL -- the same figure as the dashboard. It moves with party size as much as with what people order.',
   avg_spend_per_head: 'Food + beverage (before discounts, excluding service charge) ÷ covers. This is the basis query_sales reports and the one sales.ts uses for every per-something figure.',
   not_the_same_as_spend_per_head:
     'spend_per_head elsewhere in this response is NET SALES ÷ covers, because that is the identity the drivers decompose. It is a different denominator and will read a few percent lower. Use one or the other throughout a table and never put them in the same row.',
@@ -416,9 +421,9 @@ export function compareTill(
   const txTo = has(current) ? current.transactions : null;
 
   const checkFrom = has(prior) && prior.transactions > 0
-    ? prior.net_to_account_for / prior.transactions : null;
+    ? prior.net_sales / prior.transactions : null;
   const checkTo = has(current) && current.transactions > 0
-    ? current.net_to_account_for / current.transactions : null;
+    ? current.net_sales / current.transactions : null;
 
   const sphFrom = has(prior) && covers.from > 0 ? prior.food_bev_sales / covers.from : null;
   const sphTo = has(current) && covers.to > 0 ? current.food_bev_sales / covers.to : null;

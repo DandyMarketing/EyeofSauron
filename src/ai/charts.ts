@@ -292,7 +292,8 @@ export async function buildChart(input: BuildChartInput): Promise<ChartSpec | { 
         // food_bev_sales, and the spend-per-head denominator.
         a.revenue += foodAndBevSalesOf(o);
       }
-      a.checks += Number(o.net_to_account_for ?? 0);
+      // Average check is net sales ÷ bills, the dashboard's basis (7 Oct 2026).
+      a.checks += netSalesOf(o);
       a.txns += Number(o.total_transactions ?? 0);
       a.days.add(o.business_date);
     }

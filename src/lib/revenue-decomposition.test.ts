@@ -240,7 +240,7 @@ const round2Check = (n: number) => Math.round(n * 100) / 100;
 
 const till = (over: Partial<TillTotals> = {}): TillTotals => ({
   transactions: 170,
-  net_to_account_for: 44983.7,
+  net_sales: 44983.7,
   food_bev_sales: 43906.9,
   days: 7,
   ...over,
@@ -248,8 +248,8 @@ const till = (over: Partial<TillTotals> = {}): TillTotals => ({
 
 test('both periods are filled, which is the whole point', () => {
   const t = compareTill(
-    till({ transactions: 170, net_to_account_for: 44983.7, food_bev_sales: 43906.9 }),
-    till({ transactions: 118, net_to_account_for: 26584.2, food_bev_sales: 25800.0 }),
+    till({ transactions: 170, net_sales: 44983.7, food_bev_sales: 43906.9 }),
+    till({ transactions: 118, net_sales: 26584.2, food_bev_sales: 25800.0 }),
     { from: 285, to: 410 },
   );
 
@@ -277,7 +277,7 @@ test('spend per head here is the food-and-beverage basis, not the driver basis',
 });
 
 test('a period with no rows gives nulls and a caveat, never zeros', () => {
-  const t = compareTill(till(), till({ days: 0, transactions: 0, net_to_account_for: 0, food_bev_sales: 0 }), { from: 285, to: 410 });
+  const t = compareTill(till(), till({ days: 0, transactions: 0, net_sales: 0, food_bev_sales: 0 }), { from: 285, to: 410 });
 
   assert.equal(t.avg_check.from, null);
   assert.equal(t.transactions.from, null);
@@ -293,7 +293,7 @@ test('a closed period is zero transactions, which is not the same as absent', ()
   // denominator so it is null. Reporting the first as null would hide a
   // closure and the second as 0 would invent a free meal.
   const t = compareTill(
-    till({ transactions: 0, net_to_account_for: 0, food_bev_sales: 0, days: 7 }),
+    till({ transactions: 0, net_sales: 0, food_bev_sales: 0, days: 7 }),
     till(),
     { from: 410, to: 0 },
   );

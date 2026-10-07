@@ -762,7 +762,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 54 migrations, 25 query tools, 11 ingest sources, 1,472 tests.
+started.** 54 migrations, 25 query tools, 11 ingest sources, 1,474 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -933,10 +933,20 @@ SENTENCE of a currency amount — so "labour is 44.8% of income" passes and
 
 **Decided 6 Oct 2026: a restaurant manager cannot see another venue's figures.**
 The tools already scope every read to the caller's own venues, and the briefing
-withholds any recommendation naming another venue (`namesOtherVenues()`). What
-the briefing still says is comparative: a group average or a rank. **Whether
-even that is allowed is not yet confirmed** -- with three venues, a group
-average and your own figure together reveal the other two combined.
+withholds any recommendation naming another venue (`namesOtherVenues()`).
+**No ranking among the venues either** (Khai, 6 Oct 2026: "no ranking
+required"): the brief forbids it and `ranksAmongVenues()` withholds any that
+slips through -- "third of three", "lowest in the group". The briefing may
+still compare against the **group average**; whether even that is allowed is
+not confirmed, since with three venues a group average and your own figure
+together reveal the other two combined.
+
+**Average check is net sales ÷ bills everywhere** (7 Oct 2026): dashboard,
+chat, charts and the revenue breakdown. The chat used net-to-account-for (with
+GST and tips), and Revel's own stored figure, so it quoted a different number
+from the dashboard for the same week. The meal-period figure is the one
+exception -- Revel's hourly report has no service charge by meal -- and the tool
+labels it as a different measure.
 
 **Function, decided the same day, needs no schema change:**
 - **Head chef**: the same rights as a manager, at their own venue -- a

@@ -234,7 +234,7 @@ WHAT TO LOOK AT — do not stop at the first thing you find:
 HARD RULES:
 - Every figure comes from a query tool. Never state a number from memory, and never estimate one.
 - DO NOT SEARCH THE WEB FOR SINGAPORE PUBLIC HOLIDAYS, school holidays or the MOE calendar. The holidays are in the warehouse — query_public_holidays — from the Ministry of Manpower, which is the body that gazettes them. The run on 7 Sep 2026 spent eleven searches across seventy-eight pages on exactly this, cited none of them, and left every one of those pages sitting in context for the rest of the analysis. School terms are in the warehouse now too — query_school_calendar, from MOE. Neither is a web search.
-- Cross-venue comparison is COMPARATIVE ONLY. You may say "your food cost is four points above the group average" or "you are third of three on spend per head". You may NOT name another venue's raw figures — not their P&L, not their sales, not their margin. The venue leader you are writing to is not cleared for another venue's books.
+- Cross-venue comparison is COMPARATIVE ONLY. You may say "your food cost is four points above the group average". You may NOT name another venue's raw figures — not their P&L, not their sales, not their margin — and you may NOT rank this venue among the others: no "third of three", no "the lowest in the group". The venue leader you are writing to is not cleared for another venue's books, and with three venues a position says nearly as much as a figure.
 - Correlation is never cause. Posts are not assigned to categories at random and Tuesdays are not randomly quiet. Say "weeks where X happened have looked better", never "X causes Y".
 - If the data behind a claim is thin — three posts, one week, a category with four rows — say the sample is small in the body. A confident claim resting on four rows is worse than no claim.
 - Draw a chart wherever the metric supports one, and put figures in a table rather than in a sentence. This is read on a phone between services. There are now two chart tools and they draw different shapes: create_chart for one number over time — sales, covers, spend per head, and retention_rate or group_retention_rate, which are the cleanest way to show whether guests are coming back; create_composition_chart for shares of a total — where guests came from, the visit mix, which booking channels carried the month. A briefing with no visual at all is a failure of this step, not a neutral outcome. If a finding rests on a movement over time or on a mix, there is a chart for it.
@@ -576,6 +576,31 @@ export function namesOtherVenues(text: string, forbiddenTerms: string[]): string
   }
 
   return found;
+}
+
+/**
+ * A recommendation that ranks this venue among the others.
+ *
+ * Khai, 6 Oct 2026: "no ranking required". With three venues a position is
+ * nearly a figure -- "third of three on spend per head" tells a manager the
+ * other two both beat them. The brief asks for no ranking; this is the control,
+ * the same standing as namesOtherVenues(), and it withholds rather than edits.
+ *
+ * Narrow on purpose: it looks for a position AMONG THE VENUES, so "the lowest
+ * Tuesday in eight weeks" -- a venue against its own history -- passes.
+ */
+export function ranksAmongVenues(text: string): string | null {
+  const patterns: RegExp[] = [
+    /\b(first|second|third|fourth|last|1st|2nd|3rd|4th)\s+(out\s+)?of\s+(the\s+)?(two|three|four)(\s+venues)?\b/i,
+    /\b(highest|lowest|best|worst|top|bottom|weakest|strongest)\s+(of|in|among|across)\s+(the\s+)?(group|venues|three|sister venues|three venues)\b/i,
+    /\brank(s|ed|ing)?\b[^.]{0,40}\b(group|venues|sister)\b/i,
+    /\b(group|venues|sister venues)\b[^.]{0,40}\brank(s|ed|ing)?\b/i,
+  ];
+  for (const p of patterns) {
+    const m = p.exec(text);
+    if (m) return m[0];
+  }
+  return null;
 }
 
 /**
