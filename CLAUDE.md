@@ -936,10 +936,10 @@ The tools already scope every read to the caller's own venues, and the briefing
 withholds any recommendation naming another venue (`namesOtherVenues()`).
 **No ranking among the venues either** (Khai, 6 Oct 2026: "no ranking
 required"): the brief forbids it and `ranksAmongVenues()` withholds any that
-slips through -- "third of three", "lowest in the group". The briefing may
-still compare against the **group average**; whether even that is allowed is
-not confirmed, since with three venues a group average and your own figure
-together reveal the other two combined.
+slips through -- "third of three", "lowest in the group". The briefing **may
+compare against the group average** -- confirmed by Khai on 7 Oct 2026, knowing
+that with three venues a group average and your own figure together reveal the
+other two combined.
 
 **Average check is net sales ÷ bills everywhere** (7 Oct 2026): dashboard,
 chat, charts and the revenue breakdown. The chat used net-to-account-for (with
