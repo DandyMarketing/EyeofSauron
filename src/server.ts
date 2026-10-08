@@ -1738,40 +1738,55 @@ app.get('/admin/api/system', async (c) => {
   if (!user) return c.json({ error: 'Admin access required' }, 403);
 
   const days = Number(c.req.query('days') ?? 3);
-  const report = await checkDataGaps(days);
-
-  const { data: recentLogs } = await supabaseAdmin
-    .from('ingestion_log')
-    .select('filename, report_type, status, row_count, created_at, business_date')
-    .order('created_at', { ascending: false })
-    .limit(20);
 
   /**
-   * Whether the Meta ingest has run recently, surfaced where an owner already
-   * looks.
+   * Four independent checks, run TOGETHER and each allowed to fail ALONE.
    *
-   * It also counts toward /watchdog, but nothing polls that endpoint, so on its
-   * own the check was a signal with no receiver -- which is the failure it
-   * exists to prevent, one level up. The admin page is the only place somebody
-   * reliably looks at this system's health.
+   * They ran one after another with no error handling, so the panel waited for
+   * the sum of four Tokyo round trips, and any one throwing turned the whole
+   * response into an error page the admin page could not read -- leaving the
+   * top of the Attention tab blank with no reason given (Khai, 8 Oct 2026: "it
+   * doesn't load it all, just the bottom part"). A failed check is now named
+   * in `failures`, and the rest still arrive.
+   *
+   * Why each check exists is unchanged: social freshness and table protection
+   * are here because this is the one page an owner reliably looks at (see
+   * socialFreshness() and rlsAudit()).
    */
-  const social = await socialFreshness();
+  const failures: string[] = [];
+  const settle = async <T>(label: string, work: () => Promise<T>): Promise<T | null> => {
+    try { return await work(); } catch (e: any) {
+      const message = `${label}: ${e?.message ?? e}`;
+      console.error(`[admin/system] ${message}`);
+      failures.push(message);
+      return null;
+    }
+  };
+  const [report, recentLogs, social, rls] = await Promise.all([
+    settle('data gaps', () => checkDataGaps(days)),
+    settle('recent ingestions', async () => {
+      // row-cap: the twenty most recent, by design.
+      const { data, error } = await supabaseAdmin
+        .from('ingestion_log')
+        .select('filename, report_type, status, row_count, created_at, business_date')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+    settle('social ingest', () => socialFreshness()),
+    settle('table protection', () => rlsAudit()),
+  ]);
 
-  /**
-   * Is every table still protected?
-   *
-   * Surfaced beside the ingest health for the same reason that check is here:
-   * this is the only page an owner reliably looks at. It is also the answer to
-   * how reconciliation_alerts and ingestion_log went a year without RLS -- the
-   * convention was so consistent that nobody thought to verify it, and the
-   * thing that eventually noticed belonged to a vendor.
-   *
-   * One catalogue query, and the audit reads the live database rather than the
-   * migrations we believe we ran.
-   */
-  const rls = await rlsAudit();
-
-  return c.json({ ...report, recent_ingestions: recentLogs ?? [], social, rls });
+  return c.json({
+    ...(report ?? {}),
+    // Unknown, not "no gaps": a failed check must never read as a clean one.
+    gaps_checked: report !== null,
+    recent_ingestions: recentLogs ?? [],
+    social,
+    rls,
+    failures,
+  });
 });
 
 // --- Watchdog (public for monitoring) ---

@@ -941,7 +941,13 @@ async function api(method, path, body) {
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
-  return res.json();
+  // An error page (a timeout, a crash) is not JSON. Throwing here used to abort
+  // whatever was drawing the panel and leave it blank with no reason given, so
+  // it comes back as an error the caller already knows how to show.
+  const text = await res.text();
+  try { return JSON.parse(text); } catch (e) {
+    return { error: 'The server returned ' + res.status + ' instead of data' + (text ? ': ' + text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) : '') };
+  }
 }
 
 function fmtTime(iso) {
@@ -1232,6 +1238,10 @@ async function loadAttention(panel) {
   // Reserved now, filled when the slow read lands, so System Health keeps its
   // place at the top rather than appearing under everything else.
   const healthSlot = el('div', '');
+  // Said while it loads. An empty slot at the top read as the page failing to
+  // load at all ("just the bottom part"), when it was only the slowest check.
+  healthSlot.innerHTML = '<div class="section"><h2>System Health</h2>' +
+    '<p style="color:var(--text-muted);font-size:13px">Checking data gaps, ingest runs and table protection&hellip;</p></div>';
   panel.appendChild(healthSlot);
 
   renderAlerts(panel, alertsData.alerts || []);
@@ -1245,7 +1255,17 @@ async function loadAttention(panel) {
     panel.appendChild(ok);
   }
 
-  renderSystem(healthSlot, await slow);
+  let system;
+  try { system = await slow; } catch (e) { system = { error: String((e && e.message) || e) }; }
+  healthSlot.innerHTML = '';
+  if (!system || system.error) {
+    const failed = el('div', 'section');
+    failed.innerHTML = '<h2>System Health</h2><p style="color:var(--error);font-size:13px">Could not load: ' +
+      escapeHtml((system && system.error) || 'no response') + '</p>';
+    healthSlot.appendChild(failed);
+    return;
+  }
+  renderSystem(healthSlot, system);
 }
 
 async function loadPeople(panel) {
@@ -1556,9 +1576,21 @@ function renderSystem(root, system) {
   const sysSection = el('div', 'section');
   sysSection.innerHTML = '<h2>System Health</h2>';
 
+  // A check that failed is named, and never drawn as a clean one.
+  if (system.failures && system.failures.length) {
+    const failedCard = el('div', 'system-card');
+    failedCard.innerHTML = '<h4>Checks that could not run</h4>' +
+      system.failures.map(function (f) { return '<div class="gap-item">' + escapeHtml(f) + '</div>'; }).join('');
+    sysSection.appendChild(failedCard);
+  }
+
   const gapsCard = el('div', 'system-card');
   gapsCard.innerHTML = '<h4>Data Gaps (last 3 days)</h4>';
-  if (system.missing && system.missing.length > 0) {
+  if (system.gaps_checked === false) {
+    const unknown = el('div', 'gap-item');
+    unknown.textContent = 'Not checked this time: see "Checks that could not run" above.';
+    gapsCard.appendChild(unknown);
+  } else if (system.missing && system.missing.length > 0) {
     for (const gap of system.missing) {
       const gapEl = el('div', 'gap-item');
       gapEl.textContent = `${gap.venue} (${gap.date}): missing ${gap.missing.join(', ')}`;
@@ -1587,7 +1619,9 @@ function renderSystem(root, system) {
   const social = system.social;
   if (!social) {
     const unknown = el('div', 'gap-item');
-    unknown.textContent = 'Not reported — the server may be running an older build.';
+    unknown.textContent = (system.failures || []).some(function (f) { return f.indexOf('social ingest:') === 0; })
+      ? 'Not checked this time: see "Checks that could not run" above.'
+      : 'Not reported — the server may be running an older build.';
     socialCard.appendChild(unknown);
   } else if (social.ok) {
     const ok = el('div', 'no-gaps');
@@ -1631,7 +1665,9 @@ function renderSystem(root, system) {
   const rls = system.rls;
   if (!rls) {
     const unknown = el('div', 'gap-item');
-    unknown.textContent = 'Not reported — the server may be running an older build.';
+    unknown.textContent = (system.failures || []).some(function (f) { return f.indexOf('table protection:') === 0; })
+      ? 'Not checked this time: see "Checks that could not run" above.'
+      : 'Not reported — the server may be running an older build.';
     rlsCard.appendChild(unknown);
   } else {
     if (rls.ok) {
