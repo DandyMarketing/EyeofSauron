@@ -2728,7 +2728,15 @@ function initUpload() {
       const sz = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
       item.innerHTML = `<span class="fname">${esc(f.name)}</span><span class="fsize">${sz}</span>
         <span class="fstatus ${valid ? 'fstatus-pending' : 'fstatus-warn'}">${valid ? 'Ready' : 'Unknown'}</span>
-        <button class="fremove" onclick="this.closest('.file-item').remove(); void 0">&times;</button>`;
+        <button class="fremove">&times;</button>`;
+      // Removes the FILE, not just its row. It used to delete the row from the
+      // screen and leave the file in uploadFiles, so the count kept it ("5
+      // files" with one showing) and Upload All sent it again (Khai, 11 Oct
+      // 2026: two removed Excel files rode along with every later upload).
+      item.querySelector('.fremove').addEventListener('click', () => {
+        uploadFiles.splice(i, 1);
+        renderUploadList();
+      });
       list.appendChild(item);
     });
     document.getElementById('upload-actions').style.display = uploadFiles.length > 0 ? 'flex' : 'none';
