@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily report - Sauron</title>
+<!--
+  The morning report, exactly as it will be sent. Previewed here first so the
+  figures can be checked against the dashboard and the Monday board before the
+  message reaches anybody's phone. WhatsApp sending is not connected yet.
+
+  modulepreload for the same reason as every other page: a dynamic import() is
+  invisible to the preload scanner.
+-->
+<link rel="modulepreload" href="/vendor/supabase.js">
+<!--SAURON_CONFIG-->
+<link rel="modulepreload" href="/terms-gate.js">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #14141f;
+    --border: #2a2a3a;
+    --text: #e4e4ef;
+    --text-muted: #8888a0;
+    --accent: #e8933a;
+    --accent-dim: #c47520;
+    --error: #e84040;
+    --bubble: #1d2a22;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 10;
+  }
+  .logo {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim));
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .subtitle { font-size: 11px; color: var(--text-muted); }
+  header nav { margin-left: auto; display: flex; gap: 16px; font-size: 14px; flex-wrap: wrap; justify-content: flex-end; }
+  header nav a { color: var(--text-muted); text-decoration: none; }
+  header nav a.active { color: var(--accent); }
+  header nav a:hover { color: var(--text); }
+
+  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  .note { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
+  .loading { color: var(--text-muted); font-size: 14px; }
+  .err { color: var(--error); font-size: 14px; }
+
+  /**
+   * A message bubble, so what is checked here is what a phone will show:
+   * WhatsApp wraps lines and honours *bold* and _italic_, nothing more.
+   */
+  .bubble {
+    background: var(--bubble); border-radius: 10px; padding: 10px 12px;
+    font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere;
+    margin-bottom: 14px; border: 1px solid var(--border);
+  }
+  .bubble em { color: var(--text-muted); }
+  .stamp { font-size: 11px; color: var(--text-muted); text-align: right; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"></div>
+    <div>
+      <h1>Daily report</h1>
+      <div class="subtitle">Preview of the morning message</div>
+    </div>
+    <nav id="nav">
+      <a href="/">Dashboard</a>
+      <a href="/daily.html" class="active">Daily</a>
+      <a href="/chat.html">Chat</a>
+      <a href="/plan.html">Plan</a>
+      <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
+      <a href="#" id="logout-link" style="display:none">Logout</a>
+    </nav>
+  </header>
+
+  <main>
+    <p class="note">
+      What each venue's morning message will say. Not sent to anyone yet &mdash;
+      check the figures against the dashboard and the Monday board first.
+    </p>
+    <div id="reports"><div class="loading">Loading…</div></div>
+  </main>
+
+<script type="module">
+let token = null;
+
+(async () => {
+  const [cfg, { createClient }] = await Promise.all([
+    window.__SAURON_CONFIG__ ?? fetch('/api/config').then(r => r.json()),
+    import('/vendor/supabase.js'),
+  ]);
+  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  token = session.access_token;
+
+  // All three need only the token, so all three start now.
+  const gate = import('/terms-gate.js');
+  const mePromise = fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+  let reportPromise = fetchReport();
+
+  const { enforceTerms } = await gate;
+  const terms = await enforceTerms(token);
+  // Issued before an acceptance existed, the parallel fetch was refused --
+  // correctly. Only 'already' means its answer can be used.
+  if (terms !== 'already') reportPromise = fetchReport();
+
+  const meRes = await mePromise;
+  if (!meRes.ok) { window.location.href = '/login.html'; return; }
+  const me = await meRes.json();
+  if (me.isOwner) document.getElementById('admin-link').style.display = '';
+
+  const logout = document.getElementById('logout-link');
+  logout.style.display = '';
+  logout.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await supabase.auth.signOut();
+    window.location.href = '/login.html';
+  });
+
+  render(await reportPromise);
+})();
+
+async function fetchReport() {
+  try {
+    const res = await fetch('/api/daily-report', { headers: { Authorization: 'Bearer ' + token } });
+    const body = await res.json().catch(() => ({}));
+    return res.ok ? body : { error: body.message || body.error || ('Request failed (' + res.status + ')') };
+  } catch (e) {
+    return { error: String(e?.message || e) };
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** WhatsApp's own markup and nothing else: *bold* and _italic_. */
+function whatsapp(text) {
+  return escapeHtml(text)
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g, '$1<em>$2</em>');
+}
+
+function render(data) {
+  const el = document.getElementById('reports');
+  if (!data || data.error) {
+    el.innerHTML = '<div class="err">' + escapeHtml(data?.error || 'Could not load the report') + '</div>';
+    return;
+  }
+  const at = new Date(data.generated_at).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Singapore' });
+  el.innerHTML = (data.reports || []).map(r =>
+    '<div class="bubble">' + whatsapp(r.text) + '<div class="stamp">' + escapeHtml(at) + '</div></div>'
+  ).join('') || '<div class="loading">No venues.</div>';
+}
+</script>
+</body>
+</html>

@@ -9,6 +9,7 @@ import { HourlyCache } from './lib/hourly-cache.js';
 const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
 const recommendationsCache = new HourlyCache<any[]>();
 import { isPeriodKind } from './lib/dashboard-window.js';
+import { buildDailyReport } from './lib/daily-report-read.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
@@ -1278,6 +1279,27 @@ app.post('/api/notes/capture', async (c) => {
  * table is what protects anything reading with a user token.
  */
 /**
+ * The venues a signed-in user may see, for the endpoints that read with the
+ * service role and so cannot lean on RLS.
+ *
+ * The venue list is cached by the hour: three rows that change when a venue
+ * opens, and a full round trip in front of everything else on every load. A
+ * failed read is not cached, and degrades to NO venues -- which every caller
+ * refuses -- never to all of them.
+ */
+async function venuesInScope(user: { isOwner: boolean; venues: Array<{ venue_id: string }> }) {
+  const allVenues = await venuesCache.get('all', new Date().toISOString().slice(0, 13), async () => {
+    // row-cap: one row per venue.
+    const { data, error } = await supabaseAdmin.from('venues').select('id, name, slug');
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Array<{ id: string; name: string; slug: string }>;
+  }).value.catch(() => [] as Array<{ id: string; name: string; slug: string }>);
+  return user.isOwner
+    ? (allVenues ?? [])
+    : (allVenues ?? []).filter(v => user.venues.some(uv => uv.venue_id === v.id));
+}
+
+/**
  * Everything the dashboard draws, in one request.
  *
  * ONE CALL, DELIBERATELY. The front-end rules say never to serialise requests
@@ -1300,21 +1322,7 @@ app.get('/api/dashboard', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  /**
-   * The venue list, cached by the hour: three rows that change when a venue
-   * opens, and a full round trip in front of everything else on every load.
-   * A failed read is not cached, and degrades exactly as an uncached one did.
-   */
-  const allVenues = await venuesCache.get('all', new Date().toISOString().slice(0, 13), async () => {
-    // row-cap: one row per venue.
-    const { data, error } = await supabaseAdmin.from('venues').select('id, name, slug');
-    if (error) throw new Error(error.message);
-    return (data ?? []) as Array<{ id: string; name: string; slug: string }>;
-  }).value.catch(() => [] as Array<{ id: string; name: string; slug: string }>);
-  const scoped = user.isOwner
-    ? (allVenues ?? [])
-    : (allVenues ?? []).filter(v => user.venues.some(uv => uv.venue_id === v.id));
-
+  const scoped = await venuesInScope(user);
   if (scoped.length === 0) {
     // Not an error the page should retry. Somebody with no venue grant has an
     // account and no data, and saying so beats an empty dashboard that looks
@@ -1348,6 +1356,29 @@ app.get('/api/dashboard', async (c) => {
   } catch (e: any) {
     console.error(`[dashboard] ${e?.message ?? e}`);
     return c.json({ error: e?.message ?? 'Could not build the dashboard' }, 500);
+  }
+});
+
+/**
+ * The morning report, as it would be sent -- previewed in the web app before
+ * it goes to anybody's phone. Same scope and terms gate as the dashboard: it is
+ * the same trading figures, one venue per message.
+ */
+app.get('/api/daily-report', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const scoped = await venuesInScope(user);
+  if (scoped.length === 0) {
+    return c.json({ error: 'no_venues', message: 'Your account is not assigned to a venue yet. Ask an owner to add you.' }, 403);
+  }
+  try {
+    return c.json({ generated_at: new Date().toISOString(), reports: await buildDailyReport(scoped) });
+  } catch (e: any) {
+    console.error(`[daily-report] ${e?.message ?? e}`);
+    return c.json({ error: e?.message ?? 'Could not build the daily report' }, 500);
   }
 });
 

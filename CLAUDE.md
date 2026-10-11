@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 54 migrations, 25 query tools, 11 ingest sources, 1,476 tests.
+started.** 54 migrations, 25 query tools, 11 ingest sources, 1,492 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -868,6 +868,85 @@ Two limits to check before trusting any split:
 **StaffAny is per-person data too.** Rosters carry names, so it is not
 automatically safer than payroll bills. Ingest hours aggregated by venue, date
 and role — never by individual.
+
+### The daily report and the messaging channel: decided 11 Oct 2026
+
+**The channel is WhatsApp**, because everyone already uses it, and a channel
+nobody opens is worth nothing. Telegram was the brief's original choice and
+stays the fallback. The chat logic is kept separate from the sender so either
+can be connected.
+
+**A daily FIGURES report goes out every morning; advice stays weekly.** It
+carries yesterday against the same weekday a week earlier, week to date against
+the same weekdays of the week before, month to date against the same days FOUR
+WEEKS earlier (1-10 Oct against 3-12 Sep, so the weekend count matches; five
+weeks past the 28th, or the comparison overlaps the month), and tonight's book.
+Built in `src/lib/daily-report.ts` (pure, tested) and `daily-report-read.ts`,
+served at `/api/daily-report` and previewed at `/daily.html`. **Nothing is sent
+yet**: the preview exists so the figures are checked against the dashboard and
+the Monday board before the message reaches anybody's phone.
+
+A closed weekday has no Revel row (the ingest refuses an empty file), so the
+report steps over `closed_weekdays` before judging a file late -- otherwise
+every Monday would report Firangi's Sunday as missing. A genuinely late file
+cuts the windows to the last day there is, and the message says so.
+
+**No personal or payroll data over WhatsApp either.** Messages to a business
+pass through Meta's servers, so they are not end-to-end encrypted to us -- the
+same reason as Telegram.
+
+## Later: parked features (recorded 11 Oct 2026)
+
+Agreed as worth doing and deliberately not started. Each needs the decision or
+prerequisite named before it is built. Move an item out of this list when it
+is built or dropped.
+
+- **WhatsApp sending.** Waiting on two things from Khai: Meta Business
+  verification (check Business Settings -> Security Centre first; Meta already
+  holds a verified entity for the Instagram connection, so it may be done) and
+  a dedicated Singapore number not signed in to the WhatsApp app. Design: the
+  morning report goes as an approved UTILITY template (fixed wording, one line
+  per blank, optional chart image), because outside 24 hours of the person's
+  last message only templates may be sent. A quick-reply button ("Ask Sauron")
+  opens the 24-hour window when tapped; Sauron's own messages never do. Roughly
+  US$0.016 a message in Singapore per a third-party table -- confirm on Meta's
+  rate card. **Policy risk:** since 15 Jan 2026 Meta bars general-purpose AI
+  assistants from the WhatsApp Business Platform. An internal tool for Dandy's
+  own managers should be outside it; selling Sauron to other operators through
+  WhatsApp (Phase 4) is closer to the line, so get Meta's answer in writing
+  first -- the Google Business Profile lesson again.
+- **Returning guests and guest profiles.** Khai: "later stage feature". The
+  warehouse holds no guest names by design; profiles would be fetched LIVE from
+  SevenRooms when somebody looks (`src/lib/sevenrooms-guest-probe.ts` exists
+  and has never been run). Undecided: (A) counts on the chat channel and names
+  only behind the web login, or (B) first names and visit counts on the chat.
+  B puts personal data through Meta and changes the rule above.
+- **Month to date against a monthly budget**, once a budget exists per venue.
+  It answers "are we on track", which beats "are we up". Until then: four
+  weeks earlier.
+- **One month-to-date basis, not two.** The dashboard's month to date compares
+  the same DATES last month (with a weekend-count warning); the daily report
+  compares four weeks earlier, as Khai chose. The current-period figure agrees;
+  the comparison does not. Decide whether the dashboard should follow.
+- **Tonight's forecast in the daily report.** The pickup model starts at one
+  day out; same-day (lead 0) has never been backtested, so the report shows the
+  book only. Add it only with its own track record, per the forecast rule.
+- **Two-way chat on WhatsApp/Telegram**: questions answered with the same tools
+  as the web chat, follow-ups kept per person, buttons that feed a
+  recommendation's status and rating. Same three-axis security as the web.
+- **Voice notes.** The bots receive them; Claude cannot hear audio, so it needs
+  a speech-to-text service first.
+- **Group chats per venue** (manager plus head chef). Needs a who-sees-what
+  decision; start one-to-one.
+- **Zeemart.** The only source of stock counts. With it, Flash COGS coverage
+  can separate missing bills from stock change, and weekly food cost becomes
+  true food cost. Khai was offered this as the next build alongside WhatsApp.
+- **Writing Revel's figure back to the Monday board automatically.** Possible
+  through the Monday API, not recommended: it overwrites what a person typed on
+  another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
+  keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
+- **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
+  says there is no test suite. There are 1,492 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
