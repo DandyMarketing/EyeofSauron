@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 54 migrations, 25 query tools, 11 ingest sources, 1,492 tests.
+started.** 54 migrations, 25 query tools, 11 ingest sources, 1,494 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -878,9 +878,10 @@ can be connected.
 
 **A daily FIGURES report goes out every morning; advice stays weekly.** It
 carries yesterday against the same weekday a week earlier, week to date against
-the same weekdays of the week before, month to date against the same days FOUR
-WEEKS earlier (1-10 Oct against 3-12 Sep, so the weekend count matches; five
-weeks past the 28th, or the comparison overlaps the month), and tonight's book.
+the same weekdays of the week before, month to date against the same DATES
+last month (1-10 Oct against 1-10 Sep -- Khai: "month to date should match
+month to month"; taken from the dashboard's own `periodWindow()`, and a
+different weekend or day count is said on its own line), and tonight's book.
 Built in `src/lib/daily-report.ts` (pure, tested) and `daily-report-read.ts`,
 served at `/api/daily-report` and previewed at `/daily.html`. **Nothing is sent
 yet**: the preview exists so the figures are checked against the dashboard and
@@ -922,12 +923,8 @@ is built or dropped.
   only behind the web login, or (B) first names and visit counts on the chat.
   B puts personal data through Meta and changes the rule above.
 - **Month to date against a monthly budget**, once a budget exists per venue.
-  It answers "are we on track", which beats "are we up". Until then: four
-  weeks earlier.
-- **One month-to-date basis, not two.** The dashboard's month to date compares
-  the same DATES last month (with a weekend-count warning); the daily report
-  compares four weeks earlier, as Khai chose. The current-period figure agrees;
-  the comparison does not. Decide whether the dashboard should follow.
+  It answers "are we on track", which beats "are we up". Until then: the same
+  dates last month, on the dashboard and in the daily report alike.
 - **Tonight's forecast in the daily report.** The pickup model starts at one
   day out; same-day (lead 0) has never been backtested, so the report shows the
   book only. Add it only with its own track record, per the forecast rule.
@@ -946,7 +943,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,492 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,494 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

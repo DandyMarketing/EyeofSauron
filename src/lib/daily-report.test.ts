@@ -8,10 +8,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  reportWindows, reportDay, spanFigures, composeVenueReport, dayLabel, spanLabel, type SalesDay,
+  reportWindows, reportDay, spanFigures, composeVenueReport, dayLabel, spanLabel, calendarNote, type SalesDay,
 } from './daily-report.js';
+import { periodWindow } from './dashboard-window.js';
 import type { CoversSummary } from './covers.js';
-import { weekdayOf } from '../ingest/closures.js';
 
 const row = (date: string, gross: number, net: number, bills = 10): SalesDay => ({
   business_date: date, gross_sales: gross, net_sales: net, item_discounts: 0, order_discounts: 0, total_transactions: bills,
@@ -27,31 +27,44 @@ const coversMap = (entries: Array<[string, number, number?]>) => new Map<string,
 const venue = { id: 'v1', name: 'Firangi Superstar', slug: 'firangi' };
 
 describe('the three windows are like for like by weekday', () => {
-  test('a Saturday: same day last week, Mon–Sat, and month to date four weeks back', () => {
+  test('a Saturday: same day last week, Mon–Sat, and the same dates last month', () => {
     const w = reportWindows('2026-10-10');
     assert.deepEqual(w.day, { current: { start: '2026-10-10', end: '2026-10-10' }, prior: { start: '2026-10-03', end: '2026-10-03' }, days: 1 });
     assert.deepEqual(w.wtd.current, { start: '2026-10-05', end: '2026-10-10' });
     assert.deepEqual(w.wtd.prior, { start: '2026-09-28', end: '2026-10-03' });
     assert.equal(w.wtd.days, 6);
-    // Khai, 11 Oct 2026: four weeks earlier, not the same dates last month.
+    // Khai, 11 Oct 2026: "month to date should match month to month".
     assert.deepEqual(w.mtd.current, { start: '2026-10-01', end: '2026-10-10' });
-    assert.deepEqual(w.mtd.prior, { start: '2026-09-03', end: '2026-09-12' });
+    assert.deepEqual(w.mtd.prior, { start: '2026-09-01', end: '2026-09-10' });
     assert.equal(w.mtd.days, 10);
   });
 
-  test('the month comparison keeps every weekday paired', () => {
-    for (const day of ['2026-10-10', '2026-10-28', '2026-10-29', '2026-10-31', '2026-02-28']) {
+  test('the month is the dashboard\'s own window, so the two cannot disagree', () => {
+    for (const day of ['2026-10-10', '2026-10-31', '2026-03-31', '2026-08-01']) {
+      const p = periodWindow('mtd', day, day);
       const m = reportWindows(day).mtd;
-      assert.equal(weekdayOf(m.prior.start), weekdayOf(m.current.start), day);
-      assert.equal(weekdayOf(m.prior.end), weekdayOf(m.current.end), day);
+      assert.deepEqual([m.current, m.prior], [p.current, p.prior], day);
     }
   });
+});
 
-  test('past the 28th it shifts five weeks, so the comparison never overlaps the month', () => {
+describe('the calendar is named when it moves a month comparison', () => {
+  test('a weekend day more is said', () => {
+    // 1–10 Oct 2026 holds Sat 3, Sun 4, Sat 10; 1–10 Sep holds Sat 5, Sun 6.
+    assert.equal(
+      calendarNote({ current: { start: '2026-10-01', end: '2026-10-10' }, prior: { start: '2026-09-01', end: '2026-09-10' } }),
+      '_Month to date has 3 weekend days against 2, so part of the change is the calendar._',
+    );
+  });
+
+  test('a short previous month is said', () => {
     const m = reportWindows('2026-10-31').mtd;
-    assert.equal(m.days, 31);
-    assert.ok(m.prior.end < m.current.start, `${m.prior.end} overlaps ${m.current.start}`);
-    assert.deepEqual(m.prior, { start: '2026-08-27', end: '2026-09-26' });
+    assert.match(calendarNote(m) ?? '', /31 days against 30/);
+  });
+
+  test('a matching calendar says nothing', () => {
+    // 1–7 of any two months hold exactly one weekend.
+    assert.equal(calendarNote({ current: { start: '2026-10-01', end: '2026-10-07' }, prior: { start: '2026-09-01', end: '2026-09-07' } }), null);
   });
 });
 
@@ -112,7 +125,7 @@ describe('the composed report', () => {
     assert.equal(r.tonight.booked, 118);
     assert.match(r.text, /\*Yesterday\* \(Sat 10 Oct\): \$1,100 \(\+10% vs Sat 3 Oct\) · 30 covers \(\+20%\)/);
     assert.match(r.text, /\*Week to date\* \(5–10 Oct\): \$2,200 \(−29% vs 28 Sep–3 Oct\)/);
-    assert.match(r.text, /\*Month to date\* \(1–10 Oct\): \$4,300 \(\+115% vs 3–12 Sep\) · 55 covers\n/);
+    assert.match(r.text, /\*Month to date\* \(1–10 Oct\): \$4,300 \(\+330% vs 1–10 Sep\) · 55 covers\n_Month to date has 3 weekend days against 2/);
     assert.match(r.text, /\*Tonight\*: 118 covers booked/);
   });
 

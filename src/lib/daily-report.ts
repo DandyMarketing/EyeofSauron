@@ -17,16 +17,18 @@
  * EVERY COMPARISON IS LIKE FOR LIKE BY WEEKDAY, the dashboard's rule:
  *   - yesterday against the same weekday a week earlier;
  *   - week to date against the same weekdays of the week before;
- *   - month to date against the same number of days FOUR WEEKS earlier
- *     (1-10 Oct against 3-12 Sep), so the weekend count matches. Khai chose this
- *     over the same dates last month, which can hold a Saturday more or fewer;
- *     a monthly budget will replace it when one exists. Past the 28th the shift
- *     is five weeks, or the comparison would overlap the month it is compared to.
+ *
+ * EXCEPT THE MONTH, which is by DATE: 1-10 Oct against 1-10 Sep. Khai, 11 Oct
+ * 2026: "the month to date should match month to month". It is the dashboard's
+ * rule, taken from `periodWindow()` itself so the two can never disagree. The
+ * spans can then hold a different number of weekend days -- or of days, on the
+ * 31st -- and the message says so on its own line rather than letting the
+ * calendar pass for trade. A monthly budget will sit beside it when one exists.
  */
 
 import { salesFiguresOf } from './sales.js';
 import type { CoversSummary } from './covers.js';
-import { dashboardWindow, movement } from './dashboard-window.js';
+import { dashboardWindow, movement, periodWindow, weekendDays } from './dashboard-window.js';
 import { weekdayOf } from '../ingest/closures.js';
 
 export interface Span { start: string; end: string }
@@ -44,24 +46,19 @@ export function addDays(date: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function spanDays(s: Span): number {
+export function spanDays(s: Span): number {
   return Math.round((Date.parse(`${s.end}T00:00:00Z`) - Date.parse(`${s.start}T00:00:00Z`)) / 86400_000) + 1;
 }
 
 /** The three comparisons for a report whose last day is `day`. */
 export function reportWindows(day: string): ReportWindows {
   const w = dashboardWindow(day);
-  const monthStart = day.slice(0, 8) + '01';
-  const mtdDays = spanDays({ start: monthStart, end: day });
-  const shift = mtdDays <= 28 ? 28 : 35;
+  // Built AS OF the report day, so "to date" means to the last day reported.
+  const m = periodWindow('mtd', day, day);
   return {
     day: { current: { start: day, end: day }, prior: { start: addDays(day, -7), end: addDays(day, -7) }, days: 1 },
     wtd: { current: w.current, prior: w.prior, days: w.days },
-    mtd: {
-      current: { start: monthStart, end: day },
-      prior: { start: addDays(monthStart, -shift), end: addDays(day, -shift) },
-      days: mtdDays,
-    },
+    mtd: { current: m.current, prior: m.prior, days: m.days },
   };
 }
 
@@ -257,6 +254,20 @@ function figuresText(l: ReportLine, priorLabel: string): string {
 }
 
 /**
+ * What the calendar did to a by-date month comparison, when it did anything.
+ * Weekend days are worth far more than a Tuesday here, so "−6%" with one
+ * Saturday fewer is mostly the calendar.
+ */
+export function calendarNote(l: Pick<ReportLine, 'current' | 'prior'>): string | null {
+  const bits: string[] = [];
+  const dNow = spanDays(l.current), dThen = spanDays(l.prior);
+  if (dNow !== dThen) bits.push(`${dNow} days against ${dThen}`);
+  const wNow = weekendDays(l.current.start, l.current.end), wThen = weekendDays(l.prior.start, l.prior.end);
+  if (wNow !== wThen) bits.push(`${wNow} weekend day${wNow === 1 ? '' : 's'} against ${wThen}`);
+  return bits.length ? `_Month to date has ${bits.join(' and ')}, so part of the change is the calendar._` : null;
+}
+
+/**
  * The message, in WhatsApp's own markup (*bold*). Kept to one fact per line so
  * it can become a template with one line per blank when WhatsApp is connected.
  */
@@ -275,7 +286,11 @@ export function reportText(r: Omit<VenueDailyReport, 'text'>): string {
       out.push(`*Yesterday* (${dayLabel(r.day.current.start)}): ${figuresText(r.day, dayLabel(r.day.prior.start))}`);
     }
     if (r.wtd) out.push(`*Week to date* (${spanLabel(r.wtd.current)}): ${figuresText(r.wtd, spanLabel(r.wtd.prior))}`);
-    if (r.mtd) out.push(`*Month to date* (${spanLabel(r.mtd.current)}): ${figuresText(r.mtd, spanLabel(r.mtd.prior))}`);
+    if (r.mtd) {
+      out.push(`*Month to date* (${spanLabel(r.mtd.current)}): ${figuresText(r.mtd, spanLabel(r.mtd.prior))}`);
+      const note = calendarNote(r.mtd);
+      if (note) out.push(note);
+    }
   }
 
   if (r.tonight.closed) out.push('*Tonight*: closed');
