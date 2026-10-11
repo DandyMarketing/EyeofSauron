@@ -948,6 +948,11 @@ from the dashboard for the same week. The meal-period figure is the one
 exception -- Revel's hourly report has no service charge by meal -- and the tool
 labels it as a different measure.
 
+**`Staff costs - Tips` is NOT treated as payroll** (Khai, 11 Oct 2026: managers
+can see tips). It is pooled money paid out to staff rather than any person's
+pay, so its amount shows in the P&L like any operating expense. Wages, CPF, SDL
+and FWL remain payroll: managers see their % of income only.
+
 **Function, decided the same day, needs no schema change:**
 - **Head chef**: the same rights as a manager, at their own venue -- a
   `manager` grant on that venue.
