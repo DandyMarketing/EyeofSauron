@@ -477,6 +477,11 @@ and its API is refused on cost, so the correction is a manual re-upload.
 **Recurs?** **Every customer on Revel**, and any POS that lets a past day change
 after a nightly export. The board works as a witness here only because Finance
 maintains one; a customer without a second source would never see it.
+**Closed, 11 Oct 2026.** Finance confirmed they made the board corrections but
+could not say why Revel changed after the export; it reads as a Revel-side
+behaviour. Khai decided to leave it there: the hourly sweep and the alert card
+are the standing measure, and Revel support was not pursued. Reopen only if
+the sweep starts raising these often.
 
 ---
 
