@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  closeDateFor, isPeriodClosed, isSettled, latestClosedMonth,
+  closeDateFor, isPeriodClosed, isSettled, latestClosedMonth, monthOpenUntil,
   CLOSE_DAY_OF_FOLLOWING_MONTH, SETTLING_WORKING_DAYS,
 } from './accounting-period.js';
 
@@ -168,4 +168,17 @@ test('it agrees with isPeriodClosed, which is the rule of record', () => {
   const next = new Date(`${latest}T00:00:00Z`);
   next.setUTCMonth(next.getUTCMonth() + 1);
   assert.ok(!isPeriodClosed(next.toISOString().slice(0, 10), asOf), 'the month after must be open');
+});
+
+describe('monthOpenUntil — is the month on screen still moving?', () => {
+  // Neon Pigeon's September food cost moved $241.22 between 6 and 11 Oct 2026.
+  test('September is open until 15 Oct, and says so', () => {
+    assert.equal(monthOpenUntil('2026-09-30', '2026-10-11'), '2026-10-15');
+    assert.equal(monthOpenUntil('2026-09-30', '2026-10-14'), '2026-10-15');
+  });
+
+  test('from the close date on, it is final and nothing is said', () => {
+    assert.equal(monthOpenUntil('2026-09-30', '2026-10-15'), null);
+    assert.equal(monthOpenUntil('2026-09-30', '2026-11-02'), null);
+  });
 });

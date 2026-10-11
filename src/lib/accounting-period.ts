@@ -56,6 +56,19 @@ export function isPeriodClosed(businessDate: string, asOf: Date = new Date()): b
 }
 
 /**
+ * Is a month still open in the books, and until when?
+ *
+ * For the monthly figures on the dashboard, which used to show a month as if it
+ * were final from the day it ended. Neon Pigeon's September food cost moved by
+ * $241.22 between 6 and 11 Oct 2026 as Finance entered late bills -- correct,
+ * and invisible. `today` is a YYYY-MM-DD string, the dashboard's own day.
+ */
+export function monthOpenUntil(monthEnd: string, today: string): string | null {
+  const closes = closeDateFor(monthEnd);
+  return today < closes ? closes : null;
+}
+
+/**
  * The most recent month whose figures are settled, as YYYY-MM-01.
  *
  * The reconciliation code has always known this rule; the AI never did. The

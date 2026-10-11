@@ -37,6 +37,7 @@ import {
   historyHorizon, LIFETIME_LOOKBACK_DAYS,
   type RetentionCounts, type RetentionShares, type HistoryHorizon,
 } from './retention-month.js';
+import { monthOpenUntil } from './accounting-period.js';
 import { costRatios, costCaveats, costBucket, isSushiSales, type CostRatios, type PLRow } from './cost-ratios.js';
 import { trailingMonths, costTrend, trendNote, type CostPoint, type MonthInput } from './cost-trend.js';
 import { readAllPages, selectAll } from './paged.js';
@@ -139,6 +140,13 @@ export interface CostBlock {
   caveats: string[];
   /** False when no P&L has been ingested for that month. Never inferred. */
   available: boolean;
+  /**
+   * The close date, while the month is still open in the books -- its figures
+   * can still move as late bills are entered. Null once it has closed.
+   */
+  open_until?: string | null;
+  /** When Sauron last read this month from Xero (latest fetched_at). */
+  read_at?: string | null;
 }
 
 export interface DashboardPayload {
@@ -838,7 +846,7 @@ async function buildCosts(
     const perVenue = await Promise.all(venues.map(async v => {
       const [{ data: pl }, { data: ops }, accountMap] = await Promise.all([
         selectAll(() => supabaseAdmin.from('profit_and_loss')
-          .select('section, account_name, amount, is_summary')
+          .select('section, account_name, amount, is_summary, fetched_at')
           .eq('venue_id', v.id)
           .gte('period_start', month.start)
           .lte('period_end', month.end)),
@@ -854,15 +862,21 @@ async function buildCosts(
         const { canonical_account, business_line } = resolveAccount(r.account_name, accountMap);
         return { ...r, amount: Number(r.amount), canonical_account, business_line };
       });
+      // ISO timestamps compare correctly as strings.
+      const readAt = (pl ?? []).reduce((m: string | null, r: any) => (r.fetched_at && (!m || r.fetched_at > m) ? r.fetched_at : m), null);
 
-      return { slug: v.slug, rows, sales: sumClassSplits(ops ?? []) };
+      return { slug: v.slug, rows, sales: sumClassSplits(ops ?? []), readAt };
     }));
 
     for (const v of perVenue) {
       const available = v.rows.length > 0;
       if (available) anyAvailable = true;
       const ratios = costRatios(v.rows, v.sales);
-      out[v.slug] = { month, ratios, caveats: costCaveats(ratios, 1), available };
+      out[v.slug] = {
+        month, ratios, caveats: costCaveats(ratios, 1), available,
+        open_until: monthOpenUntil(month.end, today),
+        read_at: v.readAt,
+      };
     }
 
     if (venues.length > 1) {
@@ -883,7 +897,13 @@ async function buildCosts(
         }),
         { food_sales: 0, beverage_sales: 0, days: { monday_board: 0, none: 0 } });
       const ratios = costRatios(allRows, allSales);
-      out.group = { month, ratios, caveats: costCaveats(ratios, 1), available: allRows.length > 0 };
+      const reads = perVenue.map(v => v.readAt).filter(Boolean) as string[];
+      out.group = {
+        month, ratios, caveats: costCaveats(ratios, 1), available: allRows.length > 0,
+        open_until: monthOpenUntil(month.end, today),
+        // The OLDEST venue read: the group figure is only as current as that.
+        read_at: reads.length ? reads.sort()[0] : null,
+      };
     }
 
     return anyAvailable ? out : null;

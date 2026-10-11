@@ -1209,6 +1209,28 @@ function periodCostPanel(payload, v, w) {
     '</div>';
 }
 
+/**
+ * Is this month still moving in Xero, and how fresh is our copy?
+ *
+ * A month stays open until the 15th of the next, and Finance keeps entering
+ * late bills until then: Neon Pigeon's September food cost rose $241.22 between
+ * 6 and 11 Oct 2026, correctly, while this panel showed it as final. Khai:
+ * say so on screen. The "last read" time is Singapore time.
+ */
+function monthOpenNote(c) {
+  const sgt = (iso, opts) => new Date(iso).toLocaleString('en-SG', Object.assign({ timeZone: 'Asia/Singapore' }, opts));
+  const read = c.read_at
+    ? 'Last read from Xero: ' + sgt(c.read_at, { day: 'numeric', month: 'short' }) + ', ' +
+      sgt(c.read_at, { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase() + '.'
+    : '';
+  if (c.open_until) {
+    return '<p class="figure-note provisional">' + esc(c.month.label) + ' is still open in Xero until ' +
+      esc(sgt(c.open_until + 'T00:00:00+08:00', { day: 'numeric', month: 'short' })) +
+      ', so these figures may still change as late bills are entered. ' + esc(read) + '</p>';
+  }
+  return read ? '<p class="figure-note">' + esc(read) + '</p>' : '';
+}
+
 function costPanel(payload, v) {
   const wait = calculating(payload, 'costs', 'Cost of sales');
   if (wait) return wait;
@@ -1242,6 +1264,7 @@ function costPanel(payload, v) {
     : '';
 
   return '<div class="panel"><h2>Cost of sales</h2>' +
+    monthOpenNote(c) +
     '<table><tbody>' +
       row('Food', r.food) + row('Beverage', r.beverage) + row('Combined', r.combined) + discountRow + unmapped +
     '</tbody></table>' +
