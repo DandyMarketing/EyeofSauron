@@ -130,6 +130,7 @@ test('the purchases-not-consumption warning is always on the panel, and says why
    */
   const page = readFileSync('public/index.html', 'utf8');
   const panel = page.slice(page.indexOf('function periodCostPanel('), page.indexOf('function costPanel('));
+  assert.match(panel, /Flash COGS/);
   assert.match(panel, /what was BOUGHT, not what was used/);
   assert.match(panel, /read the direction over several weeks/);
   const r = weeklyCogs([bill('acc-food', 1)], names, { food_sales: 10, beverage_sales: 10 }, { food: 100, beverage: 100 });
@@ -379,6 +380,6 @@ test('bills above the ledger are explained, not hidden or capped', () => {
   const r = weeklyCogs([bill('acc-food', 1)], names, { food_sales: 10, beverage_sales: 10 }, { food: 100, beverage: 143.3 });
   assert.equal(r.beverage.coverage_pct, 143.3, 'shown as it is');
   assert.equal(r.beverage.usable, true);
-  assert.ok(r.caveats.some(c => /Beverage: bills .* 143\.3% of the ledger/.test(c)));
-  assert.ok(!r.caveats.some(c => /^Food: bills .* of the ledger/.test(c)), 'food at 100% says nothing');
+  assert.ok(r.caveats.some(c => /Beverage: last month's bills came to 143\.3% of the ledger/.test(c) && /month-end count/.test(c)));
+  assert.ok(!r.caveats.some(c => /^Food: last month's bills/.test(c)), 'food at 100% says nothing');
 });

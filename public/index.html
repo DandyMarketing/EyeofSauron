@@ -1181,7 +1181,7 @@ function sushiWeekPanel(payload, v, w) {
 }
 
 function periodCostPanel(payload, v, w) {
-  const wait = calculating(payload, 'period_costs', 'Cost of sales \u00b7 ' + w.label.toLowerCase());
+  const wait = calculating(payload, 'period_costs', 'Flash COGS \u00b7 ' + w.label.toLowerCase());
   if (wait) return wait;
   const c = payload.period_costs && payload.period_costs[v.slug];
   if (!c) return '';
@@ -1197,14 +1197,15 @@ function periodCostPanel(payload, v, w) {
       ' <span class="cov">' + pct(s.coverage_pct) + ' covered</span></td></tr>';
   };
 
-  return '<div class="panel"><h2>Cost of sales · ' + esc(w.label.toLowerCase()) + '</h2>' +
+  // "Flash COGS" is the team's own name for it (Khai, 11 Oct 2026): purchases
+  // with no stock count, which is only taken at month end. ONE note says what
+  // the panel is; it used to be said twice in different words.
+  return '<div class="panel"><h2>Flash COGS · ' + esc(w.label.toLowerCase()) + '</h2>' +
     settlementNote(c.settlement) +
     '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
-    // ONE note for what the panel is. It used to say "from supplier invoices,
-    // which carry a date" here and again, reworded, in the first caveat below.
-    '<p class="figure-note">From supplier bills dated in this period, so it is what was BOUGHT, not what was used: one large delivery lands in the week it was invoiced, so read the direction over several weeks, not the level of one. ' +
-    'Coverage is how much of the ledger those bills explain, measured on the last complete month. ' +
-    'A line shown as "only X% on bills" is mostly absence: anything paid by card or bank transfer, or coded to inventory, never reaches a bill.</p>' +
+    '<p class="figure-note">Purchases in this period from supplier bills, with no stock count: what was BOUGHT, not what was used. ' +
+    'Stock is counted at month end, so the monthly cost of sales below is the cost of what was used. One large delivery lands in the week it was invoiced, so read the direction over several weeks, not the level of one. ' +
+    '"Covered" compares last month\'s bills with the ledger\'s cost for that month. The gap includes the month-end stock change, so read it as "are the bills all there", not as an exact figure: well under 100% usually means costs paid by card or bank transfer that never reach a bill.</p>' +
     (c.caveats.length ? '<p class="figure-note">' + c.caveats.map(x => esc(x)).join('<br><br>') + '</p>' : '') +
     '</div>';
 }

@@ -117,6 +117,13 @@ supplier breakdown as complete without the coverage percentage beside it.
   own COGS.
 - **Voided and deleted bills are never spend.** A weekly figure is
   provisional until seven days after the week ends.
+- **The weekly figure is "Flash COGS"** (Khai's name for it, 11 Oct 2026):
+  purchases from bills with NO stock count, because stock is counted only at
+  month end. The monthly figure from Xero includes that count, so it is the cost
+  of what was used. Weekly coverage (bills ÷ ledger) therefore mixes missing
+  bills with the month's stock change: over 100% usually means stock built up.
+  **The stock count is not recorded anywhere Sauron can read**; if it ever is,
+  stock change can be split out and coverage would measure missing bills alone.
 
 **One authorization, one refresh token, three organisations — and rotation
 breaks all but one of them if you let it.** Xero issues a SINGLE token pair for

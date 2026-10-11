@@ -362,11 +362,13 @@ export function weeklyCogs(
       // ledger's COGS - Alcohol for September. Not an error in the bills -- the
       // ledger is lower than purchases whenever something is journalled OUT of
       // cost of sales, and journals are the one thing we cannot read.
+      // Khai, 11 Oct 2026: stock is counted only at month end and the weekly
+      // figure is a flash cost, so the usual reason is the stock count.
       out.caveats.push(
-        `${label}: bills for the last complete month came to ${s.coverage_pct}% of the ledger's ${label.toLowerCase()} cost — more than it. ` +
-        'The ledger ends up below purchases when something is moved out of cost of sales by journal: a month-end stock count, ' +
-        'staff meals or wastage, or stock sent to a sister venue. None of those is a bill, so this weekly figure is what was ' +
-        'bought and reads higher than what the ledger counts as used.',
+        `${label}: last month's bills came to ${s.coverage_pct}% of the ledger's ${label.toLowerCase()} cost. ` +
+        'Purchases above the ledger usually mean stock built up by the month-end count — bought, still on the shelf. ' +
+        'Staff meals, wastage or stock sent to a sister venue moved out of cost of sales do the same. Flash COGS counts ' +
+        'purchases, so in a month like that it reads higher than what the ledger counts as used.',
       );
     } else if (!s.usable) {
       out.caveats.push(
@@ -376,6 +378,7 @@ export function weeklyCogs(
         // (Neon Pigeon, September 2026: 66.9%) -- an explanation of the
         // wrong account, which is worse than none.
         'mostly absence: anything paid by card or bank transfer, or coded to inventory and journalled out later, never touches a bill. ' +
+        'Part of the gap can also be stock used from the shelf, which the month-end count adds to the ledger and no bill shows. ' +
         'Do not quote this percentage — use the monthly ledger figure.',
       );
     }
