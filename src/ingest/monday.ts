@@ -831,14 +831,43 @@ export async function sweepRevelDrift(asOf: Date = new Date()): Promise<{ differ
     .gte('business_date', since));
   if (error) throw new Error(`revel drift sweep: ${error.message}`);
 
-  const { differ, agree } = revelBoardDrift(rows as any[], asOf);
-
-  const { data: alerts, error: alertError } = await selectAll(() => supabase
+  const { data: recentAlerts, error: alertError } = await selectAll(() => supabase
     .from('reconciliation_alerts')
     .select('id, venue_id, business_date, resolved, monday_gross, revel_gross')
     .eq('alert_type', 'reconciliation_failed')
     .gte('business_date', since));
   if (alertError) throw new Error(`revel drift sweep: ${alertError.message}`);
+
+  /**
+   * OPEN alerts are re-checked whatever their age; only RAISING is limited to
+   * the window. Khai applied 39 August board corrections on 11 Oct 2026, which
+   * made the board agree with Revel on most of the August days still carrying a
+   * "reconciliation failed" card -- and nothing ever looked at them again,
+   * because the sweep stopped at five weeks. Only days that already have an
+   * open card are read, so this costs nothing once the backlog is gone.
+   */
+  const { data: olderOpen, error: olderError } = await selectAll(() => supabase
+    .from('reconciliation_alerts')
+    .select('id, venue_id, business_date, resolved, monday_gross, revel_gross')
+    .eq('alert_type', 'reconciliation_failed')
+    .eq('resolved', false)
+    .lt('business_date', since));
+  if (olderError) throw new Error(`revel drift sweep: ${olderError.message}`);
+  let olderRows: any[] = [];
+  if (olderOpen.length > 0) {
+    const wanted = new Set(olderOpen.map((a: any) => `${a.venue_id}|${a.business_date}`));
+    const { data: candidates, error: olderRowError } = await selectAll(() => supabase
+      .from('daily_operations')
+      .select('venue_id, business_date, gross_sales, meal_periods')
+      .eq('data_source', 'both')
+      .in('venue_id', [...new Set(olderOpen.map((a: any) => a.venue_id))])
+      .in('business_date', [...new Set(olderOpen.map((a: any) => a.business_date))]));
+    if (olderRowError) throw new Error(`revel drift sweep: ${olderRowError.message}`);
+    olderRows = candidates.filter((r: any) => wanted.has(`${r.venue_id}|${r.business_date}`));
+  }
+
+  const { differ, agree } = revelBoardDrift([...(rows as any[]), ...olderRows], asOf);
+  const alerts = [...recentAlerts, ...olderOpen];
   const open = alerts.filter((a: any) => !a.resolved);
   const resolved = alerts.filter((a: any) => a.resolved);
   const openByDay = new Map(open.map((o: any) => [`${o.venue_id}|${o.business_date}`, o.id]));

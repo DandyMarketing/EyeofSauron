@@ -1910,7 +1910,8 @@ function drawAlerts(a, alerts, page, scroll) {
           ? '<span title="' + al.duplicates + ' identical alerts for this day" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:8px">&times;' + al.duplicates + '</span>'
           : '';
         const diff = (al.difference !== null && al.difference !== undefined)
-          ? '<span style="font-size:12px;color:var(--text-muted);margin-left:8px">$' + escapeHtml(String(al.difference)) + '</span>'
+          // Sign before the currency: "$-32" reads as a typo.
+          ? '<span style="font-size:12px;color:var(--text-muted);margin-left:8px">' + (Number(al.difference) < 0 ? '\u2212$' + escapeHtml(String(-Number(al.difference))) : '$' + escapeHtml(String(al.difference))) + '</span>'
           : '';
         return '<details class="alert-card" data-id="' + al.id + '" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
           '<summary style="cursor:pointer;font-size:13px">' +
