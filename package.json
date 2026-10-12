@@ -38,6 +38,7 @@
     "@supabase/supabase-js": "^2.47.0",
     "csv-parse": "^5.6.0",
     "dotenv": "^16.4.0",
+    "exceljs": "^4.4.0",
     "hono": "^4.12.32",
     "xlsx": "^0.18.5"
   },

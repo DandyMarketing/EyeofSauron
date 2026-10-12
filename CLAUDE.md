@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 55 migrations, 25 query tools, 11 ingest sources, 1,509 tests.
+started.** 55 migrations, 25 query tools, 11 ingest sources, 1,513 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -896,6 +896,25 @@ cuts the windows to the last day there is, and the message says so.
 pass through Meta's servers, so they are not end-to-end encrypted to us -- the
 same reason as Telegram.
 
+### Event P&L in Excel: built 12 Oct 2026
+
+The planner's brief downloads as a workbook in the group's own template shape
+(Khai's `26-1012_NP_NYE_2026.xlsx`): revenue programmed by floor x time slot x
+covers x per person on the right, the P&L by section on the left, live
+formulas throughout. `src/lib/event-pnl.ts` builds it (ExcelJS, chosen because
+the SheetJS community build cannot write formatting); `event-rates.ts` reads
+the venue's rates; `POST /api/plan/excel` serves it.
+
+Two things the template got wrong, and the reason the builder exists rather
+than a copy of the file: its product-cost row had no formula (cost $0, profit
+75%), and one revenue slot had no total ($7,680 missing). **Product cost and
+group fees are never inputs**: they are computed per revenue line from the
+venue's measured food and drink cost and fee rate over its last three complete
+months, each with its source on the Assumptions sheet, and a rate that cannot
+be measured is blank and "to fill", never zero. Every line carries a BASIS --
+our data, source, proposal, to fill -- the rule the planner follows. Each
+formula is written with its result so a phone's preview shows the figures.
+
 ## Later: parked features (recorded 11 Oct 2026)
 
 Agreed as worth doing and deliberately not started. Each needs the decision or
@@ -943,7 +962,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,509 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,513 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

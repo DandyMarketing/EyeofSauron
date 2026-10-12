@@ -154,7 +154,8 @@
   .draft th, .draft td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
   .draft th { background: var(--bg); }
   .draft .missing { color: var(--error); font-size: 13px; margin-bottom: 12px; }
-  .draft .confirm-row { display: flex; gap: 10px; justify-content: flex-end; }
+  .draft .confirm-row { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+  .draft .excel-msg { margin: 8px 0 0; text-align: right; }
   .saved { color: var(--success); font-size: 14px; }
 
   /**
@@ -526,14 +527,48 @@ function renderDraft(d) {
     (d.concept ? '<p>' + escapeHtml(d.concept) + '</p>' : '') +
     taskTable +
     '<div class="confirm-row">' +
+      (d.pnl && (d.pnl.programming || []).length ? '<button class="secondary" data-act="excel">Download P&amp;L (Excel)</button>' : '') +
       '<button class="secondary" data-act="discard">Not yet</button>' +
       '<button data-act="confirm">Create this event</button>' +
-    '</div>';
+    '</div>' +
+    '<div class="excel-msg note"></div>';
 
   thread.appendChild(el);
   window.scrollTo(0, document.body.scrollHeight);
 
   el.querySelector('[data-act="discard"]').addEventListener('click', () => el.remove());
+  /**
+   * The P&L in the group's template shape, built on the server from this draft
+   * and the venue's measured rates. Fetched with the token and handed to the
+   * browser as a file -- a plain link could not carry the Authorization header.
+   */
+  el.querySelector('[data-act="excel"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const msg = el.querySelector('.excel-msg');
+    btn.disabled = true; btn.textContent = 'Building…'; msg.textContent = '';
+    try {
+      const res = await fetch('/api/plan/excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(d),
+      });
+      if (!res.ok) {
+        const out = await res.json().catch(() => ({}));
+        msg.textContent = out.error || 'Could not build the workbook.';
+      } else {
+        const blob = await res.blob();
+        const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'Event_PnL.xlsx';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        msg.textContent = 'Downloaded. Shaded cells are inputs; anything marked "to fill" still needs a number.';
+      }
+    } catch (err) {
+      msg.textContent = String(err.message || err);
+    }
+    btn.disabled = false; btn.textContent = 'Download P&L (Excel)';
+  });
   el.querySelector('[data-act="confirm"]').addEventListener('click', async () => {
     const btn = el.querySelector('[data-act="confirm"]');
     btn.disabled = true;

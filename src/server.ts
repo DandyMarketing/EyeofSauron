@@ -38,6 +38,8 @@ import {
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide } from './ai/plan-progress.js';
+import { buildEventPnlWorkbook } from './lib/event-pnl.js';
+import { venueRates } from './lib/event-rates.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -856,6 +858,58 @@ app.post('/api/plan/progress', async (c) => {
   } catch (e: any) {
     console.error(`[plan/progress] failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
+  }
+});
+
+/**
+ * The brief's P&L as an Excel workbook, in the group's own template shape.
+ *
+ * WRITES NOTHING to the database. Product cost and group fees are computed in
+ * the workbook from the venue's MEASURED rates over its last three complete
+ * months, read here -- never from the draft, which came through a browser and
+ * could say anything. Venue scope is checked like every other read: a rate is a
+ * venue's figure, and a manager gets only their own.
+ */
+app.post('/api/plan/excel', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const d = await c.req.json<any>().catch(() => null);
+  const pnl = d?.pnl;
+  if (!pnl || !Array.isArray(pnl.programming) || pnl.programming.length === 0) {
+    return c.json({ error: 'This brief has no revenue lines to put in a P&L yet. Ask the planner to set out the programming -- rooms, times, covers and prices -- then prepare the brief again.' }, 400);
+  }
+
+  const scoped = await venuesInScope(user);
+  const slugs: string[] = Array.isArray(d.venue_slugs) ? d.venue_slugs : [];
+  const chosen = scoped.filter(v => slugs.includes(v.slug));
+  if (chosen.length === 0) return c.json({ error: 'Name a venue you have access to.' }, 403);
+
+  try {
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const rates = await venueRates(chosen[0].id, today);
+    const wb = await buildEventPnlWorkbook({
+      name: String(d.name || 'Event'),
+      venues: chosen.map(v => v.name),
+      dates: d.start_date === d.end_date || !d.end_date ? String(d.start_date ?? '') : `${d.start_date} to ${d.end_date}`,
+      service_charge_pct: pnl.service_charge_pct ?? null,
+      programming: pnl.programming,
+      costs: Array.isArray(pnl.costs) ? pnl.costs : [],
+    }, rates, today);
+    const buf = await wb.xlsx.writeBuffer();
+    const file = `${String(d.name || 'Event').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Event'}_PnL.xlsx`;
+    return new Response(buf as ArrayBuffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${file}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (e: any) {
+    console.error(`[plan/excel] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: 'Could not build the P&L workbook.' }, 500);
   }
 });
 
