@@ -37,6 +37,7 @@ import {
   isConversationKind, type ConversationKind,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
+import { progressTool, summariseProgress, planTranscript } from './ai/plan-progress.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -792,9 +793,7 @@ app.post('/api/plan/draft', async (c) => {
   const history = body.history ?? [];
   if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
 
-  const transcript = history
-    .map(m => `${m.role === 'user' ? 'PLANNER' : 'YOU'}: ${m.content}`)
-    .join('\n\n');
+  const transcript = planTranscript(history);
 
   try {
     const structured = await anthropic.messages.create({
@@ -816,6 +815,46 @@ app.post('/api/plan/draft', async (c) => {
     return c.json({ draft: call.input });
   } catch (e: any) {
     console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: humanApiError(e) }, 500);
+  }
+});
+
+/**
+ * How far the plan has got: which of the playbook's decisions are settled.
+ *
+ * Asked for by the page AFTER an answer has rendered, so it never adds a second
+ * to the reply. A cheap forced-tool pass over the transcript, like the draft --
+ * the planner's own claim to progress would be the model marking its own work.
+ * Reads the conversation it is given and writes nothing.
+ */
+app.post('/api/plan/progress', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ history?: ChatMessage[] }>();
+  const history = body.history ?? [];
+  if (history.length === 0) return c.json(summariseProgress(null));
+
+  try {
+    const res = await anthropic.messages.create({
+      model: modelFor('lookup', process.env).model,
+      max_tokens: 4096,
+      system: [{
+        type: 'text',
+        text: 'You read an event-planning conversation and record which decisions THE PERSON PLANNING has settled -- by saying so, or by agreeing when the director proposed it. A question the director asked that was not answered is not settled. Be strict: a vague answer settles nothing. Summaries use the conversation\'s own words and never add a figure that is not in it.',
+        cache_control: { type: 'ephemeral' },
+      }],
+      tools: [progressTool() as any],
+      tool_choice: { type: 'tool', name: 'record_plan_progress' },
+      messages: [{ role: 'user', content: `The planning conversation:\n\n${planTranscript(history)}` }],
+    });
+    const call = res.content.find((b: any) => b.type === 'tool_use') as any;
+    return c.json(summariseProgress(call?.input));
+  } catch (e: any) {
+    console.error(`[plan/progress] failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
   }
 });

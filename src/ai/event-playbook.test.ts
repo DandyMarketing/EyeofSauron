@@ -125,6 +125,10 @@ test('the prompt keeps the empty events store from becoming a verdict', () => {
   // year's competing programme are both reachable (Khai, 12 Oct 2026).
   assert.match(EVENT_AGENT_PROMPT, /SAME OCCASION LAST YEAR/);
   assert.match(EVENT_AGENT_PROMPT, /AN EMPTY EVENTS STORE IS NOT AN EMPTY HISTORY/);
+  // Khai, 12 Oct 2026: "It keeps asking without sign of progress."
+  assert.match(EVENT_AGENT_PROMPT, /EVERY EXCHANGE MUST MOVE THE PLAN/);
+  assert.match(EVENT_AGENT_PROMPT, /RECOMMEND, THEN ASK FOR A YES/);
+  assert.match(EVENT_AGENT_PROMPT, /SAY A CAVEAT ONCE/);
   assert.match(EVENT_AGENT_PROMPT, /Never say "this has not been\s+tried here"/);
 });
 

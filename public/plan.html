@@ -219,6 +219,36 @@
     padding-top: 10px; margin-top: 10px; line-height: 1.5;
   }
   .withheld { color: var(--text-muted); font-style: italic; font-size: 14px; }
+  /* --- the progress board ------------------------------------------------- */
+  #progress { max-width: 860px; width: 100%; margin: 8px auto 0; padding: 0 20px; }
+  #progress details {
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  }
+  #progress summary {
+    list-style: none; cursor: pointer; padding: 10px 12px; font-size: 13px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  #progress summary::-webkit-details-marker { display: none; }
+  .pg-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .pg-count { font-weight: 600; }
+  .pg-count b { color: var(--accent); }
+  .pg-next { color: var(--text-muted); font-size: 12px; text-align: right; }
+  .pg-next span { color: var(--text); }
+  .pg-bar { display: flex; gap: 4px; }
+  .pg-seg { flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .pg-seg i { display: block; height: 100%; background: var(--success); }
+  .pg-stages { display: flex; gap: 4px; font-size: 10px; color: var(--text-muted); }
+  .pg-stages span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pg-body { padding: 4px 12px 12px; font-size: 13px; border-top: 1px solid var(--border); }
+  .pg-body h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 4px; font-weight: 600; }
+  .pg-row { display: flex; gap: 8px; padding: 3px 0; line-height: 1.35; }
+  .pg-row .mk { width: 14px; flex-shrink: 0; text-align: center; }
+  .pg-row.done .mk { color: var(--success); }
+  .pg-row.open .mk { color: var(--text-muted); }
+  .pg-row.wait .mk { color: var(--accent); }
+  .pg-row .sum { color: var(--text-muted); }
+  .pg-note { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
+  .pg-busy { opacity: .6; }
 </style>
 </head>
 <body>
@@ -248,6 +278,12 @@
       <span class="chev" aria-hidden="true">&#9662;</span>
     </button>
   </div>
+  <!--
+    WHERE THE PLAN STANDS. Khai, 12 Oct 2026: "It keeps asking without sign of
+    progress." Read from the conversation by a second pass after each answer
+    (POST /api/plan/progress), so it is not the planner grading itself.
+  -->
+  <div id="progress" hidden></div>
   <div id="history-overlay" hidden></div>
   <div id="history-panel" hidden role="listbox" aria-label="Your plans">
     <button id="new-plan">+ New plan</button>
@@ -406,6 +442,7 @@ async function send() {
 
     history.push({ role: 'user', content: message });
     history.push({ role: 'assistant', content: data.answer || '' });
+    refreshProgress();
     if (data.conversation_id && data.conversation_id !== conversationId) {
       conversationId = data.conversation_id;
       // The first sixty characters until the real title arrives; the list
@@ -535,6 +572,69 @@ async function prepareDraft() {
   setBusy(false);
 }
 
+/* --- progress board ------------------------------------------------------- */
+
+let progressSeq = 0;
+let progressOpen = false;
+
+/**
+ * Re-read progress from the conversation. Called after an answer has rendered,
+ * never before, so it costs the reply nothing. A sequence number drops a slow
+ * response that a newer one has overtaken -- otherwise switching plans quickly
+ * could paint one plan's board over another.
+ */
+async function refreshProgress() {
+  const box = document.getElementById('progress');
+  if (history.length === 0) { box.hidden = true; box.innerHTML = ''; return; }
+  const seq = ++progressSeq;
+  box.hidden = false;
+  if (!box.innerHTML) box.innerHTML = '<details><summary><div class="pg-head"><span class="pg-count">Reading where the plan stands…</span></div></summary></details>';
+  else box.classList.add('pg-busy');
+  try {
+    const res = await fetch('/api/plan/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ history }),
+    });
+    const p = await res.json();
+    if (seq !== progressSeq) return;
+    box.classList.remove('pg-busy');
+    if (!res.ok || p.error) {
+      // Said, not hidden: a board that silently stops updating is the same
+      // "no sign of progress" this exists to fix.
+      box.innerHTML = '<details><summary><div class="pg-head"><span class="pg-count">Could not read progress just now.</span></div></summary></details>';
+      return;
+    }
+    renderProgress(p);
+  } catch (e) {
+    if (seq === progressSeq) box.classList.remove('pg-busy');
+  }
+}
+
+function renderProgress(p) {
+  const box = document.getElementById('progress');
+  const seg = (s) => '<div class="pg-seg" title="' + escapeHtml(s.label + ': ' + s.settled + ' of ' + s.applicable) + '">' +
+    '<i style="width:' + (s.applicable ? Math.round(100 * s.settled / s.applicable) : 0) + '%"></i></div>';
+  const row = (cls, mk, label, sum) => '<div class="pg-row ' + cls + '"><span class="mk">' + mk + '</span><span>' +
+    escapeHtml(label) + (sum ? ' <span class="sum">— ' + escapeHtml(sum) + '</span>' : '') + '</span></div>';
+
+  const done = p.settled || [], open = p.open || [], wait = p.waiting_on || [];
+  box.innerHTML =
+    '<details' + (progressOpen ? ' open' : '') + '><summary>' +
+      '<div class="pg-head"><span class="pg-count"><b>' + p.counts.settled + '</b> of ' + p.counts.applicable + ' decided</span>' +
+        (p.next ? '<span class="pg-next">Next: <span>' + escapeHtml(p.next.label) + '</span></span>' : '<span class="pg-next">Ready for the brief</span>') +
+      '</div>' +
+      '<div class="pg-bar">' + (p.stages || []).map(seg).join('') + '</div>' +
+      '<div class="pg-stages">' + (p.stages || []).map(s => '<span>' + escapeHtml(s.label) + '</span>').join('') + '</div>' +
+    '</summary><div class="pg-body">' +
+      (done.length ? '<h4>Decided</h4>' + done.map(d => row('done', '✓', d.label, d.summary)).join('') : '') +
+      (wait.length ? '<h4>Waiting on someone</h4>' + wait.map(w => row('wait', '◷', w.item, w.who)).join('') : '') +
+      (open.length ? '<h4>Still open</h4>' + open.map(o => row('open', '○', o.label, '')).join('') : '') +
+      '<div class="pg-note">Read from the conversation after each answer. Tap to ' + (progressOpen ? 'close' : 'open') + '.</div>' +
+    '</div></details>';
+  box.querySelector('details').addEventListener('toggle', (e) => { progressOpen = e.target.open; });
+}
+
 /* --- saved plans ---------------------------------------------------------- */
 
 function historyPanel(open) {
@@ -615,6 +715,9 @@ async function loadPlans() {
 function startNewPlan() {
   conversationId = null;
   history = [];
+  progressSeq++;
+  document.getElementById('progress').hidden = true;
+  document.getElementById('progress').innerHTML = '';
   thread.innerHTML = INTRO_HTML;
   setConvoTitle('New plan');
   setBusy(false);
@@ -664,6 +767,8 @@ async function openPlan(id) {
       ' hidden because your access has changed since it was written.</div>');
   }
   setBusy(false);
+  document.getElementById('progress').innerHTML = '';
+  refreshProgress();
 }
 
 document.getElementById('convo-current').addEventListener('click', () =>
