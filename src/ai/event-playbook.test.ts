@@ -129,6 +129,13 @@ test('the prompt keeps the empty events store from becoming a verdict', () => {
   assert.match(EVENT_AGENT_PROMPT, /EVERY EXCHANGE MUST MOVE THE PLAN/);
   assert.match(EVENT_AGENT_PROMPT, /RECOMMEND, THEN ASK FOR A YES/);
   assert.match(EVENT_AGENT_PROMPT, /SAY A CAVEAT ONCE/);
+  // Khai, 12 Oct 2026: people do not know what makes it unique -- propose it,
+  // rank what to push, and use plain words.
+  assert.match(EVENT_AGENT_PROMPT, /PROPOSE THE CREATIVE ANSWERS/);
+  assert.match(EVENT_AGENT_PROMPT, /Never ask one of these cold/);
+  assert.match(EVENT_AGENT_PROMPT, /RANK WHAT TO PUSH/);
+  assert.match(EVENT_AGENT_PROMPT, /PLAIN WORDS/);
+  assert.match(JSON.stringify(eventDraftTool()), /What to push hardest/);
   assert.match(EVENT_AGENT_PROMPT, /Never say "this has not been\s+tried here"/);
 });
 

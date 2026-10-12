@@ -88,7 +88,7 @@ export const PLAYBOOK: PlaybookRow[] = [
     key: 'audience_motivation',
     stage: 'point',
     decision: 'Why that person gives up an evening for this.',
-    ask: 'Put yourself in that person\'s week. Why do they give up a Thursday for this? What do they want that they are not getting?',
+    ask: 'PROPOSE, do not ask cold: "The reason I think they come is X — they cannot get it elsewhere that night because Y. Right?" Offer two or three readings if you cannot draft one.',
     weak: '"Because it is a great chef." "Because the food is amazing."',
     challenge:
       'That is why YOU would come. The guest is choosing between this and everything else on that night, most of it cheaper and closer to home. Name what they get here that they cannot get elsewhere that week.',
@@ -99,8 +99,8 @@ export const PLAYBOOK: PlaybookRow[] = [
   {
     key: 'usp_and_differentiation',
     stage: 'point',
-    decision: 'What makes this one different from the last one.',
-    ask: 'What is the single thing about this that is not true of the last one we did, or of the one down the road the same week?',
+    decision: 'What makes this one different, and which of its draws to market hardest.',
+    ask: 'PROPOSE, do not ask cold: "As I read it, what makes this different is X, and the draw to push hardest is Y because Z — agreed?" Build it from what the person has already said.',
     weak: '"It is a collab." "It is a five-course menu."',
     challenge:
       'We have done collabs and five-course menus. If the honest answer is that it is the same shape with a different guest, say so — that is a legitimate event, but it should be marketed and priced as a repeat rather than as news, and the content plan changes accordingly.',
@@ -114,7 +114,7 @@ export const PLAYBOOK: PlaybookRow[] = [
     key: 'venue_fit',
     stage: 'shape',
     decision: 'Why this concept belongs at this venue rather than another.',
-    ask: 'Why does this belong here rather than at one of the others? What is it about the room, the kitchen or the guest base that makes it land?',
+    ask: 'PROPOSE, do not ask cold: say why you think it belongs in this room — the space, the kitchen, the guests — and ask whether that is right.',
     weak: '"The date was free." "The chef knows the GM."',
     challenge:
       'Three venues with genuinely different rooms, price points and guest bases. A concept that would work equally well at any of them has not been designed for any of them, and it will read that way to the guest.',
@@ -216,7 +216,7 @@ export const PLAYBOOK: PlaybookRow[] = [
     key: 'ad_spend',
     stage: 'money',
     decision: 'The paid budget, what it buys, and who approved it.',
-    ask: 'What are we spending on paid promotion, on what, and what do we expect back?',
+    ask: 'How much money are we putting into ads — Instagram, TikTok, Google — on what, who signs it off, and what do we expect back?',
     weak: 'Nothing, which is the current state — paid promotion is not being planned or costed at all.',
     challenge:
       'A budget with no number is not a budget, and paid reach with no target is a donation. Name the amount, the platform, the audience it is aimed at, the dates it runs and what you expect it to produce. It is a line in the cost build and it must appear there. Sign-off is the MARKETING MANAGER — every amount, no ceiling, so the control is that somebody owns the number.',
