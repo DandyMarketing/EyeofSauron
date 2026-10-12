@@ -181,7 +181,7 @@ export async function readPeople(): Promise<{ users: MondayUser[]; me: MondayUse
  */
 export async function createGroupWithItems(
   board: BoardForPlan, title: string, items: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>>,
-): Promise<{ group_id: string; created: number; error?: string }> {
+): Promise<{ group_id: string; created: number; item_ids: string[]; error?: string }> {
   const anchor = board.groups.find(g => /active tasks/i.test(g.title));
   const g = await gql<{ create_group: { id: string } }>(
     anchor
@@ -193,6 +193,7 @@ export async function createGroupWithItems(
 
   let previous: string | null = null;
   let created = 0;
+  const itemIds: string[] = [];
   for (const item of items) {
     try {
       const vars: Record<string, unknown> = {
@@ -203,10 +204,39 @@ export async function createGroupWithItems(
         ? await gql('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON, $p: ID!) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v, position_relative_method: after_at, relative_to: $p) { id } }', { ...vars, p: previous })
         : await gql('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v) { id } }', vars);
       previous = String(r.create_item.id);
+      itemIds.push(previous);
       created++;
     } catch (e: any) {
-      return { group_id: groupId, created, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
+      return { group_id: groupId, created, item_ids: itemIds, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }
   }
-  return { group_id: groupId, created };
+  return { group_id: groupId, created, item_ids: itemIds };
+}
+
+/**
+ * An update on an item, with a file attached to it. The activation boards
+ * have no Files column, so an update is where a file can go -- and the
+ * update's text means the content can be read without opening the file.
+ *
+ * Files go to Monday's separate /v2/file endpoint as multipart, the file under
+ * `variables[file]` (Monday's documented form). The update is written first;
+ * if the file then fails, the update stays and the error says so.
+ */
+export async function postUpdateWithFile(
+  itemId: string, html: string, file: { name: string; type: string; data: Buffer | ArrayBuffer } | null,
+): Promise<void> {
+  const u = await gql<{ create_update: { id: string } }>(
+    'mutation ($i: ID!, $b: String!) { create_update(item_id: $i, body: $b) { id } }',
+    { i: itemId, b: html },
+  );
+  if (!file) return;
+  const token = process.env.MONDAY_API_TOKEN!;
+  const form = new FormData();
+  form.append('query', `mutation ($file: File!) { add_file_to_update(update_id: ${Number(u.create_update.id)}, file: $file) { id } }`);
+  form.append('variables[file]', new Blob([file.data as any], { type: file.type }), file.name);
+  const res = await fetch(`${MONDAY_API}/file`, { method: 'POST', headers: { Authorization: token, 'API-Version': '2024-10' }, body: form });
+  const json = await res.json().catch(() => ({})) as { errors?: Array<{ message: string }>; error_message?: string; data?: unknown };
+  if (!res.ok || json.errors?.length || json.error_message) {
+    throw new Error(`the update was posted but the file was not: ${json.errors?.[0]?.message ?? json.error_message ?? res.status}`);
+  }
 }

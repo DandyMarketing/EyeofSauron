@@ -357,3 +357,40 @@ export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'd
   }));
   return out.every(i => i.name) ? out : null;
 }
+
+/**
+ * Where the brief and the P&L go: the template's "Concept & Mechanics" and
+ * "Financial Forecast" steps, found by WORDS rather than number, because the
+ * numbering differs between groups on the same board (the forecast is "3." on
+ * the template and "7." in copies of it). Null where the board has no such
+ * step -- then that attachment is offered as unavailable, not sent elsewhere.
+ */
+export function attachTargets(names: string[]): { brief: number | null; pnl: number | null } {
+  const keys = names.map(stepKey);
+  const find = (re: RegExp) => { const i = keys.findIndex(k => re.test(k)); return i < 0 ? null : i; };
+  return { brief: find(/concept\s*(&|and)\s*mechanic/), pnl: find(/financial forecast/) };
+}
+
+/** The Financial Forecast update: the headline figures, with where each rate came from. */
+export function pnlUpdateHtml(
+  title: string,
+  f: { gross: number; nett: number; product_cost: number; group_fees: number; profit: number; scenarios: Array<{ pct: number; profit: number }> },
+  rates: Record<string, { value: number | null; label: string; basis: string }>,
+): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const m = (n: number) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-SG', { maximumFractionDigits: 0 });
+  const margin = f.nett > 0 ? ` (${(f.profit / f.nett * 100).toFixed(1)}% of nett)` : '';
+  const toFill = Object.values(rates).filter(r => r.value === null).map(r => esc(r.label));
+  return [
+    `<p><strong>${esc(title)} -- event P&amp;L from Sauron</strong></p>`,
+    '<ul>',
+    `<li>Gross revenue: ${m(f.gross)}; nett: ${m(f.nett)}</li>`,
+    `<li>Food &amp; drink cost: ${m(f.product_cost)}; group fees: ${m(f.group_fees)}</li>`,
+    `<li><strong>Profit: ${m(f.profit)}</strong>${margin}</li>`,
+    `<li>If it sells ${f.scenarios.filter(s => s.pct < 1).map(s => `${Math.round(s.pct * 100)}%: ${m(s.profit)}`).join('; ')}</li>`,
+    '</ul>',
+    `<p><em>Product cost and group fees are computed from the venue's measured rates, never typed in: ${Object.values(rates).filter(r => r.value !== null).map(r => esc(r.label)).join('; ')}.</em></p>`,
+    toFill.length ? `<p><em>Still to fill: ${toFill.join('; ')}. Lines marked "to fill" in the workbook need a number before this is a forecast.</em></p>` : '',
+    '<p>The workbook is attached. Shaded cells are inputs; every line carries its basis.</p>',
+  ].join('');
+}

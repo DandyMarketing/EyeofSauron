@@ -38,11 +38,12 @@ import {
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide } from './ai/plan-progress.js';
-import { buildEventPnlWorkbook } from './lib/event-pnl.js';
+import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
+import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
-import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
-import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems } from './lib/monday-client.js';
+import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -892,20 +893,10 @@ app.post('/api/plan/excel', async (c) => {
 
   try {
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-    const rates = await venueRates(chosen[0].id, today);
-    const wb = await buildEventPnlWorkbook({
-      name: String(d.name || 'Event'),
-      venues: chosen.map(v => v.name),
-      dates: d.start_date === d.end_date || !d.end_date ? String(d.start_date ?? '') : `${d.start_date} to ${d.end_date}`,
-      service_charge_pct: pnl.service_charge_pct ?? null,
-      programming: pnl.programming,
-      costs: Array.isArray(pnl.costs) ? pnl.costs : [],
-    }, rates, today);
-    const buf = await wb.xlsx.writeBuffer();
-    const file = `${String(d.name || 'Event').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Event'}_PnL.xlsx`;
-    return new Response(buf as ArrayBuffer, {
+    const { buf, file } = await eventPnlFile(d, chosen[0], chosen.map(v => v.name), today);
+    return new Response(buf, {
       headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Type': XLSX_TYPE,
         'Content-Disposition': `attachment; filename="${file}"`,
         'Cache-Control': 'no-store',
       },
@@ -913,6 +904,64 @@ app.post('/api/plan/excel', async (c) => {
   } catch (e: any) {
     console.error(`[plan/excel] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: 'Could not build the P&L workbook.' }, 500);
+  }
+});
+
+/**
+ * The brief's P&L workbook for one venue's rates: shared by the download and
+ * by "Send to Monday", so the file attached to Financial Forecast is the same
+ * file the download gives. Product cost and group fees come from the venue's
+ * MEASURED rates, read here -- never from the draft.
+ */
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const safeFileName = (name: string, fallback: string) =>
+  String(name || fallback).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || fallback;
+const hasPnl = (d: any) => Array.isArray(d?.pnl?.programming) && d.pnl.programming.length > 0;
+
+async function eventPnlFile(d: any, venue: { id: string }, venueNames: string[], today: string) {
+  const rates = await venueRates(venue.id, today);
+  const input = {
+    name: String(d.name || 'Event'),
+    venues: venueNames,
+    dates: d.start_date === d.end_date || !d.end_date ? String(d.start_date ?? '') : `${d.start_date} to ${d.end_date}`,
+    service_charge_pct: d.pnl.service_charge_pct ?? null,
+    programming: d.pnl.programming,
+    costs: Array.isArray(d.pnl.costs) ? d.pnl.costs : [],
+  };
+  const wb = await buildEventPnlWorkbook(input, rates, today);
+  const buf = await wb.xlsx.writeBuffer() as ArrayBuffer;
+  return { buf, file: `${safeFileName(d.name, 'Event')}_PnL.xlsx`, figures: computePnl(input, rates), rates };
+}
+
+/**
+ * The brief as a Word document. WRITES NOTHING. The PDF is the page printing
+ * its own rendering of the same text, so it needs no server half.
+ */
+app.post('/api/plan/brief-docx', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const d = await c.req.json<any>().catch(() => null);
+  if (!d?.brief || typeof d.brief !== 'string') return c.json({ error: 'This draft has no brief text yet.' }, 400);
+  try {
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const buf = await briefDocx(d.brief.slice(0, 100_000), {
+      title: String(d.name || 'Event brief'),
+      subtitle: d.start_date ? (d.start_date === d.end_date || !d.end_date ? d.start_date : `${d.start_date} to ${d.end_date}`) : undefined,
+      generatedOn: today,
+    });
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        'Content-Type': DOCX_TYPE,
+        'Content-Disposition': `attachment; filename="${safeFileName(d.name, 'Event')}_Brief.docx"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (e: any) {
+    console.error(`[plan/brief-docx] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: 'Could not build the Word document.' }, 500);
   }
 });
 
@@ -1209,8 +1258,13 @@ app.post('/api/plan/monday/preview', async (c) => {
       if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
       if (!board.columns.assigned) warnings.push('This board has no "Assigned To" column; nobody will be assigned.');
       if (!sender && tasks.length) warnings.push(`No Monday user has your email (${user.email}), so the planner's tasks will have no Owner.`);
+      const targets = attachTargets(items.map(i => i.name));
       return {
         slug: v.slug, venue: v.name,
+        attach: {
+          brief: targets.brief === null ? null : items[targets.brief].name,
+          pnl: targets.pnl === null ? null : items[targets.pnl].name,
+        },
         board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
         group_title: title, exists,
         member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
@@ -1240,7 +1294,12 @@ app.post('/api/plan/monday/send', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ event_id?: string; venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown }> }>().catch(() => null);
+  const body = await c.req.json<{
+    event_id?: string;
+    venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown }>;
+    attach?: { brief?: boolean; pnl?: boolean };
+    draft?: any;
+  }>().catch(() => null);
   if (!body?.event_id || !Array.isArray(body.venues) || body.venues.length === 0) {
     return c.json({ error: 'Nothing to send.' }, 400);
   }
@@ -1264,11 +1323,48 @@ app.post('/api/plan/monday/send', async (c) => {
         return { slug: v.slug, venue: venue.name, board: board.name, error: `"${title}" is already on ${board.name}. Nothing was written.` };
       }
       const r = await createGroupWithItems(board, title, items);
-      console.log(`[plan/monday] ${user.email ?? user.id} sent "${title}" to ${board.name} (${board.id}): ${r.created}/${items.length} item(s)${r.error ? ` -- ${r.error}` : ''}`);
+
+      /**
+       * The brief to Concept & Mechanics and the P&L to Financial Forecast,
+       * each only if it was ticked. An attachment that fails is reported
+       * beside the group, never undoes it: the tasks are the point, and a
+       * missing file is put right by downloading it and dropping it in.
+       */
+      const attached: { brief?: string; pnl?: string } = {};
+      const targets = attachTargets(items.map(i => i.name));
+      const d = body.draft ?? {};
+      if (body.attach?.brief) {
+        const id = targets.brief === null ? undefined : r.item_ids[targets.brief];
+        if (typeof d.brief !== 'string' || !d.brief.trim()) attached.brief = 'Not attached: the brief had no text.';
+        else if (!id) attached.brief = 'Not attached: no "Concept & Mechanics" item was created on this board.';
+        else {
+          try {
+            const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+            const doc = await briefDocx(d.brief.slice(0, 100_000), { title: issued.ev.name, generatedOn: today });
+            await postUpdateWithFile(id, briefMondayHtml(d.brief, issued.ev.name), { name: `${safeFileName(issued.ev.name, 'Event')}_Brief.docx`, type: DOCX_TYPE, data: doc });
+            attached.brief = 'ok';
+          } catch (e: any) { attached.brief = `Not attached: ${e?.message ?? e}`; }
+        }
+      }
+      if (body.attach?.pnl) {
+        const id = targets.pnl === null ? undefined : r.item_ids[targets.pnl];
+        if (!hasPnl(d)) attached.pnl = 'Not attached: the brief has no revenue lines for a P&L.';
+        else if (!id) attached.pnl = 'Not attached: no "Financial Forecast" item was created on this board.';
+        else {
+          try {
+            const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+            const p = await eventPnlFile({ ...d, name: issued.ev.name }, venue, [venue.name], today);
+            await postUpdateWithFile(id, pnlUpdateHtml(issued.ev.name, p.figures, p.rates as any), { name: p.file, type: XLSX_TYPE, data: p.buf });
+            attached.pnl = 'ok';
+          } catch (e: any) { attached.pnl = `Not attached: ${e?.message ?? e}`; }
+        }
+      }
+
+      console.log(`[plan/monday] ${user.email ?? user.id} sent "${title}" to ${board.name} (${board.id}): ${r.created}/${items.length} item(s)${r.error ? ` -- ${r.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
       return {
         slug: v.slug, venue: venue.name, board: board.name, group_title: title,
         url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
-        created: r.created, total: items.length, error: r.error,
+        created: r.created, total: items.length, error: r.error, attached,
       };
     }));
     return c.json({ results });

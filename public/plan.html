@@ -207,6 +207,11 @@
   #monday-sheet .md-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   #monday-sheet .md-msg { font-size: 13px; margin-top: 8px; }
   #monday-sheet a { color: var(--accent); }
+  #monday-sheet .md-attach { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; }
+  #monday-sheet .md-attach label { display: block; padding: 4px 0; cursor: pointer; }
+  #monday-sheet .md-attach small { display: block; color: var(--text-muted); font-size: 11px; margin-left: 22px; }
+  #monday-sheet .md-attach input { margin-right: 6px; accent-color: var(--accent); }
+  .draft .download-row { margin-bottom: 8px; }
 
   /**
    * A definition line, set apart from the analysis. Same rule as the chat --
@@ -576,8 +581,13 @@ function renderDraft(d) {
     '<dl>' + dl + '</dl>' +
     (d.concept ? '<p>' + escapeHtml(d.concept) + '</p>' : '') +
     taskTable +
+    // Each piece downloads on its own (Khai, 12 Oct 2026), before or after the
+    // event is created -- the same files Send to Monday attaches.
+    '<div class="confirm-row download-row">' +
+      (d.brief ? '<button class="secondary" data-act="docx">Brief (Word)</button><button class="secondary" data-act="pdf">Brief (PDF)</button>' : '') +
+      (d.pnl && (d.pnl.programming || []).length ? '<button class="secondary" data-act="excel">P&amp;L (Excel)</button>' : '') +
+    '</div>' +
     '<div class="confirm-row">' +
-      (d.pnl && (d.pnl.programming || []).length ? '<button class="secondary" data-act="excel">Download P&amp;L (Excel)</button>' : '') +
       '<button class="secondary" data-act="discard">Not yet</button>' +
       '<button data-act="confirm">Create this event</button>' +
     '</div>' +
@@ -588,37 +598,42 @@ function renderDraft(d) {
 
   el.querySelector('[data-act="discard"]').addEventListener('click', () => el.remove());
   /**
-   * The P&L in the group's template shape, built on the server from this draft
-   * and the venue's measured rates. Fetched with the token and handed to the
-   * browser as a file -- a plain link could not carry the Authorization header.
+   * A file built on the server from this draft, fetched with the token and
+   * handed to the browser -- a plain link could not carry the Authorization
+   * header. The P&L uses the venue's measured rates; the brief is Word.
    */
-  el.querySelector('[data-act="excel"]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
+  const download = async (btn, url, fallback, done) => {
+    const label = btn.textContent;
     const msg = el.querySelector('.excel-msg');
     btn.disabled = true; btn.textContent = 'Building…'; msg.textContent = '';
     try {
-      const res = await fetch('/api/plan/excel', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(d),
       });
       if (!res.ok) {
         const out = await res.json().catch(() => ({}));
-        msg.textContent = out.error || 'Could not build the workbook.';
+        msg.textContent = out.error || 'Could not build the file.';
       } else {
         const blob = await res.blob();
-        const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'Event_PnL.xlsx';
+        const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || fallback;
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob); a.download = name;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-        msg.textContent = 'Downloaded. Shaded cells are inputs; anything marked "to fill" still needs a number.';
+        msg.textContent = done;
       }
     } catch (err) {
       msg.textContent = String(err.message || err);
     }
-    btn.disabled = false; btn.textContent = 'Download P&L (Excel)';
-  });
+    btn.disabled = false; btn.textContent = label;
+  };
+  el.querySelector('[data-act="excel"]')?.addEventListener('click', e =>
+    download(e.currentTarget, '/api/plan/excel', 'Event_PnL.xlsx', 'Downloaded. Shaded cells are inputs; anything marked "to fill" still needs a number.'));
+  el.querySelector('[data-act="docx"]')?.addEventListener('click', e =>
+    download(e.currentTarget, '/api/plan/brief-docx', 'Event_Brief.docx', 'Downloaded. It opens in Word or Google Docs and can be edited.'));
+  el.querySelector('[data-act="pdf"]')?.addEventListener('click', () => printBrief(d));
   el.querySelector('[data-act="confirm"]').addEventListener('click', async () => {
     const btn = el.querySelector('[data-act="confirm"]');
     btn.disabled = true;
@@ -642,11 +657,37 @@ function renderDraft(d) {
         // draft can never put tasks in people's inboxes.
         (out.id ? '<button data-act="monday">Send to Monday</button>' : '');
       el.querySelector('[data-act="monday"]')?.addEventListener('click', () =>
-        openMonday(out.id, out.venue_list || [], d.brief || ''));
+        openMonday(out.id, out.venue_list || [], d));
     } catch (e) {
       el.querySelector('.confirm-row').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
     }
   });
+}
+
+/**
+ * The brief as a PDF: the page's own rendering of the same text, printed.
+ * "Save as PDF" in the print window. No server half and no library -- the
+ * shared markdown renderer draws it, so it reads exactly as on screen, in
+ * black on white for paper.
+ */
+function printBrief(d) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups for Sauron to save the brief as a PDF.'); return; }
+  const title = d.name || 'Event brief';
+  const dates = d.start_date ? (d.start_date === d.end_date || !d.end_date ? d.start_date : d.start_date + ' to ' + d.end_date) : '';
+  const today = new Date().toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>' + escapeHtml(title) + ' - brief</title><style>' +
+    'body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;max-width:760px;margin:24px auto;padding:0 16px;line-height:1.5;font-size:13px}' +
+    'h1{font-size:22px;margin-bottom:2px}h2{font-size:17px;margin:18px 0 6px}h3{font-size:15px;margin:14px 0 4px}p,ul,ol{margin:6px 0}' +
+    'table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f1f1f1}' +
+    '.sub{color:#666;font-style:italic;margin-bottom:14px}img{display:none}@page{margin:16mm}' +
+    '</style></head><body><h1>' + escapeHtml(title) + '</h1>' +
+    '<div class="sub">' + (dates ? escapeHtml(dates) + ' · ' : '') + 'Event brief, generated by Sauron on ' + escapeHtml(today) + '</div>' +
+    window.renderMarkdown(d.brief || '') + '</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
 }
 
 /**
@@ -665,7 +706,10 @@ const boardKey = slug => 'sauron.monday.board.' + slug;
 function rememberedBoard(slug) { try { return localStorage.getItem(boardKey(slug)); } catch { return null; } }
 function rememberBoard(slug, id) { try { localStorage.setItem(boardKey(slug), id); } catch { /* private mode */ } }
 
-async function openMonday(eventId, venues, brief) {
+async function openMonday(eventId, venues, d) {
+  const brief = d.brief || '';
+  const hasPnl = !!(d.pnl && (d.pnl.programming || []).length);
+  const attach = { brief: !!brief, pnl: hasPnl };
   document.getElementById('monday-overlay')?.remove();
   document.getElementById('monday-sheet')?.remove();
   const overlay = document.createElement('div');
@@ -780,6 +824,9 @@ async function openMonday(eventId, venues, brief) {
   // A group that already exists is refused by the server unless renamed here,
   // so it stays sendable: renaming it in the preview is the fix.
   const sendable = v => !v.error && v.member !== false;
+  const attachLine = (what, status) => !status ? ''
+    : status === 'ok' ? '<div class="saved">' + escapeHtml(what) + ': attached.</div>'
+    : '<div class="md-warn">' + escapeHtml(what) + ': ' + escapeHtml(status) + ' Download it from the brief and drop it in.</div>';
 
   const drawPreview = () => {
     const blocks = preview.venues.map((v, i) => {
@@ -792,6 +839,8 @@ async function openMonday(eventId, venues, brief) {
         (v.exists ? '<div class="md-warn">A group called "' + escapeHtml(v.group_title) + '" is already on this board. Monday will refuse a second one — rename the group above, or leave it and this venue is skipped.</div>' : '') +
         (v.member === false ? '<div class="md-warn">Sauron writes to Monday as ' + escapeHtml(preview.writes_as) + ', who is not a member of this board, so Monday will refuse. Add them to the board first.</div>' : '') +
         v.warnings.map(w => '<div class="md-note">' + escapeHtml(w) + '</div>').join('') +
+        (brief && !v.attach?.brief ? '<div class="md-note">No "Concept &amp; Mechanics" step on this board\'s template, so the brief will not go on here.</div>' : '') +
+        (hasPnl && !v.attach?.pnl ? '<div class="md-note">No "Financial Forecast" step on this board\'s template, so the P&amp;L will not go on here.</div>' : '') +
         '<div class="md-note">' + v.items.length + ' items' + (flagged ? ', <span style="color:var(--error)">' + flagged + ' flagged</span> — check them in Monday after, or fix the plan and send again' : '') + '.</div>' +
         '<table><thead><tr><th>Deadline</th><th>Task</th><th>Owner</th><th>Assigned to</th><th>Why / flags</th></tr></thead><tbody>' +
         v.items.map(it =>
@@ -807,10 +856,19 @@ async function openMonday(eventId, venues, brief) {
     sheet.innerHTML =
       '<h3>Preview — nothing written yet</h3>' +
       '<div class="md-sub">Sauron writes as ' + escapeHtml(preview.writes_as) + '. Template steps keep the board\'s own owners; the plan\'s tasks go to the person the plan named.</div>' +
+      // By choice (Khai, 12 Oct 2026): each attachment is a tick, on unless
+      // there is nothing to attach.
+      '<div class="md-attach">' +
+        '<label><input type="checkbox" data-a="brief"' + (attach.brief ? ' checked' : '') + (brief ? '' : ' disabled') + '> Brief → Concept &amp; Mechanics <small>the brief as the update\'s text, with the Word file attached</small></label>' +
+        '<label><input type="checkbox" data-a="pnl"' + (attach.pnl ? ' checked' : '') + (hasPnl ? '' : ' disabled') + '> P&amp;L → Financial Forecast <small>the headline figures as the update, with the Excel attached</small></label>' +
+        (brief ? '' : '<div class="md-note">This draft has no brief text to attach.</div>') +
+        (hasPnl ? '' : '<div class="md-note">This brief has no revenue lines, so there is no P&amp;L to attach.</div>') +
+      '</div>' +
       blocks +
       '<div class="md-row"><button type="button" class="secondary md-back">Back</button>' +
       '<button type="button" class="md-send"' + (any ? '' : ' disabled') + '>Create in Monday</button></div>' +
       '<div class="md-msg"></div>';
+    sheet.querySelectorAll('.md-attach input').forEach(cb => cb.addEventListener('change', () => { attach[cb.dataset.a] = cb.checked; }));
     sheet.querySelector('.md-back').addEventListener('click', pick);
     sheet.querySelector('.md-send').addEventListener('click', runSend);
   };
@@ -831,7 +889,11 @@ async function openMonday(eventId, venues, brief) {
       const res = await fetch('/api/plan/monday/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ event_id: eventId, venues: payload }),
+        body: JSON.stringify({
+          event_id: eventId, venues: payload,
+          attach: { brief: attach.brief && !!brief, pnl: attach.pnl && hasPnl },
+          draft: { name: d.name, brief: d.brief, pnl: d.pnl, start_date: d.start_date, end_date: d.end_date },
+        }),
       });
       const out = await res.json();
       if (!res.ok || out.error) throw new Error(out.error || 'Could not send.');
@@ -841,7 +903,9 @@ async function openMonday(eventId, venues, brief) {
           ? '<div class="md-warn">' + escapeHtml(r.error) + '</div>'
           : '<div class="saved">"' + escapeHtml(r.group_title) + '": ' + r.created + ' of ' + r.total + ' items created.' +
             (r.url ? ' <a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">Open the board</a>' : '') + '</div>' +
-            (r.error ? '<div class="md-warn">' + escapeHtml(r.error) + ' The items already made are left on the board.</div>' : '')) +
+            (r.error ? '<div class="md-warn">' + escapeHtml(r.error) + ' The items already made are left on the board.</div>' : '') +
+            attachLine('Brief → Concept & Mechanics', r.attached?.brief) +
+            attachLine('P&L → Financial Forecast', r.attached?.pnl)) +
         '</div>').join('') +
         '<div class="md-row"><button type="button" class="md-done">Done</button></div>';
       sending = false;

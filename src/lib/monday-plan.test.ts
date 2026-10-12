@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
-  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, type MondayUser,
+  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, type MondayUser,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -147,4 +147,14 @@ test('the deadline pass is given the plan first and the board\'s history as a la
   assert.match(p, /2026-12-10: Launch post \(carousel\) -- Corbin/);
   assert.match(p, /0\. 13\. Send Menus to Printers \[on past events on this board: due 18 days before, median of 2\]/);
   assert.match(p, /1\. 99\. New step \[no history on this board\]/);
+});
+
+test('the brief and the P&L find their steps by words, whatever the number', () => {
+  assert.deepEqual(attachTargets(['0. Review last year performance', '2. Concept & Mechanics', '7. Submit & Review Financial Forecast']), { brief: 1, pnl: 2 });
+  assert.deepEqual(attachTargets(['1.1 Ask Booth choice']), { brief: null, pnl: null });
+  const html = pnlUpdateHtml('NYE', { gross: 53624, nett: 53624, product_cost: 9000, group_fees: 2713, profit: 20000.4, scenarios: [{ pct: 0.6, profit: -1500 }, { pct: 0.8, profit: 9000 }, { pct: 1, profit: 20000 }] },
+    { food: { value: 0.25, label: 'Food cost, Jul-Sep 2026', basis: 'our data' }, card: { value: null, label: 'Card rate: enter the quote', basis: 'to fill' } });
+  assert.match(html, /Profit: \$20,000<\/strong> \(37\.3% of nett\)/);
+  assert.match(html, /60%: -\$1,500; 80%: \$9,000/);
+  assert.match(html, /Still to fill: Card rate: enter the quote/);
 });

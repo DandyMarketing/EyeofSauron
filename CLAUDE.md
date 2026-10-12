@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 55 migrations, 25 query tools, 11 ingest sources, 1,525 tests.
+started.** 55 migrations, 25 query tools, 11 ingest sources, 1,531 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -956,6 +956,21 @@ a task with an Owner, Assigned To and Deadline. Decided with Khai:
 `/api/monday/boards`, `/api/plan/monday/preview`, `/api/plan/monday/send`.
 Needs `MONDAY_API_TOKEN` on the web service; it writes as that token's owner,
 and the preview says who and whether they are a member of the board.
+**The brief and the P&L go in too, by choice** (two ticks on the preview, on
+unless there is nothing to attach): the brief onto the template's "Concept &
+Mechanics" item, the P&L onto "Financial Forecast" -- found by WORDS, because
+the numbering differs between groups on one board. The activation boards have
+no Files column, so each goes on as an UPDATE: its text is the content (the
+brief itself; the P&L's headline figures with where each rate came from) and
+the file is attached to it, so it reads inside Monday without opening anything.
+A failed attachment is reported beside the group, never undoes it.
+
+**Each piece also downloads on its own** from the draft, before or after the
+event is created: the brief as Word (`docx` library, `src/lib/brief-doc.ts` --
+one markdown parse feeds both the Word file and the Monday text, so they cannot
+disagree) and as PDF (the page printing its own rendering, no server half), and
+the P&L as Excel. They are the same files Monday gets.
+
 **Not built:** reading Done / Stuck back into the brief.
 
 ## Later: parked features (recorded 11 Oct 2026)
@@ -1005,7 +1020,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,525 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,531 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
