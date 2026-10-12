@@ -37,7 +37,7 @@ import {
   isConversationKind, type ConversationKind,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
-import { progressTool, summariseProgress, planTranscript } from './ai/plan-progress.js';
+import { progressTool, summariseProgress, planTranscript, decisionGuide } from './ai/plan-progress.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -844,7 +844,7 @@ app.post('/api/plan/progress', async (c) => {
       max_tokens: 4096,
       system: [{
         type: 'text',
-        text: 'You read an event-planning conversation and record which decisions THE PERSON PLANNING has settled -- by saying so, or by agreeing when the director proposed it. A question the director asked that was not answered is not settled. Be strict: a vague answer settles nothing. Summaries use the conversation\'s own words and never add a figure that is not in it.',
+        text: 'You read an event-planning conversation and record which decisions THE PERSON PLANNING has settled -- by saying so, or by agreeing when the director proposed it. A question the director asked that was not answered is not settled. Be strict: a vague answer settles nothing. File each fact under the decision it actually answers, using the definitions below; one fact can settle at most the decisions it plainly answers. Summaries use the conversation\'s own words and never add a figure that is not in it.\n\nTHE DECISIONS:\n' + decisionGuide(),
         cache_control: { type: 'ephemeral' },
       }],
       tools: [progressTool() as any],

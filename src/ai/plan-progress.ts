@@ -51,6 +51,14 @@ export const STAGE_LABELS: Record<Stage, string> = {
 
 const KEYS = PLAYBOOK.map(r => r.key);
 
+/**
+ * What each decision MEANS, for the reader. Given only the keys it guessed:
+ * "four tickets, not one wristband" was filed under price, when it is scope.
+ */
+export function decisionGuide(rows: PlaybookRow[] = PLAYBOOK): string {
+  return rows.map(r => `- ${r.key} (${DECISION_LABELS[r.key] ?? r.key}): ${r.decision}`).join('\n');
+}
+
 /** The forced tool the second pass fills in. */
 export function progressTool() {
   return {

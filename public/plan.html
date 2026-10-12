@@ -130,7 +130,16 @@
   button.secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
   button.secondary:hover:not(:disabled) { color: var(--text); border-color: var(--accent-dim); }
 
-  .actions { max-width: 860px; margin: 10px auto 0; display: flex; gap: 10px; justify-content: flex-end; }
+  #draft-btn .short { display: none; }
+  @media (max-width: 600px) {
+    /* Three controls on one row: the long label would squeeze the input. */
+    #draft-btn { padding: 12px 12px; }
+    #draft-btn .long { display: none; }
+    #draft-btn .short { display: inline; }
+  }
+  .not-ready ul { margin: 6px 0 10px 20px; }
+  .not-ready li { margin: 2px 0; }
+  .not-ready .anyway { margin-top: 4px; }
 
   /* --- the draft, and the one click that writes --- */
   .draft {
@@ -264,9 +273,8 @@
     <div class="composer">
       <textarea id="input" rows="1" placeholder="A two-night guest chef collab at Firangi in November…"></textarea>
       <button id="send">Send</button>
-    </div>
-    <div class="actions">
-      <button id="draft-btn" class="secondary" disabled>Prepare the brief</button>
+      <!-- Beside Send (Khai, 12 Oct 2026); says "not ready" rather than drafting a half plan. -->
+      <button id="draft-btn" class="secondary" disabled title="Prepare the brief"><span class="long">Prepare the brief</span><span class="short">Brief</span></button>
     </div>
     <!--
       WHERE THE PLAN STANDS, under the input bar where the eye already is.
@@ -519,8 +527,29 @@ function renderDraft(d) {
   });
 }
 
-async function prepareDraft() {
+/**
+ * "Prepare the brief" before the plan is ready says so, and names what is
+ * still open, rather than drafting a half plan (Khai, 12 Oct 2026). Readiness
+ * is the progress board's reading: no BLOCKING decision left open. That
+ * reading is a model's, so a way past it is offered -- a board that misreads
+ * one answer must not lock the brief away entirely.
+ */
+async function prepareDraft(force) {
   if (busy || history.length === 0) return;
+  if (force !== true) {
+    const p = lastProgressKey === progressKey() ? lastProgress : await refreshProgress();
+    const blocking = p ? (p.open || []).filter(o => o.blocking) : [];
+    if (p && blocking.length > 0) {
+      const el = addMessage('Planner', 'agent',
+        '<div class="not-ready"><p><strong>The brief is not ready yet.</strong> ' +
+        p.counts.settled + ' of ' + p.counts.applicable + ' decided; these still need settling:</p>' +
+        '<ul>' + blocking.map(o => '<li>' + escapeHtml(o.label) + '</li>').join('') + '</ul>' +
+        (p.next ? '<p>Next: <strong>' + escapeHtml(p.next.label) + '</strong>.</p>' : '') +
+        '<button class="secondary anyway">Prepare a draft anyway</button></div>');
+      el.querySelector('.anyway').addEventListener('click', (e) => { e.target.disabled = true; prepareDraft(true); });
+      return;
+    }
+  }
   setBusy(true);
   const pending = addMessage('Planner', 'agent', '<div class="thinking">Putting the brief together…</div>');
 
@@ -555,6 +584,10 @@ async function prepareDraft() {
 
 let progressSeq = 0;
 let progressOpen = false;
+/** The latest reading, and which conversation state it was read from. */
+let lastProgress = null;
+let lastProgressKey = '';
+const progressKey = () => (conversationId || 'new') + ':' + history.length;
 
 /**
  * Re-read progress from the conversation. Called after an answer has rendered,
@@ -576,19 +609,33 @@ async function refreshProgress() {
       body: JSON.stringify({ history }),
     });
     const p = await res.json();
-    if (seq !== progressSeq) return;
+    if (seq !== progressSeq) return null;
     box.classList.remove('pg-busy');
     if (!res.ok || p.error) {
       // Said, not hidden: a board that silently stops updating is the same
       // "no sign of progress" this exists to fix.
       box.innerHTML = '<details><summary><div class="pg-head"><span class="pg-count">Could not read progress just now.</span></div></summary></details>';
-      return;
+      return null;
     }
+    lastProgress = p;
+    lastProgressKey = progressKey();
     renderProgress(p);
+    return p;
   } catch (e) {
     if (seq === progressSeq) box.classList.remove('pg-busy');
+    return null;
   }
 }
+
+/**
+ * Clicking anywhere outside the open board closes it (Khai, 12 Oct 2026).
+ * Clicks inside it -- scrolling its list, tapping a row -- leave it open.
+ */
+document.addEventListener('click', (e) => {
+  const box = document.getElementById('progress');
+  const d = box.querySelector('details');
+  if (d && d.open && !box.contains(e.target)) { d.open = false; progressOpen = false; }
+});
 
 function renderProgress(p) {
   const box = document.getElementById('progress');
@@ -620,6 +667,7 @@ function startNewPlan() {
   conversationId = null;
   history = [];
   progressSeq++;
+  lastProgress = null; lastProgressKey = '';
   document.getElementById('progress').hidden = true;
   document.getElementById('progress').innerHTML = '';
   thread.innerHTML = INTRO_HTML;
