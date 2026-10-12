@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 55 migrations, 25 query tools, 11 ingest sources, 1,514 tests.
+started.** 55 migrations, 25 query tools, 11 ingest sources, 1,525 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -922,6 +922,42 @@ returns, so it cannot disagree with the screen, with definitions beside the
 figures (`src/lib/dashboard-export.ts`). PDF is the page itself through the
 browser's print, with the controls hidden by print styles.
 
+### Send to Monday: built 12 Oct 2026
+
+An issued brief becomes a group of tasks on monday.com, the way the marketing
+team already works: each venue has its own activations board in the **TDC
+Marketing & PR** workspace, an event is a GROUP named `YY-MMDD Name`, each item
+a task with an Owner, Assigned To and Deadline. Decided with Khai:
+
+- **The board's own Event Template steps plus the planner's tasks.** The
+  template is read LIVE from the board's "Event Template" group, so the team's
+  edits to their checklist arrive without a deploy, and its steps keep the
+  board's standing Owner / Assigned To.
+- **Deadlines come from the plan.** A forced-tool pass fits each template step
+  to the plan's own schedule (launch, posts, outreach); the board's past events
+  are shown beside each step as a reference only -- they are noisy (one group
+  has every deadline on the same day, and those groups are left out). Past,
+  out-of-order or missing dates are FLAGGED on the preview, never moved.
+- **Board picked from a searchable list, limited to TDC Marketing & PR** (Khai:
+  "for planning this should be in tdc marketing and PR"). Sauron's Monday key
+  can see guest-detail boards too; the workspace is re-checked on every preview
+  and send. The browser remembers the last board per venue. No database table:
+  a second send is refused because the group name already exists on the board.
+- **Preview, then create; only the issued brief can be sent**, and what the
+  preview showed is what is written (the deadline pass is not re-run). One
+  group per venue board. A failure part-way stops and reports, leaving what was
+  made rather than deleting from somebody's board.
+- **People are matched, never guessed**: full name, then a first name only one
+  Monday user has; anything else is left blank and flagged.
+- **The Event/Campaign Name label is not set.** NP and FS have exactly 40
+  labels on it and the group name already says which event it is.
+
+`src/lib/monday-plan.ts` (pure, tested) and `monday-client.ts`; endpoints
+`/api/monday/boards`, `/api/plan/monday/preview`, `/api/plan/monday/send`.
+Needs `MONDAY_API_TOKEN` on the web service; it writes as that token's owner,
+and the preview says who and whether they are a member of the board.
+**Not built:** reading Done / Stuck back into the brief.
+
 ## Later: parked features (recorded 11 Oct 2026)
 
 Agreed as worth doing and deliberately not started. Each needs the decision or
@@ -969,7 +1005,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,514 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,525 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

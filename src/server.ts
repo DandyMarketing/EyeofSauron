@@ -41,6 +41,8 @@ import { progressTool, summariseProgress, planTranscript, decisionGuide } from '
 import { buildEventPnlWorkbook } from './lib/event-pnl.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
+import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -1045,6 +1047,8 @@ app.post('/api/events', async (c) => {
       console.error(`[events] tasks failed for ${created.id}: ${taskError.message}`);
       return c.json({
         id: created.id,
+        venues: chosen.map(v => v.name),
+        venue_list: chosen.map(v => ({ slug: v.slug, name: v.name })),
         warning: `The event was created but its schedule was not: ${taskError.message}`,
       });
     }
@@ -1103,9 +1107,175 @@ app.post('/api/events', async (c) => {
   return c.json({
     id: created.id,
     venues: chosen.map(v => v.name),
+    venue_list: chosen.map(v => ({ slug: v.slug, name: v.name })),
     tasks: tasks.length,
     city_events_added: calendarAdded || undefined,
   });
+});
+
+// --- Send an issued brief to monday.com ---
+
+/**
+ * The event as it was ISSUED, for "Send to Monday": the row, its venues within
+ * this user's scope, and its stored schedule. Read from the database rather
+ * than taken from the browser, because the brief was the moment of record and
+ * Monday should get what was recorded.
+ */
+async function issuedEvent(user: SessionUser, eventId: string) {
+  // row-cap: one event by id.
+  const { data: ev } = await supabaseAdmin.from('events')
+    .select('id, name, start_date, end_date, concept, ad_plan').eq('id', eventId).maybeSingle();
+  if (!ev) return null;
+  // row-cap: the venues of one event.
+  const { data: links } = await supabaseAdmin.from('event_venues').select('venue_id').eq('event_id', eventId);
+  const scoped = await venuesInScope(user);
+  const venues = scoped.filter(v => (links ?? []).some((l: any) => l.venue_id === v.id));
+  if (venues.length === 0) return null;
+  const tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
+    .select('description, channel, kind, due_date, owner_name').eq('event_id', eventId));
+  if (tasks.error) throw new Error(tasks.error.message);
+  return { ev: ev as any, venues, tasks: (tasks.data ?? []) as PlannerTask[] };
+}
+
+/** The boards a planner may send to: the TDC Marketing & PR workspace only. */
+app.get('/api/monday/boards', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  try {
+    return c.json({ boards: await listPlanningBoards() });
+  } catch (e: any) {
+    console.error(`[monday/boards] ${e?.message ?? e}`);
+    return c.json({ error: `Could not list the Monday boards: ${e?.message ?? e}` }, 502);
+  }
+});
+
+/**
+ * What would be written, per venue. WRITES NOTHING.
+ *
+ * The template is read live from the chosen board, so the team's own edits to
+ * their checklist arrive without a deploy. Deadlines for those steps are set
+ * by a forced-tool pass that fits them to the plan's own schedule, with the
+ * board's past events beside each step as a reference only; anything past,
+ * out of order or missing is flagged, never moved.
+ */
+app.post('/api/plan/monday/preview', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ event_id?: string; boards?: Record<string, string>; brief?: string }>().catch(() => null);
+  if (!body?.event_id) return c.json({ error: 'Issue the brief first -- Monday gets the event as it was recorded.' }, 400);
+
+  try {
+    const issued = await issuedEvent(user, body.event_id);
+    if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
+    const { ev, venues, tasks } = issued;
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const { users, me, account } = await readPeople();
+    const sender = users.find(u => u.email && user.email && u.email.toLowerCase() === user.email.toLowerCase()) ?? null;
+    const title = groupTitle(ev.name, ev.start_date, ev.end_date);
+
+    const out = await Promise.all(venues.map(async v => {
+      const boardId = body.boards?.[v.slug];
+      if (!boardId) return { slug: v.slug, venue: v.name, error: 'Choose a board.' };
+      // A board refused or unreadable is that venue's problem, not the preview's.
+      let board;
+      try { board = await readBoardForPlan(String(boardId)); }
+      catch (e: any) { return { slug: v.slug, venue: v.name, error: String(e?.message ?? e) }; }
+
+      let deadlines: StepDeadline[] = [];
+      if (board.template.length > 0) {
+        const res = await anthropic.messages.create({
+          model: modelFor('lookup', process.env).model,
+          max_tokens: 4096,
+          system: [{ type: 'text', text: DEADLINE_SYSTEM, cache_control: { type: 'ephemeral' } }],
+          tools: [deadlineTool(board.template.length) as any],
+          tool_choice: { type: 'tool', name: 'record_checklist_deadlines' },
+          messages: [{ role: 'user', content: deadlinePrompt({ event: ev, tasks, steps: board.template, history: board.history, today, brief: body.brief ?? null }) }],
+        });
+        const call = res.content.find((b: any) => b.type === 'tool_use') as any;
+        deadlines = (Array.isArray(call?.input?.steps) ? call.input.steps : [])
+          .filter((s: any) => Number.isInteger(s?.index))
+          .map((s: any) => ({ index: s.index, due: typeof s.due === 'string' ? s.due : null, phase: s.phase === 'after' ? 'after' : 'before', reason: String(s.reason ?? '').slice(0, 200) }));
+      }
+
+      const items = buildItems({ steps: board.template, deadlines, tasks, users, sender, today, start: ev.start_date, end: ev.end_date });
+      const exists = board.groups.some(g => g.title.trim().toLowerCase() === title.toLowerCase());
+      const warnings: string[] = [];
+      if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');
+      if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
+      if (!board.columns.assigned) warnings.push('This board has no "Assigned To" column; nobody will be assigned.');
+      if (!sender && tasks.length) warnings.push(`No Monday user has your email (${user.email}), so the planner's tasks will have no Owner.`);
+      return {
+        slug: v.slug, venue: v.name,
+        board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
+        group_title: title, exists,
+        member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
+        items, warnings,
+      };
+    }));
+
+    return c.json({ writes_as: me.name, venues: out });
+  } catch (e: any) {
+    console.error(`[plan/monday/preview] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: humanApiError(e) }, 500);
+  }
+});
+
+/**
+ * Write the previewed groups. THE ONLY MONDAY WRITE, and a person pressed it.
+ *
+ * What the preview showed comes back and is written as shown -- re-running the
+ * deadline pass here could give different dates from the ones that were
+ * approved. It is checked rather than trusted: the event and venue against
+ * this user, the board against the planning workspace, and the group name
+ * against the board, so pressing twice cannot make two groups.
+ */
+app.post('/api/plan/monday/send', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ event_id?: string; venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown }> }>().catch(() => null);
+  if (!body?.event_id || !Array.isArray(body.venues) || body.venues.length === 0) {
+    return c.json({ error: 'Nothing to send.' }, 400);
+  }
+
+  try {
+    const issued = await issuedEvent(user, body.event_id);
+    if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
+    const expected = groupTitle(issued.ev.name, issued.ev.start_date, issued.ev.end_date);
+    const { account } = await readPeople();
+
+    const results = await Promise.all(body.venues.map(async v => {
+      const venue = issued.venues.find(x => x.slug === v.slug);
+      if (!venue) return { slug: v.slug, error: 'Not a venue of this event that you can see.' };
+      const items = sanitiseItems(v.items);
+      if (!items) return { slug: v.slug, venue: venue.name, error: 'The items did not come back intact. Preview again.' };
+      const title = typeof v.group_title === 'string' && v.group_title.trim() ? v.group_title.trim().slice(0, 255) : expected;
+      let board;
+      try { board = await readBoardForPlan(String(v.board_id)); }
+      catch (e: any) { return { slug: v.slug, venue: venue.name, error: String(e?.message ?? e) }; }
+      if (board.groups.some(g => g.title.trim().toLowerCase() === title.toLowerCase())) {
+        return { slug: v.slug, venue: venue.name, board: board.name, error: `"${title}" is already on ${board.name}. Nothing was written.` };
+      }
+      const r = await createGroupWithItems(board, title, items);
+      console.log(`[plan/monday] ${user.email ?? user.id} sent "${title}" to ${board.name} (${board.id}): ${r.created}/${items.length} item(s)${r.error ? ` -- ${r.error}` : ''}`);
+      return {
+        slug: v.slug, venue: venue.name, board: board.name, group_title: title,
+        url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
+        created: r.created, total: items.length, error: r.error,
+      };
+    }));
+    return c.json({ results });
+  } catch (e: any) {
+    console.error(`[plan/monday/send] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: humanApiError(e) }, 500);
+  }
 });
 
 // --- Admin API (owner only) ---

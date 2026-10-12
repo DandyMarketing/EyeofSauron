@@ -432,19 +432,14 @@ row per content and outreach item: what, when (as a T-minus date), who owns it.
 A person can work from that directly, and it is what makes the brief a document
 with commitments in it rather than a description.
 
-*monday.com is a LATER STAGE — deliberately, and the shape is already decided so
-it does not get re-argued.* Not a board per event: **a new GROUP of items per
-event**, inside a standing board, one item per task, assigned and dated from the
-same T-minus schedule. A board per event would scatter the diary across dozens
-of boards nobody can see at once; groups in one board put every live event and
-its tasks on a single screen, which is what row 7's overlapping-events question
-actually needs.
-
-*Two things still to settle when it is picked up:* whether Sauron writes the
-group or proposes it for a person to accept — a write is irreversible and lands
-in somebody else's inbox — and how a completed task flows back so the brief
-marks rather than diverging silently. Propose-then-accept for the first version.
-The connector also needs authorising before anything can be built against it.
+*monday.com: BUILT 12 Oct 2026* (CLAUDE.md, "Send to Monday"). Not a board per
+event: **a new GROUP of items per event**, inside each venue's standing
+activations board, the board's own Event Template steps plus the brief's
+tasks, assigned and dated. Groups in one board put every live event and its
+tasks on a single screen, which is what row 7's overlapping-events question
+actually needs. Settled: Sauron PROPOSES (a preview) and a person presses
+Create. Still open: how a completed task flows back so the brief marks rather
+than diverging silently.
 
 **Issuing the brief is the moment of record, with or without monday.com.** One
 action creates the event row with its attributes and the brief itself. That
@@ -554,8 +549,8 @@ idea a Michelin-starred guest chef was in the kitchen.
    `revel_venue_keys` and `account_map`: judgement confirmed by a person, never
    inferred.
 3. **The tab** — the interrogation, and the brief it emits, task table included.
-4. **monday.com** — later stage. Shape decided (a group per event), nothing
-   blocked by leaving it.
+4. **monday.com** — built 12 Oct 2026: a group per event on each venue's
+   activations board, previewed before it is created.
 
 ---
 
@@ -570,5 +565,5 @@ the High Commission of India.*
   eight and a two-night partner collab sees all twenty. But it needs your eye.
 - **Does the team bring you the brief, or does the assistant?** If a manager
   runs this and you never see it, the pushback must stand alone.
-- **Which monday.com board** the event groups live in, when that stage arrives.
-  Not needed to start.
+- ~~Which monday.com board~~ -- settled 12 Oct 2026: chosen per venue from the
+  TDC Marketing & PR workspace when the brief is sent.
