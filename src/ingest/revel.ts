@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import type { ProductMixRow, OperationsData, HourlySalesData, MealPeriodSummary } from '../parsers/revel/types.js';
-import { deriveMealPeriods } from '../parsers/revel/meal-periods.js';
+import { deriveMealPeriods, isDaytime } from '../parsers/revel/meal-periods.js';
 
 export async function resolveVenueId(reportKey: string): Promise<string> {
   const { data, error } = await supabase
@@ -169,7 +169,7 @@ export async function ingestHourlySales(
   const periods = deriveMealPeriods(data, { venueSlug, businessDate });
   const periodByHour = new Map<number, string>();
   for (const h of data.hours) {
-    if (h.hour < 17) {
+    if (isDaytime(h.hour)) {
       const lunchPeriod = periods.find(p => p.period === 'lunch' || p.period === 'brunch');
       periodByHour.set(h.hour, lunchPeriod?.period ?? 'lunch');
     } else {

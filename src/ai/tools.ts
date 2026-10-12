@@ -634,7 +634,7 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'query_hourly_sales',
-    description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns.',
+    description: 'Query hour-by-hour sales breakdown for a venue on a specific date. Shows transactions, items sold, average check, and sales for each hour. Use this to understand peak hours, quiet periods, and hourly sales patterns. The business date is the SHIFT: hours after midnight (12 AM-5 AM) belong to that night and are returned last, in shift order.',
     input_schema: {
       type: 'object' as const,
       properties: {

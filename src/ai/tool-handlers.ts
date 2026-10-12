@@ -1,3 +1,4 @@
+import { serviceOrder } from '../parsers/revel/meal-periods.js';
 import { supabase } from '../lib/supabase.js';
 import { selectAll } from '../lib/paged.js';
 import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
@@ -1993,12 +1994,17 @@ async function queryHourlySales(input: Record<string, any>): Promise<string> {
   const totalSales = data.reduce((s, r) => s + Number(r.sales), 0);
   const totalTx = data.reduce((s, r) => s + Number(r.transactions), 0);
 
+  // In SHIFT order, not clock order: Revel files the after-midnight hours with
+  // the night they belong to, and sorted 0-23 they read as before opening.
+  const hours = [...data].sort((a, b) => serviceOrder(Number(a.hour)) - serviceOrder(Number(b.hour)));
+
   return JSON.stringify({
     venue: input.venue_slug,
     date: businessDate,
     total_sales: totalSales,
     total_transactions: totalTx,
-    hours: data,
+    hours_note: 'Hours are in shift order, opening to close. Rows from 12:00 AM to 5:59 AM are AFTER MIDNIGHT at the end of this business date\'s night (Revel files them with the shift they belong to), not the morning of this date. Say "after midnight" when reporting them. A row with 0 transactions and some sales is items added to a bill opened in an earlier hour.',
+    hours,
   });
 }
 

@@ -483,6 +483,24 @@ behaviour. Khai decided to leave it there: the hourly sweep and the alert card
 are the standing measure, and Revel support was not pursued. Reopen only if
 the sweep starts raising these often.
 
+### 1.15 The shift's last hour sorted to the top of the day
+**Symptom.** Asked about Neon Pigeon on 10 Oct 2026, the hour-by-hour answer
+stopped at 11 PM (Khai: "the sales figures stops at 12am never beyond that").
+The 12 AM and 1 AM bills ($214 and $14) were there, at the top, as if sold
+before lunch, and the meal-period split counted them as lunch.
+**Root cause.** Revel's business day runs past midnight: the 10 Oct report
+carries the after-midnight hours and the 11 Oct report has none. Sauron stored
+clock hours 0-23 and sorted by them, so hour 0 came first. Separately, the
+meal-period rule was "before 5 PM is lunch", and 1 AM is before 5 PM. The
+file's own comment said after midnight was dinner; the code never did it.
+**Fix.** `serviceOrder()` puts 12 AM-5 AM after 11 PM, `isDaytime()` makes
+those hours dinner at ingest, and the hourly tool tells the model they are
+after midnight on that night. Rows already stored as lunch were corrected by
+one UPDATE. 6 AM is the line because no venue trades between 6 AM and lunch.
+**Recurs?** **Every customer with a late bar**, and any POS whose business day
+crosses midnight. Check the cut-off when onboarding: a venue that serves
+breakfast from 5 AM would need it moved, and the line is one constant.
+
 ---
 
 ## 2. Data that is valid but wrong
