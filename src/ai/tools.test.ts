@@ -116,3 +116,15 @@ describe('query_visit_distribution is wired', () => {
     assert.deepEqual((tool.input_schema as any).required, ['start_date', 'end_date']);
   });
 });
+
+describe('query_booking_lead_time can measure one night', () => {
+  test('an occasion is measured on its own, not inside an ordinary month', () => {
+    // NYE 2026 planning quoted "guests book a day ahead" from June-September.
+    const tool = queryTools.find(t => t.name === 'query_booking_lead_time')!;
+    const props = (tool.input_schema as any).properties;
+    assert.ok(props.business_date, 'query_booking_lead_time has no business_date');
+    assert.match(tool.description!, /same occasion LAST YEAR/);
+    const visits = queryTools.find(t => t.name === 'query_visit_distribution')!;
+    assert.ok(!(visits.input_schema as any).properties.business_date, 'business_date belongs to lead time, not visit distribution');
+  });
+});

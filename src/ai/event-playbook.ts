@@ -233,7 +233,7 @@ export const PLAYBOOK: PlaybookRow[] = [
     ask: 'How long is the campaign, and what job does each week do?',
     weak: '"Three weeks", given without reference to how far ahead people book here.',
     challenge:
-      'Measured in August: 23.5% of bookings were made same-day and a further 32.3% within one to three days — so roughly half a typical midweek lands in the final 72 hours. A campaign built as though people book three weeks out is planning for a customer this business does not have. Be honest about which weeks build recognition and which week books the room, and do not judge week one by bookings.',
+      'FOR AN OCCASION, MEASURE THE OCCASION: query_booking_lead_time with business_date set to the same occasion LAST year (e.g. 2025-12-31) — ordinary months say guests book a day ahead, and nobody books New Year\'s Eve the day before. For an ordinary night: measured in August, 23.5% of bookings were made same-day and a further 32.3% within one to three days — so roughly half a typical midweek lands in the final 72 hours. A campaign built as though people book three weeks out is planning for a customer this business does not have. Be honest about which weeks build recognition and which week books the room, and do not judge week one by bookings.',
     measurable: true,
     sharpen_with: ['query_booking_lead_time'],
     blocking: true,

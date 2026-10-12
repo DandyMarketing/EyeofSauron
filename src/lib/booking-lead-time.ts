@@ -181,3 +181,35 @@ export function leadTimeCaveats(months: LeadTimeMonth[]): string[] {
 
   return out;
 }
+
+/**
+ * The window the lead-time query reads: whole months, or ONE NIGHT.
+ *
+ * WHY ONE NIGHT. Planning New Year's Eve 2026 the planner told Khai that Neon
+ * Pigeon's guests "book one day ahead" -- the median for ordinary nights, June
+ * to September. Nobody books New Year's Eve the day before; an occasion has its
+ * own booking curve, and the only honest baseline is the same occasion last
+ * year. A month cannot isolate it: December's median is set by its other
+ * thirty nights. The SQL already filters by business date and groups by month,
+ * so a one-day window returns exactly that night, with no new migration.
+ *
+ * A night still ahead of us is refused rather than measured: it shows only its
+ * early bookers so far, and would read as a far longer lead than it ends with.
+ */
+export function leadTimeWindow(
+  input: { start_date?: string; end_date?: string; business_date?: string },
+  today: string,
+): { start: string; end: string; single_night: boolean } | { error: string } {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (input.business_date) {
+    if (!iso.test(input.business_date)) return { error: 'business_date must be YYYY-MM-DD.' };
+    if (input.business_date > today) {
+      return { error: `${input.business_date} has not happened yet, so its bookings are still coming in. For an occasion, measure the same occasion LAST year instead.` };
+    }
+    return { start: input.business_date, end: input.business_date, single_night: true };
+  }
+  if (!input.start_date || !input.end_date || !iso.test(input.start_date) || !iso.test(input.end_date)) {
+    return { error: 'Give business_date for one night, or start_date and end_date (YYYY-MM-DD) for whole months.' };
+  }
+  return { start: input.start_date, end: input.end_date, single_night: false };
+}

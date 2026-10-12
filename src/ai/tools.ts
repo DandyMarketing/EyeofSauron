@@ -612,13 +612,18 @@ export const queryTools: Tool[] = [
       'QUOTE THE MEDIAN, NOT THE MEAN. Lead time has a long right tail — a Christmas party booked in September sits in the same column as a Tuesday booked that morning — so the mean follows one large event and reads as a change in behaviour that did not happen. Both are returned, and a mean far above the median is itself the finding: that month was carried by a few long-lead bookings. The caveats say when this applies. ' +
       'WALK-INS ARE EXCLUDED AND COUNTED. A walk-in is created as it arrives, so its lead time is zero by definition; including them would make this a measure of the walk-in ratio wearing the name of lead time. Never describe the booking counts here as total covers — use query_reservations for that. ' +
       'FUTURE DATES ARE EXCLUDED. A month still being booked shows only its early bookers, so it would report a lead time far longer than it finishes with, and the most recent months would always look best. ' +
-      'READ THE BANDS, NOT ONLY THE MEDIAN. The same-day, 1-3, 4-7, 8-30 and 31+ shares say what actually moved: a median holding steady while the same-day share doubles is two populations changing in opposite directions, and the median alone hides it.',
+      'READ THE BANDS, NOT ONLY THE MEDIAN. The same-day, 1-3, 4-7, 8-30 and 31+ shares say what actually moved: a median holding steady while the same-day share doubles is two populations changing in opposite directions, and the median alone hides it. ' +
+      'ONE NIGHT: pass business_date instead of a range to measure a single past date. FOR AN OCCASION -- New Year\'s Eve, Valentine\'s, Christmas, Mother\'s Day, a race weekend -- ALWAYS measure the same occasion LAST YEAR this way, never ordinary months: an ordinary month says guests book a day ahead, and nobody books New Year\'s Eve the day before.',
     input_schema: {
       type: 'object' as const,
       properties: {
         venue_slug: {
           type: 'string',
           description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi". Omit for all venues plus the group.',
+        },
+        business_date: {
+          type: 'string',
+          description: 'ONE past night, YYYY-MM-DD, e.g. 2025-12-31 for last New Year\'s Eve. Use instead of start_date/end_date.',
         },
         start_date: {
           type: 'string',
@@ -629,7 +634,7 @@ export const queryTools: Tool[] = [
           description: 'End of the period (inclusive), YYYY-MM-DD.',
         },
       },
-      required: ['start_date', 'end_date'],
+      required: [],
     },
   },
   {

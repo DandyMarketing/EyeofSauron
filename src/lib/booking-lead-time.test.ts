@@ -128,3 +128,20 @@ test('a month with no bookings gives null shares, never zero', () => {
   assert.equal(m.pct_same_day, null);
   assert.equal(m.median_days, null);
 });
+
+import { leadTimeWindow } from './booking-lead-time.js';
+
+test('one night is a one-day window, so an occasion can be measured on its own', () => {
+  assert.deepEqual(leadTimeWindow({ business_date: '2025-12-31' }, '2026-10-12'),
+    { start: '2025-12-31', end: '2025-12-31', single_night: true });
+  // Months still work as before.
+  assert.deepEqual(leadTimeWindow({ start_date: '2026-06-01', end_date: '2026-09-30' }, '2026-10-12'),
+    { start: '2026-06-01', end: '2026-09-30', single_night: false });
+});
+
+test('a night still ahead is refused, and pointed at last year', () => {
+  const r = leadTimeWindow({ business_date: '2026-12-31' }, '2026-10-12');
+  assert.ok('error' in r && /LAST year/.test(r.error));
+  assert.ok('error' in leadTimeWindow({}, '2026-10-12'));
+  assert.ok('error' in leadTimeWindow({ business_date: '31/12/2025' }, '2026-10-12'));
+});

@@ -16,7 +16,7 @@ import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
-import { monthlyLeadTime, leadTimeCaveats, medianChange, type LeadTimeRow } from '../lib/booking-lead-time.js';
+import { monthlyLeadTime, leadTimeCaveats, medianChange, leadTimeWindow, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
 import { holidayCoverage } from '../lib/school-calendar.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
@@ -2994,9 +2994,8 @@ async function queryPublicHolidays(input: Record<string, any>): Promise<string> 
  * the conversation, from a column that does not exist.
  */
 async function queryBookingLeadTime(input: Record<string, any>): Promise<string> {
-  if (!input.start_date || !input.end_date) {
-    return JSON.stringify({ error: 'start_date and end_date are required (YYYY-MM-DD).' });
-  }
+  const win = leadTimeWindow(input, new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10));
+  if ('error' in win) return JSON.stringify({ error: win.error });
 
   const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
@@ -3007,8 +3006,8 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
   if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
 
   const { data, error } = await supabase.rpc('booking_lead_time', {
-    p_start: input.start_date,
-    p_end: input.end_date,
+    p_start: win.start,
+    p_end: win.end,
   });
 
   if (error) {
@@ -3037,7 +3036,10 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
   const groupMonths = seesEverything ? forVenue(null) : null;
 
   return JSON.stringify({
-    period: { start: input.start_date, end: input.end_date },
+    period: win.single_night ? { night: win.start } : { start: win.start, end: win.end },
+    ...(win.single_night ? {
+      single_night: 'ONE NIGHT ONLY: each venue\'s single "month" row is this date and nothing else. Use it as the booking curve for this occasion; compare it with ordinary months only to show how different the occasion is.',
+    } : {}),
     unit: 'days between the booking being created and the date it was for',
     venues: byVenue,
     group: groupMonths ? { months: groupMonths, change: medianChange(groupMonths) } : null,
