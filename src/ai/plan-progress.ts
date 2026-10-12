@@ -41,6 +41,35 @@ export const DECISION_LABELS: Record<string, string> = {
   abort_condition: 'Abort condition',
 };
 
+/**
+ * One line on what each decision actually asks, for the board's open list.
+ * Khai, 12 Oct 2026: "elaborate on this a little bit but keep everything one
+ * line so people know what it is about specifically". Plain words, no
+ * figures, at most 60 characters -- a test holds that.
+ */
+export const DECISION_HINTS: Record<string, string> = {
+  objective: 'The number that proves it worked, vs a normal night',
+  target_demographic: 'Exactly which guests: who, what they spend',
+  audience_motivation: 'Why they give up their night for this',
+  usp_and_differentiation: 'What makes it unlike what we or others did before',
+  venue_fit: 'Why it belongs in this room and not another',
+  scope: 'One event across venues, or separate ones sharing a date',
+  date_and_why: 'The date, and whether it fills or spends a night',
+  competing_events: 'What else that night pulls the same people away',
+  product_shape: 'What a guest buys: ticket, set menu, table, walk-in',
+  partner_terms: 'What each partner gives, gets and owes, in writing',
+  price_and_basis: 'The price, checked against food and drink averages',
+  cost_build_and_breakeven: 'Every cost, and the covers needed to break even',
+  ad_spend: 'Paid ads: how much, what it buys, who signs it off',
+  campaign_length: 'How many weeks of promotion, and what each week does',
+  channels: 'Where we post, and which one should bring bookings',
+  alternative_channels: 'Partners, media and groups beyond our own pages',
+  content_plan: 'Every post with a date: what goes out when',
+  direct_outreach: 'Who gets a personal message, and on which days',
+  owners_and_deadlines: 'A named person and a date against every task',
+  abort_condition: 'Bookings needed by when, and what we do if short',
+};
+
 export const STAGE_LABELS: Record<Stage, string> = {
   point: 'The point',
   shape: 'The shape',
@@ -105,7 +134,7 @@ export function progressTool() {
 
 export interface PlanProgress {
   settled: Array<{ key: string; label: string; stage: Stage; summary: string }>;
-  open: Array<{ key: string; label: string; stage: Stage; blocking: boolean }>;
+  open: Array<{ key: string; label: string; hint: string; stage: Stage; blocking: boolean }>;
   not_applicable: string[];
   waiting_on: Array<{ item: string; who: string | null }>;
   next: { key: string; label: string } | null;
@@ -137,7 +166,7 @@ export function summariseProgress(raw: unknown, rows: PlaybookRow[] = PLAYBOOK):
   const settled = rows.filter(row => settledMap.has(row.key))
     .map(row => ({ key: row.key, label: label(row.key), stage: row.stage, summary: settledMap.get(row.key)! }));
   const open = rows.filter(row => !settledMap.has(row.key) && !na.has(row.key))
-    .map(row => ({ key: row.key, label: label(row.key), stage: row.stage, blocking: row.blocking }));
+    .map(row => ({ key: row.key, label: label(row.key), hint: DECISION_HINTS[row.key] ?? '', stage: row.stage, blocking: row.blocking }));
 
   const stageOrder: Stage[] = ['point', 'shape', 'money', 'campaign', 'follow_through'];
   const stages = stageOrder.map(stage => {

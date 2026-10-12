@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summariseProgress, planTranscript, DECISION_LABELS, progressTool, decisionGuide } from './plan-progress.js';
+import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide } from './plan-progress.js';
 import { PLAYBOOK } from './event-playbook.js';
 
 test('every playbook decision has a short label, and the tool offers exactly the playbook keys', () => {
@@ -48,4 +48,15 @@ test('the reader is told what every decision means, not just its key', () => {
   const g = decisionGuide();
   for (const r of PLAYBOOK) assert.ok(g.includes(`- ${r.key} (`) && g.includes(r.decision), r.key);
   assert.match(g, /scope \(One event or several\): Whether this is one event across venues or several events sharing a date\./);
+});
+
+test('every open item carries a one-line hint of what it means', () => {
+  for (const r of PLAYBOOK) {
+    const h = DECISION_HINTS[r.key];
+    assert.ok(h, `${r.key} has no hint`);
+    assert.ok(h.length <= 60, `${r.key}: "${h}" is ${h.length} characters -- keep it to one line`);
+    assert.doesNotMatch(h, /\d/, `${r.key}: a hint carries no figures`);
+  }
+  const p = summariseProgress(null);
+  assert.equal(p.open.find(o => o.key === 'scope')?.hint, DECISION_HINTS.scope);
 });

@@ -655,7 +655,7 @@ function renderProgress(p) {
     '</summary><div class="pg-body">' +
       (done.length ? '<h4>Decided</h4>' + done.map(d => row('done', '✓', d.label, d.summary)).join('') : '') +
       (wait.length ? '<h4>Waiting on someone</h4>' + wait.map(w => row('wait', '◷', w.item, w.who)).join('') : '') +
-      (open.length ? '<h4>Still open</h4>' + open.map(o => row('open', '○', o.label, '')).join('') : '') +
+      (open.length ? '<h4>Still open</h4>' + open.map(o => row('open', '○', o.label, o.hint)).join('') : '') +
       '<div class="pg-note">Read from the conversation after each answer. Tap to ' + (progressOpen ? 'close' : 'open') + '.</div>' +
     '</div></details>';
   box.querySelector('details').addEventListener('toggle', (e) => { progressOpen = e.target.open; });
