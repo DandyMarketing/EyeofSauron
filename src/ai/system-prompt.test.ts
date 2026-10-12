@@ -195,3 +195,12 @@ test('every figure the summary demands is one the tools actually return', () => 
     );
   }
 });
+
+test('a suggested number is labelled, and a market claim needs a source', () => {
+  // Khai, 12 Oct 2026: '$10 per head, standard enough that a promoter takes it'
+  // came from training. The chat has the same gap as the planner had.
+  assert.match(SYSTEM_PROMPT_BASE, /THREE KINDS OF NUMBER/);
+  assert.match(SYSTEM_PROMPT_BASE, /\(proposal\)/);
+  assert.match(SYSTEM_PROMPT_BASE, /going rate without a source/);
+  assert.match(SYSTEM_PROMPT_BASE, /Your training is not a source/);
+});
