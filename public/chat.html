@@ -389,114 +389,17 @@
 
   /* --- chat history ------------------------------------------------------ */
 
-  /**
-   * The switcher bar: which chat you are in, always visible.
-   *
-   * Sticky, because on a long conversation the one thing you might want while
-   * scrolled to the bottom is to start a different one.
-   */
-  #convo-bar {
-    position: sticky; top: 0; z-index: 30;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 7px 14px;
-  }
-
-  #convo-current {
-    display: flex; align-items: center; gap: 8px;
-    max-width: 100%;
-    background: none; border: none; color: var(--text);
-    font-family: inherit; font-size: 13px; font-weight: 600;
-    cursor: pointer; padding: 5px 2px;
-  }
-
-  /* min-width:0 so a long title truncates instead of pushing the chevron off. */
-  #convo-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  #convo-current .chev { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
-  #convo-current[aria-expanded="true"] .chev { color: var(--accent); }
-
-  /**
-   * THE `hidden` ATTRIBUTE DOES NOT WIN AGAINST A `display` RULE.
-   *
-   * `hidden` works by the browser's own stylesheet setting `display: none`, and
-   * ANY author rule that sets display beats it — so `#history-panel { display:
-   * flex }` left the panel permanently on screen, covering the chat's own
-   * header. Worse, it looked broken rather than open: the list only loads when
-   * the panel is OPENED through historyPanel(), which had never run, so it sat
-   * on "Loading…" for ever, and the chevron that would have opened it properly
-   * was underneath the thing covering it.
-   *
-   * Stated as a rule rather than worked around by swapping to a class, because
-   * the next element with `hidden` and a display rule will hit the same thing.
-   */
+  /* `hidden` loses to any author display rule, so it is restated here. */
   [hidden] { display: none !important; }
 
-  /* Catches the tap that closes the dropdown, and dims what is behind it. */
-  #history-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.4); }
-
-  #history-panel {
-    position: fixed; z-index: 41;
-    top: 0; left: 0; right: 0;
-    max-height: 70vh;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    border-radius: 0 0 12px 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    display: flex; flex-direction: column;
-    padding: 12px;
-  }
-
-  /* Anchored under the bar rather than full-width once there is room for it. */
-  @media (min-width: 700px) {
-    #history-panel { left: 14px; right: auto; width: 420px; }
-  }
-
-  .btn-newchat {
-    width: 100%;
-    background: var(--accent); color: #000; border: none; border-radius: 8px;
-    padding: 10px; font-size: 14px; font-weight: 600; font-family: inherit;
-    cursor: pointer; margin-bottom: 12px;
-  }
-
-  #history-list { flex: 1; overflow-y: auto; }
-
-  .hp-item {
-    display: flex; align-items: center; gap: 4px;
-    border-radius: 8px; margin-bottom: 2px;
-  }
-  .hp-item:hover { background: var(--bg); }
-  .hp-item.current { background: var(--bg); }
-
-  /**
-   * The title is a button so the whole row is a tap target, and min-width:0
-   * lets it shrink — without it a long title pushes the rename and delete
-   * controls off the edge of the panel.
+  /*
+   * Saved chats live in a LEFT SIDEBAR (public/conv-sidebar.js, shared with the
+   * planner): a column beside the conversation on a laptop that minimises to a
+   * strip, a slide-over from a header button on a phone. Khai, 12 Oct 2026. It
+   * replaced a dropdown under the header that showed one title at a time.
    */
-  .hp-open {
-    flex: 1; min-width: 0; text-align: left;
-    background: none; border: none; color: var(--text);
-    font-family: inherit; font-size: 13px; line-height: 1.35;
-    padding: 9px 8px; cursor: pointer;
-  }
-  .hp-open .hp-when { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-  .hp-open .hp-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .hp-act {
-    background: none; border: none; color: var(--text-muted);
-    cursor: pointer; font-size: 13px; padding: 6px;
-    /* 30px square: a thumb target, not a mouse target. */
-    min-width: 30px; min-height: 30px;
-  }
-  .hp-act:hover { color: var(--accent); }
-  .hp-act.hp-del:hover { color: var(--error); }
-
-  .hp-empty { color: var(--text-muted); font-size: 13px; padding: 10px 2px; line-height: 1.5; }
-
-  .hp-note {
-    font-size: 11px; color: var(--text-muted);
-    border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; line-height: 1.5;
-  }
+  #workspace { flex: 1; display: flex; min-height: 0; }
+  #main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 
   /**
    * A message withheld because the reader's access changed.
@@ -867,29 +770,10 @@
     </nav>
   </header>
 
-  <!--
-    THE CURRENT CHAT, WITH THE REST BEHIND A CHEVRON.
-
-    This started as a slide-over reached from a "History" link, which hid two
-    things that matter: WHICH conversation you are in, and that there are
-    others. Khai pointed at the pattern -- show the current one, let it drop
-    down -- and it is better for exactly that reason. The title is always on
-    screen, switching is one tap, and no layout is given up to a list nobody is
-    reading most of the time.
-  -->
-  <div id="convo-bar">
-    <button id="convo-current" aria-haspopup="listbox" aria-expanded="false">
-      <span id="convo-title">New chat</span>
-      <span class="chev" aria-hidden="true">&#9662;</span>
-    </button>
-  </div>
-
-  <div id="history-overlay" hidden></div>
-  <div id="history-panel" hidden role="listbox" aria-label="Your chats">
-    <button id="new-chat" class="btn-newchat">+ New chat</button>
-    <div id="history-list"><div class="hp-empty">Loading&hellip;</div></div>
-    <div class="hp-note">Kept for a year. Only you can read these.</div>
-  </div>
+  <div id="workspace">
+  <!-- Your saved chats: minimisable on a laptop, a slide-over on a phone. -->
+  <aside id="conv-sidebar"></aside>
+  <div id="main-col">
 
   <div id="chat">
     <div class="welcome" id="welcome">
@@ -950,6 +834,8 @@
       </button>
     </div>
   </div>
+  </div><!-- #main-col -->
+  </div><!-- #workspace -->
 </div>
 
 <div id="chart-modal" aria-hidden="true">
@@ -964,6 +850,8 @@
   long note at the top of markdown.js for what three copies of it had cost.
 -->
 <script src="/markdown.js"></script>
+<!-- The saved-conversations sidebar, shared with the planner. -->
+<script src="/conv-sidebar.js"></script>
 <script>
 const chat = document.getElementById('chat');
 const input = document.getElementById('question');
@@ -1031,6 +919,8 @@ if (window.visualViewport) {
 let history = [];
 let busy = false;
 let authToken = null;
+/** The left sidebar of saved chats; set once signed in. */
+let sidebar = null;
 let supabaseClient = null;
 // Venues this user may see, for the note-capture venue picker.
 let myVenues = [];
@@ -1062,6 +952,17 @@ let myVenues = [];
   }
 
   authToken = session.access_token;
+  sidebar = window.ConvSidebar.mount({
+    aside: document.getElementById('conv-sidebar'),
+    header: document.querySelector('header'),
+    kind: 'chat', noun: 'chat',
+    token: () => authToken,
+    currentId: () => conversationId,
+    onOpen: openConversation,
+    onNew: startNewChat,
+    onDeletedCurrent: startNewChat,
+  });
+  sidebar.refresh();
 
   /**
    * Who I am, and the terms module, fired together the moment there is a token.
@@ -1122,7 +1023,10 @@ let myVenues = [];
    */
   const thread = params.get('c');
   if (thread) {
-    history.replaceState(null, '', window.location.pathname);
+    // window.history: this script's own `let history` (the chat context)
+    // shadows the browser's, and `history.replaceState` threw before the
+    // handed-over conversation could open.
+    window.history.replaceState(null, '', window.location.pathname);
     openConversation(thread);
   }
 
@@ -1139,7 +1043,10 @@ let myVenues = [];
     box.value = handoff.slice(0, 2000);
     box.dispatchEvent(new Event('input'));   // the textarea auto-grows on input
     box.focus();
-    history.replaceState(null, '', window.location.pathname);
+    // window.history: this script's own `let history` (the chat context)
+    // shadows the browser's, and `history.replaceState` threw before the
+    // handed-over conversation could open.
+    window.history.replaceState(null, '', window.location.pathname);
   }
 
   document.getElementById('logout-link').addEventListener('click', async (e) => {
@@ -1639,118 +1546,13 @@ async function askPlain(question) {
  */
 let conversationId = null;
 
-function historyPanel(open) {
-  document.getElementById('history-panel').hidden = !open;
-  document.getElementById('history-overlay').hidden = !open;
-  document.getElementById('convo-current').setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (open) loadConversations();
-}
-
-/** Keep the bar showing the thread you are actually in. */
-function setConvoTitle(title) {
-  document.getElementById('convo-title').textContent = title || 'New chat';
-}
-
-function whenText(iso) {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (!Number.isFinite(days)) return '';
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return days + ' days ago';
-  const months = Math.floor(days / 30);
-  return months + (months === 1 ? ' month ago' : ' months ago');
-}
-
-async function loadConversations() {
-  const list = document.getElementById('history-list');
-  let data;
-  try {
-    const res = await fetch('/api/conversations', { headers: { Authorization: 'Bearer ' + authToken } });
-    /**
-     * A non-OK response has to be caught EXPLICITLY. A 401 or a 500 still
-     * parses as JSON, `data.conversations` comes back undefined, and the panel
-     * would report "no saved chats yet" — which is a failure disguised as good
-     * news, and the reader has no way to tell the difference.
-     */
-    if (!res.ok) {
-      list.innerHTML = '<div class="hp-empty">Could not load your chats (' + res.status + ').</div>';
-      return;
-    }
-    data = await res.json();
-  } catch (e) {
-    list.innerHTML = '<div class="hp-empty">Could not load your chats.</div>';
-    return;
-  }
-
-  const items = (data && data.conversations) || [];
-  if (items.length === 0) {
-    // Said plainly rather than left blank: nothing here yet and something went
-    // wrong look identical to somebody staring at an empty panel.
-    list.innerHTML = '<div class="hp-empty">No saved chats yet. Ask something and it will appear here.</div>';
-    return;
-  }
-
-  list.innerHTML = items.map(function (c) {
-    const title = escapeHtml(c.title || 'Untitled');
-    return '<div class="hp-item' + (c.id === conversationId ? ' current' : '') + '" data-id="' + escapeHtml(c.id) + '">' +
-      '<button class="hp-open"><span class="hp-title">' + title + '</span>' +
-        '<span class="hp-when">' + whenText(c.updated_at) + '</span></button>' +
-      '<button class="hp-act hp-rename" title="Rename">&#9998;</button>' +
-      '<button class="hp-act hp-del" title="Delete">&times;</button>' +
-    '</div>';
-  }).join('');
-
-  /**
-   * Keep the bar in step with the list.
-   *
-   * The bar is set optimistically from the question the moment an answer comes
-   * back, because waiting would leave it saying "New chat" over a conversation
-   * that plainly is not new. The real title is written a second later by the
-   * cheap model, so the two disagree until something reloads — this is that
-   * something, and it costs nothing because the list has just been fetched.
-   */
-  const mine = items.find(function (c) { return c.id === conversationId; });
-  if (mine && mine.title) setConvoTitle(mine.title);
-
-  list.querySelectorAll('.hp-item').forEach(function (row) {
-    const id = row.dataset.id;
-    row.querySelector('.hp-open').addEventListener('click', function () { openConversation(id); });
-    row.querySelector('.hp-rename').addEventListener('click', async function () {
-      const current = row.querySelector('.hp-title').textContent;
-      const next = prompt('Rename this chat', current);
-      if (next === null || !next.trim()) return;
-      const res = await fetch('/api/conversations/' + id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
-        body: JSON.stringify({ title: next.trim() }),
-      });
-      if (!res.ok) { alert('Could not rename that chat.'); return; }
-      loadConversations();
-    });
-    row.querySelector('.hp-del').addEventListener('click', async function () {
-      const title = row.querySelector('.hp-title').textContent;
-      if (!confirm('Delete "' + title + '"? This cannot be undone.')) return;
-      const res = await fetch('/api/conversations/' + id, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + authToken },
-      });
-      if (!res.ok) { alert('Could not delete that chat.'); return; }
-      // Deleting the thread you are in leaves you on a blank one rather than
-      // looking at a conversation that no longer exists.
-      if (id === conversationId) startNewChat();
-      loadConversations();
-    });
-  });
-}
-
 function startNewChat() {
   conversationId = null;
   history = [];
   // Back to how the app looks when you open it, chips and all.
   chat.innerHTML = WELCOME_HTML;
   welcome = document.getElementById('welcome');
-  setConvoTitle('New chat');
-  historyPanel(false);
+  sidebar?.refresh();
   chat.scrollTop = 0;
 }
 
@@ -1764,7 +1566,6 @@ function startNewChat() {
  * allowed.
  */
 async function openConversation(id) {
-  historyPanel(false);
   chat.innerHTML = '';
   welcome = null;
 
@@ -1779,7 +1580,7 @@ async function openConversation(id) {
   }
 
   conversationId = id;
-  setConvoTitle(data.title);
+  sidebar?.refresh();
   history = [];
 
   for (const m of data.messages || []) {
@@ -1822,15 +1623,6 @@ async function openConversation(id) {
   chat.scrollTop = chat.scrollHeight;
 }
 
-document.getElementById('convo-current').addEventListener('click', function () {
-  historyPanel(document.getElementById('history-panel').hidden);
-});
-// Escape closes it, like any other menu.
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') historyPanel(false);
-});
-document.getElementById('history-overlay').addEventListener('click', function () { historyPanel(false); });
-document.getElementById('new-chat').addEventListener('click', startNewChat);
 
 async function send() {
   const question = input.value.trim();
@@ -1880,9 +1672,9 @@ async function send() {
     if (data.conversation_id) {
       const isNew = conversationId !== data.conversation_id;
       conversationId = data.conversation_id;
-      // The server titles a new thread from the first question. Shown straight
-      // away rather than after a refresh, so the bar is never stale.
-      if (isNew) setConvoTitle(question.length > 60 ? question.slice(0, 57) + '…' : question);
+      // A new thread: list it now, and again once the cheap model's title has
+      // had a moment to land.
+      if (isNew) { sidebar?.refresh(); setTimeout(() => sidebar?.refresh(), 4000); }
     }
 
     if (data.toolCalls && data.toolCalls.length > 0) {

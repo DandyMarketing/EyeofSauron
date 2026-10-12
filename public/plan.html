@@ -177,50 +177,19 @@
     background: rgba(255,255,255,0.04);
   }
   .post-thumb.expired { max-width: 0; max-height: 0; margin: 0; opacity: 0; }
-  /* --- saved plans: the current one in a bar, the rest behind a chevron --- */
   /* `hidden` loses to any author display rule; see the note in chat.html. */
   [hidden] { display: none !important; }
-  #convo-bar { max-width: 860px; width: 100%; margin: 0 auto; padding: 10px 20px 0; }
-  #convo-current {
-    display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
-    background: transparent; color: var(--text); border: 1px solid var(--border);
-    border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 500;
-  }
-  #convo-current:hover { border-color: var(--accent-dim); }
-  #convo-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #convo-current .chev { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
-  #history-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.4); }
-  #history-panel {
-    position: fixed; z-index: 41; top: 0; left: 0; right: 0; max-height: 70vh;
-    background: var(--surface); border-bottom: 1px solid var(--border);
-    border-radius: 0 0 12px 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    display: flex; flex-direction: column; padding: 12px;
-  }
-  @media (min-width: 700px) { #history-panel { left: 14px; right: auto; width: 420px; } }
-  #new-plan { width: 100%; margin-bottom: 12px; padding: 10px; font-size: 14px; border-radius: 8px; }
-  #history-list { flex: 1; overflow-y: auto; }
-  .hp-item { display: flex; align-items: center; gap: 4px; border-radius: 8px; margin-bottom: 2px; }
-  .hp-item:hover, .hp-item.current { background: var(--bg); }
-  .hp-open {
-    flex: 1; min-width: 0; text-align: left; background: none; color: var(--text);
-    font-size: 13px; font-weight: 400; line-height: 1.35; padding: 9px 8px; border-radius: 8px;
-  }
-  .hp-open .hp-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hp-open .hp-when { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-  .hp-act {
-    background: none; color: var(--text-muted); font-size: 13px; font-weight: 400;
-    padding: 6px; min-width: 30px; min-height: 30px;
-  }
-  .hp-act:hover { color: var(--accent); }
-  .hp-act.hp-del:hover { color: var(--error); }
-  .hp-empty { color: var(--text-muted); font-size: 13px; padding: 10px 2px; line-height: 1.5; }
-  .hp-note {
-    font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border);
-    padding-top: 10px; margin-top: 10px; line-height: 1.5;
-  }
+
+  /*
+   * Saved plans live in a left sidebar (public/conv-sidebar.js, shared with the
+   * chat). The conversation and its input sit in the column beside it.
+   */
+  #workspace { flex: 1; display: flex; align-items: stretch; min-width: 0; }
+  #main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .withheld { color: var(--text-muted); font-style: italic; font-size: 14px; }
   /* --- the progress board ------------------------------------------------- */
-  #progress { max-width: 860px; width: 100%; margin: 8px auto 0; padding: 0 20px; }
+  /* Under the input bar, in the sticky footer (Khai, 12 Oct 2026). */
+  #progress { max-width: 860px; width: 100%; margin: 10px auto 0; }
   #progress details {
     border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
   }
@@ -239,7 +208,11 @@
   .pg-seg i { display: block; height: 100%; background: var(--success); }
   .pg-stages { display: flex; gap: 4px; font-size: 10px; color: var(--text-muted); }
   .pg-stages span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pg-body { padding: 4px 12px 12px; font-size: 13px; border-top: 1px solid var(--border); }
+  .pg-body {
+    padding: 4px 12px 12px; font-size: 13px; border-top: 1px solid var(--border);
+    /* Opened inside a sticky footer it must not swallow the conversation. */
+    max-height: 40vh; overflow-y: auto;
+  }
   .pg-body h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 4px; font-weight: 600; }
   .pg-row { display: flex; gap: 8px; padding: 3px 0; line-height: 1.35; }
   .pg-row .mk { width: 14px; flex-shrink: 0; text-align: center; }
@@ -267,29 +240,10 @@
     </nav>
   </header>
 
-  <!--
-    THE PLAN YOU ARE IN, WITH YOUR OTHER PLANS BEHIND A CHEVRON -- the same
-    pattern as the chat page. Plans are argued over several days, so a refresh
-    must not lose one. Saved with chats (migration 055), listed apart from them.
-  -->
-  <div id="convo-bar">
-    <button id="convo-current" aria-haspopup="listbox" aria-expanded="false">
-      <span id="convo-title">New plan</span>
-      <span class="chev" aria-hidden="true">&#9662;</span>
-    </button>
-  </div>
-  <!--
-    WHERE THE PLAN STANDS. Khai, 12 Oct 2026: "It keeps asking without sign of
-    progress." Read from the conversation by a second pass after each answer
-    (POST /api/plan/progress), so it is not the planner grading itself.
-  -->
-  <div id="progress" hidden></div>
-  <div id="history-overlay" hidden></div>
-  <div id="history-panel" hidden role="listbox" aria-label="Your plans">
-    <button id="new-plan">+ New plan</button>
-    <div id="history-list"><div class="hp-empty">Loading&hellip;</div></div>
-    <div class="hp-note">Kept for a year. Only you can read these.</div>
-  </div>
+  <div id="workspace">
+  <!-- Your saved plans: minimisable on a laptop, a slide-over on a phone. -->
+  <aside id="conv-sidebar"></aside>
+  <div id="main-col">
 
   <div id="thread">
     <div class="intro" id="intro">
@@ -314,7 +268,16 @@
     <div class="actions">
       <button id="draft-btn" class="secondary" disabled>Prepare the brief</button>
     </div>
+    <!--
+      WHERE THE PLAN STANDS, under the input bar where the eye already is.
+      Khai, 12 Oct 2026: "It keeps asking without sign of progress." Read from
+      the conversation by a second pass after each answer (POST
+      /api/plan/progress), so it is not the planner grading itself.
+    -->
+    <div id="progress" hidden></div>
   </footer>
+  </div><!-- #main-col -->
+  </div><!-- #workspace -->
 
 <!--
   The ONE markdown renderer, shared by every page that shows an answer.
@@ -323,6 +286,8 @@
   long note at the top of markdown.js for what three copies of it had cost.
 -->
 <script src="/markdown.js"></script>
+<!-- The saved-conversations sidebar, shared with the chat page. -->
+<script src="/conv-sidebar.js"></script>
 <script type="module">
 let token = null;
 let history = [];
@@ -340,6 +305,8 @@ const INTRO_HTML = thread.innerHTML;
  * id, so an abandoned first message never leaves an empty plan behind.
  */
 let conversationId = null;
+/** The left sidebar of saved plans; set once signed in. */
+let sidebar = null;
 
 (async () => {
   // Both at once — see index.html for why these were never dependent.
@@ -355,6 +322,17 @@ let conversationId = null;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
+  sidebar = window.ConvSidebar.mount({
+    aside: document.getElementById('conv-sidebar'),
+    header: document.querySelector('header'),
+    kind: 'plan', noun: 'plan',
+    token: () => token,
+    currentId: () => conversationId,
+    onOpen: openPlan,
+    onNew: startNewPlan,
+    onDeletedCurrent: startNewPlan,
+  });
+  sidebar.refresh();
 
   // Both only need the token. There is no data fetch to start here: the planner
   // has nothing to show until somebody types.
@@ -445,9 +423,10 @@ async function send() {
     refreshProgress();
     if (data.conversation_id && data.conversation_id !== conversationId) {
       conversationId = data.conversation_id;
-      // The first sixty characters until the real title arrives; the list
-      // corrects it the next time it is opened.
-      setConvoTitle(message.length > 60 ? message.slice(0, 60) + '…' : message);
+      // A new plan: list it now. The cheap model's title lands a second
+      // later, so look again shortly to pick it up.
+      sidebar?.refresh();
+      setTimeout(() => sidebar?.refresh(), 4000);
     }
   } catch (e) {
     pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
@@ -637,81 +616,6 @@ function renderProgress(p) {
 
 /* --- saved plans ---------------------------------------------------------- */
 
-function historyPanel(open) {
-  document.getElementById('history-panel').hidden = !open;
-  document.getElementById('history-overlay').hidden = !open;
-  document.getElementById('convo-current').setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (open) loadPlans();
-}
-
-function setConvoTitle(title) {
-  document.getElementById('convo-title').textContent = title || 'New plan';
-}
-
-function whenText(iso) {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (!Number.isFinite(days)) return '';
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return days + ' days ago';
-  const months = Math.floor(days / 30);
-  return months + (months === 1 ? ' month ago' : ' months ago');
-}
-
-async function loadPlans() {
-  const list = document.getElementById('history-list');
-  let data;
-  try {
-    const res = await fetch('/api/conversations?kind=plan', { headers: { Authorization: 'Bearer ' + token } });
-    // A failure must not read as "no plans yet" -- see the chat page.
-    if (!res.ok) { list.innerHTML = '<div class="hp-empty">Could not load your plans (' + res.status + ').</div>'; return; }
-    data = await res.json();
-  } catch (e) {
-    list.innerHTML = '<div class="hp-empty">Could not load your plans.</div>';
-    return;
-  }
-
-  const items = (data && data.conversations) || [];
-  if (items.length === 0) {
-    list.innerHTML = '<div class="hp-empty">No saved plans yet. Start one and it will appear here.</div>';
-    return;
-  }
-
-  list.innerHTML = items.map(c =>
-    '<div class="hp-item' + (c.id === conversationId ? ' current' : '') + '" data-id="' + escapeHtml(c.id) + '">' +
-      '<button class="hp-open"><span class="hp-title">' + escapeHtml(c.title || 'Untitled') + '</span>' +
-        '<span class="hp-when">' + whenText(c.updated_at) + '</span></button>' +
-      '<button class="hp-act hp-rename" title="Rename">&#9998;</button>' +
-      '<button class="hp-act hp-del" title="Delete">&times;</button>' +
-    '</div>').join('');
-
-  const mine = items.find(c => c.id === conversationId);
-  if (mine && mine.title) setConvoTitle(mine.title);
-
-  list.querySelectorAll('.hp-item').forEach(row => {
-    const id = row.dataset.id;
-    row.querySelector('.hp-open').addEventListener('click', () => openPlan(id));
-    row.querySelector('.hp-rename').addEventListener('click', async () => {
-      const next = prompt('Rename this plan', row.querySelector('.hp-title').textContent);
-      if (next === null || !next.trim()) return;
-      const res = await fetch('/api/conversations/' + id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ title: next.trim() }),
-      });
-      if (!res.ok) { alert('Could not rename that plan.'); return; }
-      loadPlans();
-    });
-    row.querySelector('.hp-del').addEventListener('click', async () => {
-      if (!confirm('Delete "' + row.querySelector('.hp-title').textContent + '"? This cannot be undone.')) return;
-      const res = await fetch('/api/conversations/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
-      if (!res.ok) { alert('Could not delete that plan.'); return; }
-      if (id === conversationId) startNewPlan();
-      loadPlans();
-    });
-  });
-}
-
 function startNewPlan() {
   conversationId = null;
   history = [];
@@ -719,9 +623,8 @@ function startNewPlan() {
   document.getElementById('progress').hidden = true;
   document.getElementById('progress').innerHTML = '';
   thread.innerHTML = INTRO_HTML;
-  setConvoTitle('New plan');
   setBusy(false);
-  historyPanel(false);
+  sidebar?.refresh();
 }
 
 /**
@@ -734,7 +637,6 @@ function startNewPlan() {
  * build one from where the plan stands now.
  */
 async function openPlan(id) {
-  historyPanel(false);
   let data;
   try {
     const res = await fetch('/api/conversations/' + id, { headers: { Authorization: 'Bearer ' + token } });
@@ -748,7 +650,7 @@ async function openPlan(id) {
   conversationId = id;
   history = [];
   thread.innerHTML = '';
-  setConvoTitle(data.title);
+  sidebar?.refresh();
 
   for (const m of data.messages || []) {
     if (m.role === 'user') {
@@ -770,12 +672,6 @@ async function openPlan(id) {
   document.getElementById('progress').innerHTML = '';
   refreshProgress();
 }
-
-document.getElementById('convo-current').addEventListener('click', () =>
-  historyPanel(document.getElementById('history-panel').hidden));
-document.getElementById('history-overlay').addEventListener('click', () => historyPanel(false));
-document.getElementById('new-plan').addEventListener('click', startNewPlan);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') historyPanel(false); });
 
 sendBtn.addEventListener('click', send);
 draftBtn.addEventListener('click', prepareDraft);

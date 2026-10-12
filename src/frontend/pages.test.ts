@@ -1266,3 +1266,21 @@ test('the briefing list is cached by venue scope, and a rating clears it', () =>
   const rate = server.slice(server.indexOf("app.post('/api/recommendations/:id/rate'"), server.indexOf("app.post('/api/recommendations/:id/rate'") + 3000);
   assert.match(rate, /recommendationsCache\.clear\(\)/, 'a rating will not show until the cache refreshes');
 });
+
+test('chat and plan share one saved-conversations sidebar, on the left', () => {
+  /**
+   * Khai, 12 Oct 2026: previous conversations live in a left sidebar that
+   * minimises and expands, on both pages. One component, public/conv-sidebar.js,
+   * so rename and delete are fixed once rather than twice.
+   */
+  for (const page of ['chat.html', 'plan.html']) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.ok(html.includes('<aside id="conv-sidebar"></aside>'), `${page} has no sidebar mount point`);
+    assert.ok(html.includes('<script src="/conv-sidebar.js"></script>'), `${page} does not load the shared sidebar`);
+    assert.ok(html.indexOf('id="conv-sidebar"') < html.indexOf('id="main-col"'), `${page}: the sidebar must come before the conversation, i.e. on the left`);
+    assert.ok(!html.includes('id="history-panel"'), `${page} still carries the old dropdown`);
+  }
+  const plan = readFileSync('public/plan.html', 'utf8');
+  const footer = plan.slice(plan.indexOf('<footer>'), plan.indexOf('</footer>'));
+  assert.ok(footer.includes('id="progress"'), 'the progress board belongs under the input bar, in the footer');
+});
