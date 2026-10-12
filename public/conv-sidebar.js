@@ -83,7 +83,9 @@
          content, and the slide-over stopped where the list did. */
       position: fixed; top: 0; bottom: 0; left: 0; height: auto; align-self: stretch;
       width: min(300px, 86vw); padding: 12px; align-items: stretch;
-      transform: translateX(-102%); transition: transform .2s ease;
+      /* No transition until mounted: otherwise every page load on a phone
+         shows the list sliding away. Added by mount() a frame later. */
+      transform: translateX(-102%);
       z-index: 60; box-shadow: 8px 0 30px rgba(0,0,0,.5);
     }
     #conv-sidebar.collapsed .cs-heading, #conv-sidebar.collapsed .cs-list,
@@ -91,7 +93,21 @@
     #conv-sidebar.collapsed .cs-list { display: block; }
     #conv-sidebar.collapsed .cs-top { flex-direction: row; }
     #conv-sidebar .cs-plus, #conv-sidebar.collapsed .cs-plus { display: none; }
+    #conv-sidebar.cs-ready { transition: transform .2s ease; }
     #conv-sidebar.phone-open { transform: none; }
+    /*
+     * The header on a phone. The menu button, logo, title and five links on one
+     * row squeezed the title to a word a line (Khai's phone, 13 Oct 2026). The
+     * links take their own row under the title; the subtitle goes.
+     */
+    header { flex-wrap: wrap; row-gap: 8px; }
+    header > div:not(.logo) { flex: 1; min-width: 0; }
+    header h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    header .subtitle { display: none; }
+    header nav {
+      order: 3; flex-basis: 100%; margin-left: 0 !important; gap: 18px !important;
+      overflow-x: auto; white-space: nowrap;
+    }
     #cs-overlay.show { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.45); }
     #cs-menu {
       display: inline-flex; align-items: center; justify-content: center;
@@ -175,6 +191,8 @@
     }
     measure();
     window.addEventListener('resize', measure);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => aside.classList.add('cs-ready')));
 
     const toggle = aside.querySelector('.cs-toggle');
     function setCollapsed(c) {
