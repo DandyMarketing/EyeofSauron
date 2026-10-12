@@ -65,6 +65,8 @@ test('a missing standard cost is a visible blank, not an absence', () => {
     assert.ok(l, `${item} missing`);
     assert.equal(l!.basis, 'to fill');
   }
+  // Security is labour, not an additional cost (Khai, 12 Oct 2026).
+  assert.equal(lines.find(c => c.item === 'Security')!.section, 'labour');
   // Not duplicated when the conversation already priced it.
   const withAds = withStandardLines([{ section: 'marketing', item: 'Instagram ads', qty: 1, unit_price: 800, basis: 'proposal' }]);
   assert.equal(withAds.filter(c => c.section === 'marketing').length, 1);

@@ -512,7 +512,7 @@ export function eventDraftTool() {
             },
             costs: {
               type: 'array',
-              description: 'Every cost line discussed: hire, acts, equipment, ads, promoters, security, labour. A cost named but never priced goes in with no unit_price and basis "to fill".',
+              description: 'Every cost line discussed: hire, acts, equipment, ads, promoters, labour. SECURITY IS LABOUR (section "labour", guards x hours x rate), not an additional cost. A cost named but never priced goes in with no unit_price and basis "to fill".',
               items: {
                 type: 'object',
                 properties: {

@@ -98,7 +98,8 @@ const SECTION_ORDER: CostSection[] = ['operating', 'furniture', 'entertainment',
 const STANDARD_LINES: Array<{ section: CostSection; item: string; match: RegExp; note: string }> = [
   { section: 'marketing', item: 'Paid ads (Instagram / TikTok / Google)', match: /\bads?\b|advert|boost|paid/i, note: 'Who signs it off, and what it should bring back' },
   { section: 'additional', item: 'Promoter commission', match: /promoter/i, note: 'Per head, capped -- paid on reconciled codes' },
-  { section: 'additional', item: 'Security', match: /security|guard|bouncer/i, note: 'Door and floor, all rooms' },
+  // Labour, not an additional cost (Khai, 12 Oct 2026: "security ... is labour").
+  { section: 'labour', item: 'Security', match: /security|guard|bouncer/i, note: 'Door and floor, all rooms: guards x hours x rate' },
 ];
 
 const BASES: Basis[] = ['our data', 'source', 'proposal', 'to fill'];
