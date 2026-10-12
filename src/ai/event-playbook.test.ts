@@ -140,6 +140,11 @@ test('the prompt keeps the empty events store from becoming a verdict', () => {
   assert.match(EVENT_AGENT_PROMPT, /COMPARE THE PACKAGE, NOT THE PARTS/);
   assert.match(EVENT_AGENT_PROMPT, /WE HAVE THE EDGE · LEVEL · THEY HAVE THE EDGE/);
   assert.match(EVENT_AGENT_PROMPT, /THE LAYERING IS INSUFFICIENT/);
+  // A suggested number is labelled; a market claim needs a source (Khai, 12 Oct 2026).
+  assert.match(EVENT_AGENT_PROMPT, /THREE KINDS OF NUMBER/);
+  assert.match(EVENT_AGENT_PROMPT, /\(proposal\)/);
+  assert.match(EVENT_AGENT_PROMPT, /NEVER CALL ANYTHING STANDARD, TYPICAL, NORMAL, THE GOING RATE/);
+  assert.match(EVENT_AGENT_PROMPT, /Your training is not a source/);
   assert.match(EVENT_AGENT_PROMPT, /Never say "this has not been\s+tried here"/);
 });
 
