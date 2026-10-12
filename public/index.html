@@ -373,6 +373,45 @@
     .tiles .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .tile .value { font-size: 20px; }
   }
+  /* --- export: period and format chosen at export time (Khai, 12 Oct 2026) --- */
+  .export-chip {
+    margin-left: auto; padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  }
+  .export-chip:hover { border-color: var(--accent); color: var(--accent); }
+  #export-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.5); }
+  #export-sheet {
+    position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+  #export-sheet h3 { font-size: 15px; margin-bottom: 10px; }
+  #export-sheet .ex-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 6px; }
+  #export-sheet .ex-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  #export-sheet .ex-opt {
+    padding: 7px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text-muted);
+  }
+  #export-sheet .ex-opt.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
+  #export-sheet .ex-hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
+  #export-sheet .ex-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  #export-sheet .ex-row button { padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
+  #export-sheet .ex-row .ex-go { background: var(--accent); color: #17110a; border-color: var(--accent); font-weight: 600; }
+  #export-sheet .ex-msg { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+
+  /*
+   * PDF = the dashboard as it looks, through the browser's print. The ask bar,
+   * the chips and the export dialog are controls, not content, so they go; the
+   * colours print as shown, and a panel is not cut across two pages.
+   */
+  @media print {
+    @page { margin: 10mm; }
+    header nav, .periods, .askbar, .ask-sheet, #export-sheet, #export-overlay, .export-chip { display: none !important; }
+    body { padding-bottom: 0 !important; }
+    main { max-width: none; }
+    .tile, .panel, table { break-inside: avoid; page-break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  }
 </style>
 </head>
 <body>
@@ -635,6 +674,8 @@ function draw(recData) {
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
   document.querySelectorAll('.period-chip').forEach(b =>
     b.addEventListener('click', () => switchPeriod(b.dataset.period, recData)));
+  lastRecData = recData;
+  document.getElementById('export-open')?.addEventListener('click', openExport);
 
   const ask = document.getElementById('ask-input');
   const go = () => askNow(v, w);
@@ -678,7 +719,92 @@ const PERIODS = [
 function periodChips() {
   return '<div class="periods">' + PERIODS.map(p =>
     '<button class="period-chip' + (p[0] === period ? ' on' : '') + '" data-period="' + p[0] + '">' +
-    p[1] + '</button>').join('') + '</div>';
+    p[1] + '</button>').join('') +
+    '<button class="export-chip" id="export-open" type="button" aria-label="Export">⤓ Export</button></div>';
+}
+
+/* --- export ------------------------------------------------------------------ */
+
+/** The recommendations the page was drawn with, so a PDF of another period redraws the same advice. */
+let lastRecData = null;
+
+/**
+ * Export, with the period and the format chosen there and then (Khai, 12 Oct
+ * 2026: "make it choosable"). Excel is built on the server from the same
+ * payload the page draws; PDF is this page, printed -- the browser's own "Save
+ * as PDF" -- so it is exactly what is on screen, for the chosen period.
+ */
+function openExport() {
+  let exPeriod = period, exFormat = 'xlsx';
+  document.getElementById('export-overlay')?.remove();
+  document.getElementById('export-sheet')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'export-overlay';
+  const sheet = document.createElement('div');
+  sheet.id = 'export-sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', 'Export the dashboard');
+  const opts = (name, list, current) => '<div class="ex-opts" data-name="' + name + '">' + list.map(o =>
+    '<button type="button" class="ex-opt' + (o[0] === current ? ' on' : '') + '" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>';
+  sheet.innerHTML =
+    '<h3>Export the dashboard</h3>' +
+    '<div class="ex-label">Period</div>' + opts('period', PERIODS, exPeriod) +
+    '<div class="ex-label">Format</div>' + opts('format', [['xlsx', 'Excel'], ['pdf', 'PDF']], exFormat) +
+    '<div class="ex-hint" id="ex-hint"></div>' +
+    '<div class="ex-row"><button type="button" class="ex-cancel">Cancel</button><button type="button" class="ex-go">Export</button></div>' +
+    '<div class="ex-msg" id="ex-msg"></div>';
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+
+  const hint = () => {
+    document.getElementById('ex-hint').textContent = exFormat === 'xlsx'
+      ? 'Every venue you can see: a summary, day by day, and costs. The same figures as the page.'
+      : 'The page as it looks for that period, including the venue selected. Choose "Save as PDF" in the print window.';
+  };
+  hint();
+  const close = () => { overlay.remove(); sheet.remove(); };
+  overlay.addEventListener('click', close);
+  sheet.querySelector('.ex-cancel').addEventListener('click', close);
+  sheet.querySelectorAll('.ex-opts').forEach(group => group.addEventListener('click', e => {
+    const b = e.target.closest('.ex-opt');
+    if (!b) return;
+    group.querySelectorAll('.ex-opt').forEach(x => x.classList.toggle('on', x === b));
+    if (group.dataset.name === 'period') exPeriod = b.dataset.v; else exFormat = b.dataset.v;
+    hint();
+  }));
+  sheet.querySelector('.ex-go').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const msg = document.getElementById('ex-msg');
+    btn.disabled = true; btn.textContent = exFormat === 'xlsx' ? 'Building…' : 'Preparing…';
+    try {
+      if (exFormat === 'pdf') {
+        if (exPeriod !== period) await switchPeriod(exPeriod, lastRecData);
+        close();
+        // A beat for the redrawn page to lay out before the print snapshot.
+        setTimeout(() => window.print(), 300);
+        return;
+      }
+      const res = await fetch('/api/dashboard/export?period=' + encodeURIComponent(exPeriod), {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      if (!res.ok) {
+        const out = await res.json().catch(() => ({}));
+        msg.textContent = out.message || out.error || 'Could not build the export.';
+      } else {
+        const blob = await res.blob();
+        const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'Sauron_dashboard.xlsx';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        close();
+        return;
+      }
+    } catch (err) {
+      msg.textContent = String(err.message || err);
+    }
+    btn.disabled = false; btn.textContent = 'Export';
+  });
 }
 
 async function switchPeriod(kind, recData) {

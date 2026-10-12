@@ -39,6 +39,7 @@ import {
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook } from './lib/event-pnl.js';
+import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -1480,6 +1481,45 @@ app.get('/api/daily-report', async (c) => {
   } catch (e: any) {
     console.error(`[daily-report] ${e?.message ?? e}`);
     return c.json({ error: e?.message ?? 'Could not build the daily report' }, 500);
+  }
+});
+
+/**
+ * The dashboard as Excel, for the period the reader chose (Khai, 12 Oct 2026:
+ * "make it choosable"). Built from the very payload /api/dashboard returns, so
+ * the workbook cannot disagree with the screen. Same scope, same terms gate,
+ * same refusal of an unknown period.
+ */
+app.get('/api/dashboard/export', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const scoped = await venuesInScope(user);
+  if (scoped.length === 0) {
+    return c.json({ error: 'no_venues', message: 'Your account is not assigned to a venue yet. Ask an owner to add you.' }, 403);
+  }
+  const requested = c.req.query('period');
+  if (requested !== undefined && !isPeriodKind(requested)) {
+    return c.json({ error: 'bad_period', message: `Unknown period "${requested}".` }, 400);
+  }
+  try {
+    const payload = await buildDashboard(scoped, undefined, requested);
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const wb = await buildDashboardWorkbook(payload, today);
+    const buf = await wb.xlsx.writeBuffer();
+    const file = `Sauron_dashboard_${payload.window.kind}_${payload.window.current.start}_to_${payload.window.current.end}.xlsx`;
+    return new Response(buf as ArrayBuffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${file}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (e: any) {
+    console.error(`[dashboard/export] ${e?.message ?? e}`);
+    return c.json({ error: 'Could not build the export.' }, 500);
   }
 });
 

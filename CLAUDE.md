@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 55 migrations, 25 query tools, 11 ingest sources, 1,513 tests.
+started.** 55 migrations, 25 query tools, 11 ingest sources, 1,514 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -915,6 +915,13 @@ be measured is blank and "to fill", never zero. Every line carries a BASIS --
 our data, source, proposal, to fill -- the rule the planner follows. Each
 formula is written with its result so a phone's preview shows the figures.
 
+**The dashboard exports too** (12 Oct 2026, "make it choosable"): an Export
+button by the period chips opens a choice of period and format. Excel is
+`GET /api/dashboard/export` -- built from the same payload `/api/dashboard`
+returns, so it cannot disagree with the screen, with definitions beside the
+figures (`src/lib/dashboard-export.ts`). PDF is the page itself through the
+browser's print, with the controls hidden by print styles.
+
 ## Later: parked features (recorded 11 Oct 2026)
 
 Agreed as worth doing and deliberately not started. Each needs the decision or
@@ -962,7 +969,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,513 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,514 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
