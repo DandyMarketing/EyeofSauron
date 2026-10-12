@@ -34,6 +34,7 @@ import { queryTools } from './ai/tools.js';
 import {
   createConversation, appendTurn, listConversations, readConversation,
   renameConversation, deleteConversation, titleConversation,
+  isConversationKind, type ConversationKind,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { modelFor } from './ai/model-policy.js';
@@ -481,7 +482,11 @@ function readerScope(user: SessionUser) {
 app.get('/api/conversations', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
-  return c.json({ conversations: await listConversations(user.id) });
+  // ?kind=plan for the planner's list; chats when absent. Validated, not
+  // defaulted, so a typo cannot show one page the other page's threads.
+  const kind = c.req.query('kind') ?? 'chat';
+  if (!isConversationKind(kind)) return c.json({ error: `Unknown kind "${kind}".` }, 400);
+  return c.json({ conversations: await listConversations(user.id, kind) });
 });
 
 app.get('/api/conversations/:id', async (c) => {
@@ -532,10 +537,11 @@ async function saveTurn(
   conversationId: string | null | undefined,
   question: string,
   result: { answer?: string; toolCalls?: any[]; charts?: any },
+  kind: ConversationKind = 'chat',
 ): Promise<string | null> {
   try {
     const isNew = !conversationId;
-    const id = conversationId || await createConversation(user.id, question);
+    const id = conversationId || await createConversation(user.id, question, kind);
     if (!id) return null;
     await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null);
 
@@ -745,7 +751,7 @@ app.post('/api/plan', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ message: string; history?: ChatMessage[] }>();
+  const body = await c.req.json<{ message: string; history?: ChatMessage[]; conversation_id?: string }>();
   if (!body.message) return c.json({ error: 'Missing "message" field' }, 400);
 
   try {
@@ -754,7 +760,9 @@ app.post('/api/plan', async (c) => {
       body.message, body.history ?? [], venueFilter, 'chat',
       effectiveRole(user), undefined, undefined, EVENT_AGENT_PROMPT,
     );
-    return c.json(result);
+    // Saved like a chat, listed apart from them. Saving never fails the answer.
+    const conversationId = await saveTurn(user, body.conversation_id, body.message, result, 'plan');
+    return c.json({ ...result, conversation_id: conversationId });
   } catch (e: any) {
     console.error(`[plan] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);

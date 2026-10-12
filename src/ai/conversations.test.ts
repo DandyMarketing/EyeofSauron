@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { titleFromQuestion, cleanTitle } from './conversations.js';
+import { titleFromQuestion, cleanTitle, isConversationKind } from './conversations.js';
 
 test('a title comes from the question, trimmed to something readable', () => {
   assert.equal(titleFromQuestion('How did Neon Pigeon do last week?'), 'How did Neon Pigeon do last week?');
@@ -52,4 +52,10 @@ test('AN ANSWER IS NOT A TITLE, and is rejected so the fallback stands', () => {
   assert.equal(cleanTitle(''), '');
   assert.equal(cleanTitle('   '), '');
   assert.equal(cleanTitle(undefined as any), '');
+});
+
+test('only chat and plan are kinds, so a typo cannot list the other page\'s threads', () => {
+  assert.equal(isConversationKind('chat'), true);
+  assert.equal(isConversationKind('plan'), true);
+  for (const bad of ['Plan', 'plans', '', undefined, null, 'chat ']) assert.equal(isConversationKind(bad), false);
 });

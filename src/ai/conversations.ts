@@ -42,11 +42,23 @@ export function titleFromQuestion(question: string): string {
   return (lastSpace > 30 ? cut.slice(0, lastSpace) : cut) + '…';
 }
 
+/**
+ * Which page a thread belongs to (migration 055). The access rules are the
+ * same for both; this only keeps the chat list and the planner list apart.
+ */
+export type ConversationKind = 'chat' | 'plan';
+
+export function isConversationKind(v: unknown): v is ConversationKind {
+  return v === 'chat' || v === 'plan';
+}
+
 /** Start a thread. Returns its id. */
-export async function createConversation(userId: string, firstQuestion: string): Promise<string | null> {
+export async function createConversation(
+  userId: string, firstQuestion: string, kind: ConversationKind = 'chat',
+): Promise<string | null> {
   const { data, error } = await supabaseAdmin
     .from('conversations')
-    .insert({ user_id: userId, title: titleFromQuestion(firstQuestion) })
+    .insert({ user_id: userId, title: titleFromQuestion(firstQuestion), kind })
     .select('id')
     .single();
 
@@ -187,13 +199,16 @@ export function cleanTitle(raw: string): string {
   return t;
 }
 
-/** Somebody's own threads, newest first. */
-export async function listConversations(userId: string, limit = 50): Promise<ConversationSummary[]> {
+/** Somebody's own threads of one kind, newest first. */
+export async function listConversations(
+  userId: string, kind: ConversationKind = 'chat', limit = 50,
+): Promise<ConversationSummary[]> {
   // row-cap: a deliberate top-N, the newest `limit` threads (50 by default).
   const { data, error } = await supabaseAdmin
     .from('conversations')
     .select('id, title, created_at, updated_at')
     .eq('user_id', userId)
+    .eq('kind', kind)
     .order('updated_at', { ascending: false })
     .limit(limit);
 
