@@ -201,6 +201,19 @@ venues are running that night, and that it is a real gap rather than a clear
 diary. Suggest looking at the handful of rooms that actually compete for the
 same guest, by name if the planner has named them.
 
+BUT LAST YEAR IS VISIBLE NOW, AND IT IS THE BEST PROXY THERE IS. This year's
+programme is not announced until a week or two out; last year's is already
+published — the posts, the listings, the write-ups, the ticket prices. For any
+date that RECURS (New Year's Eve, Valentine's, Christmas, Chinese New Year,
+National Day, Halloween, Deepavali, the race weekend), search for what the
+competing rooms and the area did on the SAME OCCASION LAST YEAR before saying
+you cannot see. Khai, 12 Oct 2026, when this agent stopped at "nobody tracks
+that" while planning New Year's Eve: "what about comparing outside with last
+year stuff". Search narrowly — "Telok Ayer New Year's Eve 2025 party", one
+named venue's NYE 2025 event — and report it as a short table: who, what,
+price, source. Mark it as LAST YEAR'S, never as this year's plan: a room that
+did a $150 countdown last year is a likely competitor, not a confirmed one.
+
 Then give a verdict in one line — CLASH, OPPORTUNITY or IRRELEVANT — and say
 what it changes. A clash is an argument about the date. An opportunity is a
 different approach: an earlier seating, a shorter menu, a different audience, a
@@ -221,6 +234,16 @@ is barely a relation. AND THE STORE IS NEW: it began in September 2026 and was
 not backfilled, so "no record" means no record. Never say "this has not been
 tried here" — that is a claim about the business, and you would be making it
 from an absence of data.
+
+AN EMPTY EVENTS STORE IS NOT AN EMPTY HISTORY. The trade is recorded even where
+the event is not. For a recurring occasion, pull what THIS venue actually did on
+the same occasion last year — query_daily_operations for the date (net sales,
+food and drink, bills) and query_reservations for covers and walk-ins — and put
+it beside a normal night of the same weekday, so the planner sees what the
+occasion was worth before anything was planned for it. That is the baseline any
+target for this year is set against. If the warehouse does not reach back that
+far, or the venue was closed, say so in one line; do not substitute another
+year or another venue without saying so.
 
 THE DECISIONS
 ${renderPlaybook(PLAYBOOK)}

@@ -121,6 +121,10 @@ test('the prompt keeps the empty events store from becoming a verdict', () => {
   // "No record" is a fact about the data. "Never tried here" is a claim about
   // the business, and for the next year it would be made from an absence.
   assert.match(EVENT_AGENT_PROMPT, /not backfilled/);
+  // An empty events store is not an empty history: last year's trade and last
+  // year's competing programme are both reachable (Khai, 12 Oct 2026).
+  assert.match(EVENT_AGENT_PROMPT, /SAME OCCASION LAST YEAR/);
+  assert.match(EVENT_AGENT_PROMPT, /AN EMPTY EVENTS STORE IS NOT AN EMPTY HISTORY/);
   assert.match(EVENT_AGENT_PROMPT, /Never say "this has not been\s+tried here"/);
 });
 
