@@ -13,6 +13,7 @@ import { selectAll } from '../lib/paged.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabaseAdmin } from '../auth/session.js';
 import { modelFor } from './model-policy.js';
+import { relightCharts } from './chart-svg.js';
 import { filterConversation, scopeOfTurn } from './conversation-scope.js';
 import type { ReaderScope, ToolCallRecord } from './conversation-scope.js';
 
@@ -346,7 +347,9 @@ export async function readConversation(
     console.log(`[conversations] withheld ${withheld} message(s) of ${conversationId} — reader's access has changed`);
   }
 
-  return { id: convo.id, title: convo.title, messages, withheld };
+  // Charts are stored as SVG: one saved before the light look is repainted here.
+  const lit = messages.map((m: any) => (m.charts ? { ...m, charts: relightCharts(m.charts) } : m));
+  return { id: convo.id, title: convo.title, messages: lit, withheld };
 }
 
 export async function renameConversation(userId: string, id: string, title: string): Promise<boolean> {

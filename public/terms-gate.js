@@ -50,43 +50,43 @@ export async function enforceTerms(authToken) {
       <style>
         #terms-gate {
           position: fixed; inset: 0; z-index: 9999;
-          background: #0a0a0f; color: #e4e4ef;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: var(--bg); color: var(--text);
+          font-family: var(--font);
           display: flex; align-items: center; justify-content: center; padding: 20px;
           overflow-y: auto;
         }
         #terms-gate .tg-card {
-          background: #14141f; border: 1px solid #2a2a3a; border-radius: 14px;
+          background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
           max-width: 640px; width: 100%; max-height: 92vh;
           display: flex; flex-direction: column;
         }
-        #terms-gate .tg-head { padding: 22px 26px 12px; border-bottom: 1px solid #2a2a3a; }
-        #terms-gate h2 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-        #terms-gate .tg-sub { font-size: 12px; color: #8888a0; }
+        #terms-gate .tg-head { padding: 22px 26px 12px; border-bottom: 1px solid var(--border); }
+        #terms-gate h2 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+        #terms-gate .tg-sub { font-size: 13px; color: var(--text-muted); }
         #terms-gate .tg-body {
-          padding: 18px 26px; overflow-y: auto; font-size: 14px; line-height: 1.6;
+          padding: 18px 26px; overflow-y: auto; font-size: 15px; line-height: 1.6;
           flex: 1;
         }
         #terms-gate .tg-body p { margin: 0 0 12px; }
-        #terms-gate .tg-body strong { color: #e8933a; }
+        #terms-gate .tg-body strong { color: var(--accent); }
         #terms-gate .tg-foot {
-          padding: 16px 26px 20px; border-top: 1px solid #2a2a3a;
+          padding: 16px 26px 20px; border-top: 1px solid var(--border);
         }
         #terms-gate label {
           display: flex; gap: 10px; align-items: flex-start;
-          font-size: 13px; color: #e4e4ef; margin-bottom: 14px; cursor: pointer;
+          font-size: 14px; color: var(--text); margin-bottom: 14px; cursor: pointer;
         }
         #terms-gate input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0; }
         #terms-gate button {
           width: 100%; padding: 12px; border: none; border-radius: 8px;
-          background: #e8933a; color: #14141f; font-size: 15px; font-weight: 600;
+          background: var(--accent); color: var(--surface); font-size: 16px; font-weight: 600;
           cursor: pointer; font-family: inherit;
         }
         #terms-gate button:disabled { opacity: .4; cursor: not-allowed; }
-        #terms-gate .tg-err { color: #e84040; font-size: 13px; margin-top: 10px; text-align: center; }
+        #terms-gate .tg-err { color: var(--error); font-size: 14px; margin-top: 10px; text-align: center; }
         #terms-gate .tg-out {
           display: block; text-align: center; margin-top: 12px;
-          font-size: 12px; color: #8888a0; text-decoration: none;
+          font-size: 13px; color: var(--text-muted); text-decoration: none;
         }
       </style>
       <div class="tg-card">

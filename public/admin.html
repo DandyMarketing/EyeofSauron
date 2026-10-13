@@ -21,24 +21,14 @@
   came back.
 -->
 <!--SAURON_CONFIG-->
+<link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/theme.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  :root {
-    --bg: #0a0a0f;
-    --surface: #14141f;
-    --surface-hover: #1a1a2a;
-    --border: #2a2a3a;
-    --text: #e4e4ef;
-    --text-muted: #8888a0;
-    --accent: #e8933a;
-    --accent-dim: #c47520;
-    --error: #e84040;
-    --success: #40c060;
-  }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font);
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -57,19 +47,19 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8b3500 70%, #2a0e00 100%);
-    box-shadow: 0 0 20px rgba(232, 147, 58, 0.3);
+    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 70%, #5a2f12 100%);
+    box-shadow: 0 0 20px rgba(176,96,42,0.3);
     flex-shrink: 0;
   }
 
-  header h1 { font-size: 18px; font-weight: 600; }
-  header .subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  header h1 { font-size: 19px; font-weight: 600; }
+  header .subtitle { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
   nav {
     margin-left: auto;
     display: flex;
     gap: 16px;
-    font-size: 14px;
+    font-size: 15px;
   }
 
   nav a { color: var(--text-muted); text-decoration: none; }
@@ -90,7 +80,7 @@
   }
 
   .section h2 {
-    font-size: 16px;
+    font-size: 17px;
     margin-bottom: 16px;
     display: flex;
     align-items: center;
@@ -110,7 +100,7 @@
     border-radius: 8px;
     padding: 10px 14px;
     color: var(--text);
-    font-size: 14px;
+    font-size: 15px;
     font-family: inherit;
     outline: none;
     flex: 1;
@@ -122,11 +112,11 @@
 
   .btn {
     background: var(--accent);
-    color: #000;
+    color: var(--on-accent);
     border: none;
     border-radius: 8px;
     padding: 10px 18px;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
@@ -160,7 +150,7 @@
 
   .btn-small {
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: 13px;
     border-radius: 6px;
   }
 
@@ -169,7 +159,7 @@
     color: #fff;
   }
 
-  .btn-danger:hover { background: #c03030; }
+  .btn-danger:hover { background: #8f1e18; }
 
   .btn-outline {
     background: transparent;
@@ -182,7 +172,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: 15px;
   }
 
   th, td {
@@ -221,7 +211,7 @@
 
   th {
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -233,14 +223,14 @@
     display: inline-block;
     padding: 3px 8px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
   }
 
-  .role-owner { background: rgba(232, 147, 58, 0.15); color: var(--accent); }
-  .role-manager { background: rgba(100, 149, 237, 0.15); color: #6495ed; }
-  .role-finance { background: rgba(64, 192, 96, 0.15); color: var(--success); }
-  .role-staff { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
+  .role-owner { background: rgba(176,96,42,0.15); color: var(--accent); }
+  .role-manager { background: rgba(59,111,196,0.15); color: var(--info); }
+  .role-finance { background: rgba(47,125,74,0.15); color: var(--success); }
+  .role-staff { background: rgba(111,104,95,0.15); color: var(--text-muted); }
 
   /**
    * Said ONCE, at the top, rather than under every user.
@@ -252,27 +242,27 @@
    * applied to a page.
    */
   .role-matrix { margin-bottom: 18px; }
-  .role-matrix table { width: auto; min-width: 520px; font-size: 12px; }
+  .role-matrix table { width: auto; min-width: 520px; font-size: 13px; }
   .role-matrix th, .role-matrix td { padding: 6px 12px; text-align: center; }
   .role-matrix th:first-child, .role-matrix td:first-child { text-align: left; font-weight: 600; }
   .role-matrix .yes { color: var(--success); }
-  .role-matrix .no  { color: #6a6a7a; }
+  .role-matrix .no  { color: var(--text-muted); }
   .role-matrix .note {
-    font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.55; max-width: 620px;
+    font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.55; max-width: 620px;
   }
   .role-matrix details > summary {
-    cursor: pointer; color: var(--text-muted); font-size: 12px; margin-top: 8px;
+    cursor: pointer; color: var(--text-muted); font-size: 13px; margin-top: 8px;
   }
   .role-matrix details > summary:hover { color: var(--text); }
-  .role-matrix .detail { font-size: 12px; line-height: 1.55; padding: 8px 0 0 2px; }
-  .role-matrix .detail h4 { font-size: 12px; margin: 10px 0 2px; color: var(--text); }
+  .role-matrix .detail { font-size: 13px; line-height: 1.55; padding: 8px 0 0 2px; }
+  .role-matrix .detail h4 { font-size: 13px; margin: 10px 0 2px; color: var(--text); }
   .role-matrix .detail ul { margin: 0 0 0 16px; padding: 0; }
   .role-matrix .ra-can { color: var(--success); }
-  .role-matrix .ra-cannot { color: #e88a8a; }
+  .role-matrix .ra-cannot { color: var(--error); }
 
   /* At the point of choosing: ONE line, and only for the row being touched. */
   .role-access {
-    margin-top: 6px; font-size: 11px; line-height: 1.5;
+    margin-top: 6px; font-size: 13px; line-height: 1.5;
     color: var(--text-muted); max-width: 420px;
   }
   .role-access strong { color: var(--accent); font-weight: 600; }
@@ -297,7 +287,7 @@
     border-radius: 6px;
     padding: 6px 10px;
     color: var(--text);
-    font-size: 12px;
+    font-size: 13px;
     font-family: inherit;
     outline: none;
   }
@@ -307,12 +297,12 @@
    *
    * `.invite-form input` and `.modal input` were styled and a bare `input` was
    * not, so the two StaffAny date fields rendered as white boxes in the middle
-   * of a dark page — the browser default, on the one control type nobody had
-   * put inside a styled container.
+   * of a then-dark page — the browser default, on the one control type nobody
+   * had put inside a styled container.
    *
-   * `color-scheme: dark` is the half that CSS alone cannot do: the calendar
-   * icon inside a date field is drawn by the browser, not by us, and without
-   * this it stays black-on-black and effectively invisible.
+   * `color-scheme` is the half that CSS alone cannot do: the calendar icon
+   * inside a date field is drawn by the browser, not by us, and must match the
+   * page's light look (13 Oct 2026) or it draws for the wrong background.
    */
   input {
     background: var(--bg);
@@ -320,10 +310,10 @@
     border-radius: 6px;
     padding: 8px 10px;
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
     font-family: inherit;
     outline: none;
-    color-scheme: dark;
+    color-scheme: light;
     max-width: 100%;
   }
 
@@ -335,13 +325,13 @@
     right: 20px;
     padding: 12px 20px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 15px;
     z-index: 100;
     animation: slideIn 0.3s ease;
   }
 
-  .toast.success { background: rgba(64, 192, 96, 0.9); color: #000; }
-  .toast.error { background: rgba(232, 64, 64, 0.9); color: #fff; }
+  .toast.success { background: rgba(47,125,74,0.9); color: var(--on-accent); }
+  .toast.error { background: rgba(179,38,30,0.9); color: #fff; }
 
   @keyframes slideIn {
     from { transform: translateY(20px); opacity: 0; }
@@ -357,24 +347,24 @@
   }
 
   .system-card h4 {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-muted);
     margin-bottom: 8px;
   }
 
   .gap-item {
-    font-size: 13px;
+    font-size: 14px;
     padding: 4px 0;
     color: var(--error);
   }
 
   .no-gaps {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--success);
   }
 
   .ingestion-row {
-    font-size: 13px;
+    font-size: 14px;
     padding: 4px 0;
     display: flex;
     gap: 12px;
@@ -392,7 +382,7 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -409,7 +399,7 @@
   }
 
   .modal h3 {
-    font-size: 16px;
+    font-size: 17px;
     margin-bottom: 16px;
   }
 
@@ -420,7 +410,7 @@
     border-radius: 8px;
     padding: 10px 14px;
     color: var(--text);
-    font-size: 14px;
+    font-size: 15px;
     font-family: inherit;
     outline: none;
     margin-bottom: 16px;
@@ -446,12 +436,12 @@
 
   .drop-zone:hover, .drop-zone.dragover {
     border-color: var(--accent);
-    background: rgba(232, 147, 58, 0.04);
+    background: rgba(176,96,42,0.04);
   }
 
-  .drop-zone p { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
+  .drop-zone p { color: var(--text-muted); font-size: 14px; margin-top: 6px; }
 
-  .drop-zone strong { color: var(--accent); font-size: 14px; }
+  .drop-zone strong { color: var(--accent); font-size: 15px; }
 
   .file-item {
     display: flex;
@@ -468,7 +458,7 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 14px;
     margin-bottom: 4px;
   }
 
@@ -486,15 +476,15 @@
    */
   .file-item .fname { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .file-item .fsize { color: var(--text-muted); flex-shrink: 0; }
-  .file-item .fstatus { flex-shrink: 0; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .file-item .fstatus { flex-shrink: 0; font-size: 13px; padding: 2px 8px; border-radius: 4px; }
   .fstatus-pending { color: var(--text-muted); }
-  .fstatus-ok { color: var(--success); background: rgba(64,192,96,0.1); }
-  .fstatus-err { color: var(--error); background: rgba(232,64,64,0.1); }
-  .fstatus-warn { color: #e8c840; background: rgba(232,200,64,0.1); }
+  .fstatus-ok { color: var(--success); background: rgba(47,125,74,0.1); }
+  .fstatus-err { color: var(--error); background: rgba(179,38,30,0.1); }
+  .fstatus-warn { color: var(--warn); background: rgba(138,97,0,0.1); }
   /* What the server actually said, on its own line. Nothing showed it before. */
   .file-item .fdetail {
     flex-basis: 100%;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.5;
     color: var(--text-muted);
     overflow-wrap: anywhere;
@@ -503,7 +493,7 @@
 
   .file-item .fremove {
     background: none; border: none; color: var(--text-muted);
-    cursor: pointer; font-size: 16px; padding: 0 4px;
+    cursor: pointer; font-size: 17px; padding: 0 4px;
   }
 
   .file-item .fremove:hover { color: var(--error); }
@@ -523,7 +513,7 @@
   .upload-summary {
     margin-top: 12px; padding: 12px;
     background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 13px; display: none;
+    border-radius: 6px; font-size: 14px; display: none;
   }
 
   .upload-summary .ustat { display: flex; justify-content: space-between; padding: 3px 0; }
@@ -541,20 +531,20 @@
   .ingestion-error {
     padding: 10px 0;
     border-bottom: 1px solid var(--border);
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .ingestion-error:last-child { border-bottom: none; }
 
   .ie-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 5px; }
-  .ie-when { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+  .ie-when { color: var(--text-muted); font-size: 13px; margin-left: auto; }
 
   /* What to DO, which is the thing somebody scanning this page is after. */
-  .ie-action { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
-  .ie-fix   { background: rgba(232, 64, 64, 0.15);  color: var(--error); }
-  .ie-wait  { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
-  .ie-watch { background: rgba(232, 200, 64, 0.15);  color: #e8c840; }
-  .ie-resolved { background: rgba(64, 192, 96, 0.15); color: var(--success); }
+  .ie-action { font-size: 13px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+  .ie-fix   { background: rgba(179,38,30,0.15);  color: var(--error); }
+  .ie-wait  { background: rgba(111,104,95,0.15); color: var(--text-muted); }
+  .ie-watch { background: rgba(138,97,0,0.15);  color: var(--warn); }
+  .ie-resolved { background: rgba(47,125,74,0.15); color: var(--success); }
 
   /**
    * Dimmed, not hidden. A repaired failure is history rather than a task, but a
@@ -570,7 +560,7 @@
 
   .ie-fixed {
     color: var(--success);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.45;
     margin-bottom: 5px;
   }
@@ -578,7 +568,7 @@
   .ie-plain { line-height: 1.5; margin-bottom: 5px; }
 
   .ie-raw {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     overflow-wrap: anywhere;
@@ -592,50 +582,50 @@
     margin-top: 12px;
   }
 
-  .pager-pos { font-size: 12px; color: var(--text-muted); }
+  .pager-pos { font-size: 13px; color: var(--text-muted); }
 
   .pager-size {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
     /* Pushed away from the page controls: it is a setting, not a step. */
     margin-left: 4px;
   }
 
-  .pager-size select { font-size: 12px; padding: 4px 6px; }
+  .pager-size select { font-size: 13px; padding: 4px 6px; }
 
-  .last-seen { font-size: 12px; white-space: nowrap; }
+  .last-seen { font-size: 13px; white-space: nowrap; }
   .last-seen-unknown { color: var(--text-muted); font-style: italic; }
 
   /* --- Users: one tidy row each (13 Oct 2026) --- */
-  .u-warn { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  .u-warn { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 8px 12px; font-size: 14px; margin-bottom: 12px; }
   .ulist { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .urow {
     display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(0, 2fr) 150px 84px;
     gap: 6px 16px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border);
   }
   .urow:first-child { border-top: 0; }
-  .u-name { font-weight: 600; font-size: 14px; }
-  .u-email { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+  .u-name { font-weight: 600; font-size: 15px; }
+  .u-email { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
   .u-access { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .acc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .acc-line .role-badge { min-width: 64px; text-align: center; }
   .vpill {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
     border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; white-space: nowrap;
   }
   .vx {
-    background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1;
+    background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1;
     width: 20px; height: 20px; border-radius: 50%; padding: 0;
   }
-  .vx:hover { background: rgba(232, 64, 64, 0.15); color: var(--error); }
+  .vx:hover { background: rgba(179,38,30,0.15); color: var(--error); }
   .vpill[style] { font-weight: 600; }
   .vpill[style] .vx { color: inherit; opacity: .75; }
   .vpill[style] .vx:hover { opacity: 1; background: rgba(0,0,0,.2); color: inherit; }
   .vdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .u-status { font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+  .u-status { font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
   .u-signin { opacity: .8; }
   .u-terms .ok { color: var(--success); }
   .u-terms .warn { color: var(--accent); }
@@ -643,46 +633,46 @@
   .u-act { justify-self: end; }
   .u-manage { grid-column: 1 / -1; border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px; }
   .u-manage[hidden] { display: none; }
-  .u-manage .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .u-manage .m-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
   .u-manage .m-name input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 6px;
-    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px; }
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
   /* --- Reports (13 Oct 2026) --- */
   .rrow { padding: 12px 16px; border-top: 1px solid var(--border); }
   .rrow:first-child { border-top: 0; }
-  .r-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .r-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
   .r-kind { font-weight: 600; }
-  .r-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .r-status { font-size: 13px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
   .r-new { color: var(--accent); border-color: var(--accent); }
-  .r-looking { color: #6495ed; border-color: #6495ed; }
+  .r-looking { color: var(--info); border-color: var(--info); }
   .r-fixed { color: var(--success); border-color: var(--success); }
   .r-wont_fix { color: var(--text-muted); }
-  .r-snip { color: var(--text-muted); font-size: 12px; margin-top: 4px; cursor: pointer; overflow-wrap: anywhere; }
+  .r-snip { color: var(--text-muted); font-size: 13px; margin-top: 4px; cursor: pointer; overflow-wrap: anywhere; }
   .r-detail { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
-  .r-block { margin-bottom: 14px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .r-block { margin-bottom: 14px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
   .r-block pre, .r-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 8px; font-size: 11px; margin: 4px 0; max-height: 240px; overflow-y: auto; }
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; margin: 4px 0; max-height: 240px; overflow-y: auto; }
   .r-msg { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 8px 0; }
   .r-msg.r-a { border-left-color: var(--accent); }
-  .r-who { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .r-who { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
   .r-text { white-space: pre-wrap; }
-  .r-run { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-  .r-trace summary { cursor: pointer; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
-  .r-tool { margin: 8px 0; font-size: 12px; }
-  .r-detail .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .r-run { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  .r-trace summary { cursor: pointer; font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+  .r-tool { margin: 8px 0; font-size: 13px; }
+  .r-detail .m-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
   .r-review .m-account { display: flex; gap: 8px; margin-top: 8px; }
   .r-review textarea { width: 100%; min-height: 80px; margin-top: 8px; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; font-size: 13px; box-sizing: border-box; }
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; font-size: 14px; box-sizing: border-box; }
   .u-manage .m-account { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
   @media (max-width: 720px) {
     .urow { grid-template-columns: 1fr auto; }
     .u-who { grid-column: 1; }
     .u-act { grid-column: 2; grid-row: 1; }
     .u-access, .u-status { grid-column: 1 / -1; }
-    .u-status { flex-direction: row; gap: 12px; }
+    .u-status { flex-direction: row; flex-wrap: wrap; gap: 2px 12px; }
   }
   .last-seen-active  { color: var(--success); }
   .last-seen-quiet   { color: var(--text-muted); }
-  .last-seen-dormant { color: #e8c840; }
+  .last-seen-dormant { color: var(--warn); }
   /* An invitation nobody opened reads as a job to finish, not as a long gap. */
   .last-seen-never   { color: var(--accent); }
 
@@ -703,7 +693,7 @@
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
     user-select: none;
     /* 32px tall at this padding — a tap target, not a mouse target. */
@@ -711,7 +701,7 @@
   }
 
   .venue-chip input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; cursor: pointer; }
-  .venue-chip:has(input:checked) { border-color: var(--accent); background: rgba(232, 147, 58, 0.12); }
+  .venue-chip:has(input:checked) { border-color: var(--accent); background: rgba(176,96,42,0.12); }
   .venue-chip:has(input:disabled) { opacity: 0.45; cursor: default; }
 
   /**
@@ -762,7 +752,7 @@
     padding: 10px 14px;
     color: var(--text-muted);
     font-family: inherit;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -782,8 +772,8 @@
     padding: 1px 6px;
     border-radius: 9px;
     background: var(--accent);
-    color: #000;
-    font-size: 11px;
+    color: var(--on-accent);
+    font-size: 13px;
     font-weight: 700;
     text-align: center;
   }
@@ -793,7 +783,7 @@
   @media (max-width: 600px) {
     .invite-form { flex-direction: column; }
     .invite-form input { min-width: unset; }
-    table { font-size: 13px; }
+    table { font-size: 14px; }
     th, td { padding: 8px 6px; }
     .drop-zone { padding: 24px 16px; }
 
@@ -834,7 +824,7 @@
     #users-section td[data-label]::before {
       content: attr(data-label);
       display: block;
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: var(--text-muted);
@@ -1045,7 +1035,7 @@ async function loadAccountMap() {
   // Unmapped first. This is the queue, not a footnote.
   if ((data.unmapped || []).length > 0) {
     html += '<div class="system-card"><h4>Unmapped accounts (' + data.unmapped.length + ')</h4>' +
-      '<div style="color:var(--text-muted);font-size:12px;margin-bottom:8px">' +
+      '<div style="color:var(--text-muted);font-size:13px;margin-bottom:8px">' +
       'These appeared in a ledger after anyone last looked. They resolve to their own names — nothing is merged wrongly — but they will not match the equivalent account at another venue.' +
       '</div>';
     for (const u of data.unmapped) {
@@ -1062,7 +1052,7 @@ async function loadAccountMap() {
   });
 
   html += '<div class="system-card"><h4>Mappings that change something (' + decisions.length + ' of ' + (data.mappings || []).length + ')</h4>' +
-    '<table style="width:100%;font-size:13px;border-collapse:collapse">' +
+    '<table style="width:100%;font-size:14px;border-collapse:collapse">' +
     '<thead><tr><th>Venue</th><th>Ledger name</th><th>Rolls up to</th><th>Business line</th><th></th></tr></thead><tbody>';
   for (const m of decisions) {
     html += '<tr>' +
@@ -1117,14 +1107,14 @@ async function loadFeeAcks() {
 
   const acks = data.acknowledgements || [];
   if (acks.length === 0) {
-    html += '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">Nothing explained yet. Every flagged month is still being reported as a finding.</div>';
+    html += '<div style="color:var(--text-muted);font-size:14px;margin-top:12px">Nothing explained yet. Every flagged month is still being reported as a finding.</div>';
   } else {
     html += '<div style="margin-top:12px">';
     for (const a of acks) {
       html += '<div class="file-item" style="margin-bottom:6px">' +
         '<strong>' + esc(a.venues?.name || '') + '</strong> — ' + esc(a.period_start) +
         (a.account_name ? ' — ' + esc(a.account_name) : ' — all fees') +
-        '<div style="color:var(--text-muted);font-size:12px;margin-top:2px">' + esc(a.reason) + '</div>' +
+        '<div style="color:var(--text-muted);font-size:13px;margin-top:2px">' + esc(a.reason) + '</div>' +
         '<button class="btn btn-small btn-outline fee-del" data-id="' + esc(a.id) + '" style="margin-top:6px">Remove</button>' +
         '</div>';
     }
@@ -1315,7 +1305,7 @@ async function loadAttention(panel) {
   // Said while it loads. An empty slot at the top read as the page failing to
   // load at all ("just the bottom part"), when it was only the slowest check.
   healthSlot.innerHTML = '<div class="section"><h2>System Health</h2>' +
-    '<p style="color:var(--text-muted);font-size:13px">Checking data gaps, ingest runs and table protection&hellip;</p></div>';
+    '<p style="color:var(--text-muted);font-size:14px">Checking data gaps, ingest runs and table protection&hellip;</p></div>';
   panel.appendChild(healthSlot);
 
   renderAlerts(panel, alertsData.alerts || []);
@@ -1324,7 +1314,7 @@ async function loadAttention(panel) {
   if (!(alertsData.alerts || []).length && !(pendingData.notes || []).length) {
     const ok = el('div', 'section');
     ok.innerHTML = '<h2>Nothing to address</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px">No open reconciliation alerts and nothing waiting for review. ' +
+      '<p style="color:var(--text-muted);font-size:14px">No open reconciliation alerts and nothing waiting for review. ' +
       'System Health is below once it has finished checking.</p>';
     panel.appendChild(ok);
   }
@@ -1334,7 +1324,7 @@ async function loadAttention(panel) {
   healthSlot.innerHTML = '';
   if (!system || system.error) {
     const failed = el('div', 'section');
-    failed.innerHTML = '<h2>System Health</h2><p style="color:var(--error);font-size:13px">Could not load: ' +
+    failed.innerHTML = '<h2>System Health</h2><p style="color:var(--error);font-size:14px">Could not load: ' +
       escapeHtml((system && system.error) || 'no response') + '</p>';
     healthSlot.appendChild(failed);
     return;
@@ -1429,7 +1419,7 @@ async function toggleReport(row) {
   const ctx = r.context || {};
   const ctxLine = ['role', 'venues', 'model', 'commit'].filter(k => ctx[k]).map(k => k + ': ' + (k === 'commit' ? String(ctx[k]).slice(0, 7) : ctx[k])).join(' · ');
   box.innerHTML =
-    (ctxLine ? '<div class="r-block muted" style="font-size:12px">' + esc(ctxLine) + '</div>' : '') +
+    (ctxLine ? '<div class="r-block muted" style="font-size:13px">' + esc(ctxLine) + '</div>' : '') +
     (r.comment ? '<div class="r-block"><div class="m-label">What they said</div>' + esc(r.comment) + '</div>' : '') +
     (r.error ? '<div class="r-block"><div class="m-label">Error shown</div><pre>' + esc(r.error) + '</pre></div>' : '') +
     '<div class="r-block"><div class="m-label">Conversation</div>' + (transcript || '<div class="muted">No saved conversation. The question and answer reported:</div>' +
@@ -1556,7 +1546,7 @@ function renderInvite(root) {
       <input type="text" id="invite-name" placeholder="Full name (optional)">
       <button type="submit" class="btn">Send invitation</button>
     </form>
-    <div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5;max-width:560px">
+    <div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5;max-width:560px">
       They receive an email with a link to set their own password. You never see it.
       On first sign-in they must read and accept the confidentiality terms before
       Sauron will answer anything — that acceptance is recorded against their name.
@@ -2048,7 +2038,7 @@ function renderAlerts(root, alerts) {
  */
 function reconcileDetail(al) {
   const m = (n) => '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const muted = 'font-size:12px;color:var(--text-muted);line-height:1.6';
+  const muted = 'font-size:13px;color:var(--text-muted);line-height:1.6';
   if (al.monday_gross === null || al.monday_gross === undefined || al.revel_gross === null || al.revel_gross === undefined) {
     // The sweep looks back DRIFT_WINDOW_DAYS (35) in src/lib/revel-drift.ts.
     const ageDays = (Date.now() - new Date(al.business_date + 'T00:00:00Z').getTime()) / 86400000;
@@ -2061,9 +2051,9 @@ function reconcileDetail(al) {
   const diff = Number(al.monday_gross) - Number(al.revel_gross);
   const which = diff > 0 ? 'The board is ' + m(diff) + ' higher than Revel.' : 'Revel is ' + m(-diff) + ' higher than the board.';
   const file = al.revel_file
-    ? '<code style="font-size:11px;word-break:break-all">' + escapeHtml(al.revel_file) + '</code>'
+    ? '<code style="font-size:13px;word-break:break-all">' + escapeHtml(al.revel_file) + '</code>'
     : 'the Operations report for this date';
-  return '<table style="font-size:12px;margin-bottom:6px">' +
+  return '<table style="font-size:13px;margin-bottom:6px">' +
       '<tr><td style="color:var(--text-muted);padding-right:12px">Monday board, food + drink</td><td>' + m(al.monday_gross) + '</td></tr>' +
       '<tr><td style="color:var(--text-muted);padding-right:12px">Revel, as Sauron loaded it</td><td>' + m(al.revel_gross) + '</td></tr>' +
     '</table>' +
@@ -2078,7 +2068,7 @@ function reconcileDetail(al) {
  */
 function postLockVerdict(al) {
   const m = (n) => '$' + Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const style = 'font-size:12px;margin-top:8px;line-height:1.5';
+  const style = 'font-size:13px;margin-top:8px;line-height:1.5';
   if (al.board_food_bev === null || al.board_food_bev === undefined) return '';
   if (al.revel_food_bev === null || al.revel_food_bev === undefined) {
     return '<div style="' + style + ';color:var(--text-muted)">Board food + drink now ' + m(al.board_food_bev) +
@@ -2099,30 +2089,30 @@ function drawAlerts(a, alerts, page, scroll) {
   const slice = alerts.slice(from, from + alertsPerPage);
 
   a.innerHTML = '<h2>Reconciliation alerts (' + alerts.length + ')</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. On a post-lock card, <b>Apply board figures</b> takes the edit into Sauron; <b>Keep Sauron\'s figures</b> dismisses it, and it stays dismissed unless the board changes again.</p>' +
+      '<p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Days where the numbers disagree &mdash; click one to see what moved. A post-lock change means Monday.com was edited after that month had closed (final from the 15th of the following month), so the edit was not taken and the two systems now hold different figures. Corrections made before close are applied normally and never appear here. On a post-lock card, <b>Apply board figures</b> takes the edit into Sauron; <b>Keep Sauron\'s figures</b> dismisses it, and it stays dismissed unless the board changes again.</p>' +
       (function () {
         const matching = alerts.filter(function (x) { return x.board_matches_revel; }).length;
         return matching
           ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><button id="al-apply-matching" class="btn btn-small">Apply the ' + matching + ' that match Revel</button>' +
-            '<span style="font-size:12px;color:var(--text-muted)">The board was corrected after close and now agrees with Revel to the cent.</span></div>'
+            '<span style="font-size:13px;color:var(--text-muted)">The board was corrected after close and now agrees with Revel to the cent.</span></div>'
           : '';
       })() +
       slice.map(function (al) {
         const changeRows = (al.changes || []).map(function (c) {
-          return '<div style="font-size:12px;color:var(--text-muted)">' +
+          return '<div style="font-size:13px;color:var(--text-muted)">' +
             escapeHtml(c.period) + ' &middot; ' + escapeHtml(c.field) + ': ' +
             '<span style="color:var(--error)">' + escapeHtml(String(c.from)) + '</span> &rarr; ' +
             '<span style="color:var(--success)">' + escapeHtml(String(c.to)) + '</span></div>';
         }).join('');
         const dupes = al.duplicates > 1
-          ? '<span title="' + al.duplicates + ' identical alerts for this day" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:8px">&times;' + al.duplicates + '</span>'
+          ? '<span title="' + al.duplicates + ' identical alerts for this day" style="font-size:13px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:8px">&times;' + al.duplicates + '</span>'
           : '';
         const diff = (al.difference !== null && al.difference !== undefined)
           // Sign before the currency: "$-32" reads as a typo.
-          ? '<span style="font-size:12px;color:var(--text-muted);margin-left:8px">' + (Number(al.difference) < 0 ? '\u2212$' + escapeHtml(String(-Number(al.difference))) : '$' + escapeHtml(String(al.difference))) + '</span>'
+          ? '<span style="font-size:13px;color:var(--text-muted);margin-left:8px">' + (Number(al.difference) < 0 ? '\u2212$' + escapeHtml(String(-Number(al.difference))) : '$' + escapeHtml(String(al.difference))) + '</span>'
           : '';
         return '<details class="alert-card" data-id="' + al.id + '" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
-          '<summary style="cursor:pointer;font-size:13px">' +
+          '<summary style="cursor:pointer;font-size:14px">' +
             '<span style="font-weight:600">' + escapeHtml(al.venue || 'Unknown venue') + '</span>' +
             '<span style="color:var(--text-muted)"> &middot; ' + escapeHtml(al.business_date) +
             ' &middot; ' + escapeHtml(al.alert_type.replace(/_/g, ' ')) + '</span>' +
@@ -2130,10 +2120,10 @@ function drawAlerts(a, alerts, page, scroll) {
           '</summary>' +
           '<div style="margin-top:10px">' +
             (al.alert_type === 'reconciliation_failed' ? reconcileDetail(al)
-              : (changeRows || '<div style="font-size:12px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>')) +
+              : (changeRows || '<div style="font-size:13px;color:var(--text-muted)">No field-level detail recorded for this alert.</div>')) +
             (al.alert_type === 'post_lock_change' ? postLockVerdict(al) : '') +
             '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">' +
-              '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">' +
+              '<input class="al-note" placeholder="What did you decide? (optional)" style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;font-family:inherit">' +
               (al.alert_type === 'post_lock_change'
                 ? '<button class="al-apply btn btn-small">Apply board figures</button>' +
                   '<button class="al-resolve btn btn-small btn-outline">Keep Sauron\'s figures</button>'
@@ -2246,13 +2236,13 @@ function renderPending(root, pendingNotes) {
   if (pendingNotes && pendingNotes.length > 0) {
     const q = el('div', 'section');
     q.innerHTML = '<h2>Awaiting review (' + pendingNotes.length + ')</h2>' +
-      '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Captured from conversations. Nothing here is used by Sauron until you approve it. Edit as you approve — correcting it is the point of the queue.</p>' +
+      '<p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Captured from conversations. Nothing here is used by Sauron until you approve it. Edit as you approve — correcting it is the point of the queue.</p>' +
       pendingNotes.map(function (n) {
         return '<div class="pending-note" data-id="' + n.id + '" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">' +
-          (n.source_question ? '<div style="color:var(--text-muted);font-size:12px;margin-bottom:6px">Asked: ' + escapeHtml(n.source_question) + '</div>' : '') +
+          (n.source_question ? '<div style="color:var(--text-muted);font-size:13px;margin-bottom:6px">Asked: ' + escapeHtml(n.source_question) + '</div>' : '') +
           '<textarea class="pn-text" rows="3" style="width:100%">' + escapeHtml(n.note) + '</textarea>' +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">' +
-            '<span style="color:var(--text-muted);font-size:12px">' + (n.venues ? escapeHtml(n.venues.name) : 'All venues') + ' &middot; ' + escapeHtml(n.confidence) + '</span>' +
+            '<span style="color:var(--text-muted);font-size:13px">' + (n.venues ? escapeHtml(n.venues.name) : 'All venues') + ' &middot; ' + escapeHtml(n.confidence) + '</span>' +
             '<select class="pn-port"><option value="dandy_specific">Specific to us</option><option value="universal">General F&amp;B truth</option></select>' +
             '<button class="pn-approve">Approve</button>' +
             '<button class="pn-reject">Reject</button>' +
@@ -2283,7 +2273,7 @@ function renderNotes(root, notes) {
   const notesSection = el('div', 'section');
   const venueOpts2 = '<option value="">All venues</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
   let notesHtml = `<h2>AI Context Notes</h2>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Notes you add here are fed to the AI on every query. Use them for what the numbers can never say — who a venue is for, what you would never do, why something exists, and how you'd phrase it. The most valuable are the <strong>never do</strong> rules: one note stops every future briefing suggesting something you'd reject out of hand. Keep each note short and about one thing; fifty sharp notes beat one long document.</p>
+    <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Notes you add here are fed to the AI on every query. Use them for what the numbers can never say — who a venue is for, what you would never do, why something exists, and how you'd phrase it. The most valuable are the <strong>never do</strong> rules: one note stops every future briefing suggesting something you'd reject out of hand. Keep each note short and about one thing; fifty sharp notes beat one long document.</p>
     <div class="invite-form" id="note-form-container">
       <select id="note-venue" style="min-width:140px">${venueOpts2}</select>
       <select id="note-category" style="min-width:150px">
@@ -2315,7 +2305,7 @@ function renderNotes(root, notes) {
       const venueName = n.venues?.name || 'All venues';
       notesHtml += `<div class="file-item" style="margin-bottom:6px">
         <span class="role-badge role-${n.category === 'operations' ? 'manager' : n.category === 'promotions' ? 'owner' : n.category === 'goals' ? 'finance' : 'staff'}">${esc(n.category)}</span>
-        <span style="color:var(--accent);font-size:12px;flex-shrink:0">${esc(venueName)}</span>
+        <span style="color:var(--accent);font-size:13px;flex-shrink:0">${esc(venueName)}</span>
         <span class="fname">${esc(n.note)}</span>
         <span class="fsize">${fmtTime(n.created_at)}</span>
         <button class="fremove" onclick="deleteNote('${n.id}')">&times;</button>
@@ -2323,7 +2313,7 @@ function renderNotes(root, notes) {
     }
     notesHtml += '</div>';
   } else {
-    notesHtml += '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">No notes yet. Add context to make the AI smarter about your business.</div>';
+    notesHtml += '<div style="color:var(--text-muted);font-size:14px;margin-top:12px">No notes yet. Add context to make the AI smarter about your business.</div>';
   }
 
   notesSection.innerHTML = notesHtml;
@@ -2365,20 +2355,20 @@ function renderXero(root, xeroConnections) {
     const venueSelect = '<option value="">— not mapped —</option>' +
       venues.map(v => `<option value="${v.id}"${cn.venue_id === v.id ? ' selected' : ''}>${v.name}</option>`).join('');
     return `<tr>
-      <td><strong>${cn.tenant_name || '(unnamed)'}</strong><br><span style="color:var(--text-muted);font-size:11px">${cn.tenant_id}</span></td>
+      <td><strong>${cn.tenant_name || '(unnamed)'}</strong><br><span style="color:var(--text-muted);font-size:13px">${cn.tenant_id}</span></td>
       <td><select data-conn="${cn.id}" class="xero-venue" style="min-width:150px">${venueSelect}</select></td>
-      <td>${mapped ? 'active' : 'awaiting mapping'}${cn.last_error ? `<br><span style="color:#c00;font-size:11px">${cn.last_error}</span>` : ''}</td>
+      <td>${mapped ? 'active' : 'awaiting mapping'}${cn.last_error ? `<br><span style="color:var(--error);font-size:13px">${cn.last_error}</span>` : ''}</td>
     </tr>`;
   }).join('');
 
   xeroSection.innerHTML = `<h2>Xero</h2>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">
+    <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">
       Connect a Xero login to pull P&amp;L and cost data. One Xero organisation per venue.
       Organisations are legal entities and their names will not match venue names, so each
       one has to be mapped by hand — nothing is ingested against an unmapped organisation.
     </p>
     <button id="xero-connect-btn" class="btn">Connect Xero</button>
-    ${connRows ? `<table style="margin-top:16px"><thead><tr><th>Xero organisation</th><th>Venue</th><th>Status</th></tr></thead><tbody>${connRows}</tbody></table>` : '<p style="color:var(--text-muted);font-size:13px;margin-top:12px">No organisations connected yet.</p>'}`;
+    ${connRows ? `<table style="margin-top:16px"><thead><tr><th>Xero organisation</th><th>Venue</th><th>Status</th></tr></thead><tbody>${connRows}</tbody></table>` : '<p style="color:var(--text-muted);font-size:14px;margin-top:12px">No organisations connected yet.</p>'}`;
   root.appendChild(xeroSection);
 
   document.getElementById('xero-connect-btn').addEventListener('click', async () => {
@@ -2413,7 +2403,7 @@ function renderAccountMap(root) {
    */
   const mapSection = el('div', 'section');
   mapSection.innerHTML = '<h2>Account Map</h2>' +
-    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">' +
     'Each venue\'s ledger name, and the shared name it rolls up to. Sauron compares venues on the shared name — Fat Prince writes "Public Relations / Marketing costs" where the others write "fees", and without this they never add up. ' +
     'Business line separates a sub-business that still belongs in the venue\'s P&amp;L: Neon Pigeon\'s sushi rolls into Potus Pte Ltd and can also be reported on its own.' +
     '</p><div id="map-body">Loading…</div>';
@@ -2437,7 +2427,7 @@ function renderFees(root) {
    */
   const feeSection = el('div', 'section');
   feeSection.innerHTML = '<h2>Explained Fee Months</h2>' +
-    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">' +
     'Sauron checks the fee each venue pays the group against that venue\'s own history, and flags a month that is out of line. ' +
     'When a month is out of line for a known reason — a rate set differently by decision — record it here. ' +
     'The briefing still shows the month and states your reason; it just stops calling it a finding. ' +
@@ -2454,7 +2444,7 @@ function renderIntegrations(root) {
   // actually setting this up.
   const metaSection = el('div', 'section');
   metaSection.innerHTML = '<h2>Meta (Instagram &amp; Facebook)</h2>' +
-    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:12px">Lists every Page and Instagram account the System User token can reach, and asks each Instagram account for one day of data. Having an account id is not the same as being able to read it &mdash; only the probe tells you which.</p>' +
     '<div class="btn-row">' +
       '<button id="meta-discover-btn" class="btn">Discover accounts</button>' +
       '<button id="meta-ingest-btn" class="btn">Pull last 30 days</button>' +
@@ -2472,7 +2462,7 @@ function renderIntegrations(root) {
   // through GitHub.
   const staffSection = el('div', 'section');
   staffSection.innerHTML = '<h2>StaffAny (rosters &amp; labour)</h2>' +
-    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Asks StaffAny what this token can actually reach, for the last complete week. Reads only &mdash; nothing is written, and no payroll, compensation or staff endpoint is called. Re-run it whenever StaffAny change something on their side; the answer is expected to move.</p>' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:12px">Asks StaffAny what this token can actually reach, for the last complete week. Reads only &mdash; nothing is written, and no payroll, compensation or staff endpoint is called. Re-run it whenever StaffAny change something on their side; the answer is expected to move.</p>' +
     // Dates, because a single empty week proves nothing on its own. The
     // endpoint has always accepted them; only the button did not pass them, so
     // testing another week meant shipping a commit.
@@ -2481,7 +2471,7 @@ function renderIntegrations(root) {
       '<input type="date" id="staffany-end">' +
       '<button id="staffany-probe-btn" class="btn">Probe StaffAny</button>' +
     '</div>' +
-    '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Leave the dates blank for the last complete week.</div>' +
+    '<div style="color:var(--text-muted);font-size:13px;margin-top:6px">Leave the dates blank for the last complete week.</div>' +
     '<div id="staffany-result" style="margin-top:16px"></div>' +
     // The mapping, on the same panel as the probe, because the probe is what
     // tells you a new section exists and this is where you act on it.
@@ -2491,7 +2481,7 @@ function renderIntegrations(root) {
       '<h4 style="margin:0">Section mapping</h4>' +
       '<button id="staffany-refresh-btn" class="btn btn-small">Refresh sections from StaffAny</button>' +
     '</div>' +
-    '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
     '<div id="staffany-sections">Loading&hellip;</div>';
   root.appendChild(staffSection);
 
@@ -2501,13 +2491,13 @@ function renderIntegrations(root) {
     const list = res.sections || [];
 
     if (res.error) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
       return;
     }
     if (list.length === 0) {
       // Sections are recorded by the ingest, so an empty list means it has not
       // run rather than that StaffAny has none.
-      out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">No sections recorded yet. They appear the first time the labour ingest runs.</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--text-muted)">No sections recorded yet. They appear the first time the labour ingest runs.</p>';
       return;
     }
 
@@ -2528,8 +2518,8 @@ function renderIntegrations(root) {
           '<option value="BOH">BOH</option><option value="FOH">FOH</option><option value="GROUP">Group</option>' +
         '</select>' +
         (mapped
-          ? '<span style="color:var(--success);font-size:12px">' + (s.area === 'GROUP' ? 'group — no venue' : 'mapped') + '</span>'
-          : '<span style="color:var(--error);font-size:12px">NOT INGESTED</span>') +
+          ? '<span style="color:var(--success);font-size:13px">' + (s.area === 'GROUP' ? 'group — no venue' : 'mapped') + '</span>'
+          : '<span style="color:var(--error);font-size:13px">NOT INGESTED</span>') +
         '</div>';
     }).join('');
 
@@ -2561,10 +2551,10 @@ function renderIntegrations(root) {
 
   document.getElementById('staffany-refresh-btn').addEventListener('click', async () => {
     const out = document.getElementById('staffany-sections');
-    out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">Asking StaffAny&hellip;</p>';
+    out.innerHTML = '<p style="font-size:14px;color:var(--text-muted)">Asking StaffAny&hellip;</p>';
     const r = await api('POST', '/admin/api/staffany/sections/refresh');
     if (r.error) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(r.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error)">' + escapeHtml(r.error) + '</p>';
       return;
     }
     loadStaffAnySections();
@@ -2572,7 +2562,7 @@ function renderIntegrations(root) {
 
   document.getElementById('staffany-probe-btn').addEventListener('click', async () => {
     const out = document.getElementById('staffany-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking StaffAny. Nine calls, so give it a few seconds&hellip;</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Asking StaffAny. Nine calls, so give it a few seconds&hellip;</p>';
 
     const s = document.getElementById('staffany-start').value;
     const e = document.getElementById('staffany-end').value;
@@ -2580,7 +2570,7 @@ function renderIntegrations(root) {
 
     const r = await api('GET', '/admin/api/staffany/probe' + qs);
     if (r.error) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error);white-space:normal">' + escapeHtml(r.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error);white-space:normal">' + escapeHtml(r.error) + '</p>';
       return;
     }
 
@@ -2607,7 +2597,7 @@ function renderIntegrations(root) {
     const cost = r.schedule_costs;
 
     out.innerHTML =
-      '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">' +
+      '<div style="font-size:14px;color:var(--text-muted);margin-bottom:12px">' +
         escapeHtml(r.organisation || 'organisation not named') + ' &middot; week of ' +
         escapeHtml(r.window.start) + ' to ' + escapeHtml(r.window.end) +
       '</div>' +
@@ -2620,7 +2610,7 @@ function renderIntegrations(root) {
           }).join('') + '</div>'
         : '<div class="gap-item" style="margin-bottom:16px">Nothing conclusive. Read the counts below.</div>') +
 
-      '<table style="font-size:13px;border-collapse:collapse;width:100%">' +
+      '<table style="font-size:14px;border-collapse:collapse;width:100%">' +
         status(r.me, 'me', r.organisation || '') +
         status(r.permissions, 'access level', (r.permissions.access_level || 'none reported') + ' · ' + (r.permissions.scopes.length + ' scope(s)')) +
         // NONE in the section column is the whole answer when the rosters come
@@ -2646,18 +2636,18 @@ function renderIntegrations(root) {
       '</table>' +
 
       (r.shifts.by_section.length
-        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Shifts by section:</strong> ' + counts(r.shifts.by_section) + '</div>'
+        ? '<div style="margin-top:12px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Shifts by section:</strong> ' + counts(r.shifts.by_section) + '</div>'
         : '') +
       (ts.by_section.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work-hour rows by section:</strong> ' + counts(ts.by_section) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Work-hour rows by section:</strong> ' + counts(ts.by_section) + '</div>'
         : '') +
       (ts.hours_by_section.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Hours by section:</strong> ' + counts(ts.hours_by_section) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Hours by section:</strong> ' + counts(ts.hours_by_section) + '</div>'
         : '') +
       // SECTION totals only. A per-person figure is that person's earnings and
       // never reaches this page.
       (ts.cost_by_section.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Cost by section:</strong> ' + counts(ts.cost_by_section) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Cost by section:</strong> ' + counts(ts.cost_by_section) + '</div>'
         : '') +
       // Basic against overtime against weekend. A total says labour was
       // expensive; the split says why, and overtime is the part with a lever
@@ -2665,31 +2655,31 @@ function renderIntegrations(root) {
       // What StaffAny USED, beside what we can divide. Distinct values with row
       // counts, never a row: a rate attached to a person is their pay.
       (ts.calculation_inputs && ts.calculation_inputs.length
-        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Calculation inputs:</strong><br>' +
+        ? '<div style="margin-top:12px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Calculation inputs:</strong><br>' +
           ts.calculation_inputs.map(function (f) {
             return escapeHtml(f.field) + ' &mdash; ' + escapeHtml(f.values.join(', ')) +
               (f.distinct > f.values.length ? ' &hellip; (' + f.distinct + ' distinct)' : '');
           }).join('<br>') + '</div>'
         : '') +
       (ts.cost_components && ts.cost_components.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Cost components:</strong> ' + counts(ts.cost_components) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Cost components:</strong> ' + counts(ts.cost_components) + '</div>'
         : '') +
       // The real field list decides whether hours are a subtraction or must be
       // rebuilt from clock attempts, and the published spec understates it.
       (ts.work_hour_fields.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Work-hour fields:</strong> ' + escapeHtml(ts.work_hour_fields.join(', ')) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Work-hour fields:</strong> ' + escapeHtml(ts.work_hour_fields.join(', ')) + '</div>'
         : '') +
       (r.sections.items.length
-        ? '<div style="margin-top:12px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Sections:</strong> ' +
+        ? '<div style="margin-top:12px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Sections:</strong> ' +
           r.sections.items.map(function (s) { return escapeHtml(s.name + (s.tag ? ' [' + s.tag + ']' : '')); }).join(' &middot; ') + '</div>'
         : '') +
       (r.roles.names.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Roles:</strong> ' + escapeHtml(r.roles.names.join(', ')) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Roles:</strong> ' + escapeHtml(r.roles.names.join(', ')) + '</div>'
         : '') +
       // The scope list is what StaffAny will ask for by name if any are
       // missing, so it is printed in full rather than counted.
       (r.permissions.scopes.length
-        ? '<div style="margin-top:6px;font-size:12px;color:var(--text-muted);white-space:normal"><strong>Permission scopes:</strong> ' + escapeHtml(r.permissions.scopes.join(', ')) + '</div>'
+        ? '<div style="margin-top:6px;font-size:13px;color:var(--text-muted);white-space:normal"><strong>Permission scopes:</strong> ' + escapeHtml(r.permissions.scopes.join(', ')) + '</div>'
         : '') +
 
       // Stated on the page, not only in the code. With Xero the protection is a
@@ -2697,7 +2687,7 @@ function renderIntegrations(root) {
       // endpoint is on the free surface and reachable with this token, so not
       // calling them is the whole of it, and the next person to edit this
       // should know that before they add one.
-      '<div style="margin-top:16px;font-size:12px;color:var(--text-muted);white-space:normal">' +
+      '<div style="margin-top:16px;font-size:13px;color:var(--text-muted);white-space:normal">' +
         '<strong>Never called:</strong> ' + escapeHtml(r.not_called.join(', ')) + '. ' +
         'None of them is gated &mdash; every one is reachable with this token. Not calling them is the entire protection.' +
       '</div>';
@@ -2705,7 +2695,7 @@ function renderIntegrations(root) {
 
   document.getElementById('meta-discover-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Asking Meta&hellip;</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Asking Meta&hellip;</p>';
 
     const res = await api('GET', '/admin/api/meta/discover');
     const accounts = res.accounts || [];
@@ -2720,7 +2710,7 @@ function renderIntegrations(root) {
       return '<tr>' +
         '<td>' + escapeHtml(a.platform) + '</td>' +
         '<td>' + escapeHtml(a.account_name || '(unnamed)') + '</td>' +
-        '<td style="font-family:monospace;font-size:12px">' + escapeHtml(a.account_id) + '</td>' +
+        '<td style="font-family:monospace;font-size:13px">' + escapeHtml(a.account_id) + '</td>' +
         '<td><select class="meta-venue" data-platform="' + escapeHtml(a.platform) + '" data-account="' + escapeHtml(a.account_id) + '" data-name="' + escapeHtml(a.account_name || '') + '" style="min-width:150px">' +
           '<option value="">&mdash; not mapped &mdash;</option>' +
           venues.map(function (v) {
@@ -2728,18 +2718,18 @@ function renderIntegrations(root) {
           }).join('') +
         '</select></td>' +
         '<td>' + readable + '</td>' +
-        '<td style="font-size:12px;color:var(--text-muted);max-width:340px;white-space:normal">' + escapeHtml(a.error || '') + '</td>' +
+        '<td style="font-size:13px;color:var(--text-muted);max-width:340px;white-space:normal">' + escapeHtml(a.error || '') + '</td>' +
         '</tr>';
     }).join('');
 
     out.innerHTML =
       (accounts.length
         ? '<table><thead><tr><th>Platform</th><th>Name</th><th>Account id</th><th>Venue</th><th>Insights</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>'
-        : '<p style="color:var(--text-muted);font-size:13px">No accounts returned.</p>') +
+        : '<p style="color:var(--text-muted);font-size:14px">No accounts returned.</p>') +
       (errors.length
-        ? '<div style="margin-top:14px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">Notes</div>' +
+        ? '<div style="margin-top:14px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">Notes</div>' +
           errors.map(function (e) {
-            return '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;white-space:normal">' + escapeHtml(e) + '</div>';
+            return '<div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;white-space:normal">' + escapeHtml(e) + '</div>';
           }).join('') + '</div>'
         : '');
 
@@ -2763,11 +2753,11 @@ function renderIntegrations(root) {
 
   document.getElementById('meta-ingest-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Pulling&hellip; this takes a few seconds per account.</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Pulling&hellip; this takes a few seconds per account.</p>';
 
     const res = await api('POST', '/admin/api/meta/ingest', { days: 30 });
     if (res.error && !(res.results || []).length) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
       return;
     }
 
@@ -2785,24 +2775,24 @@ function renderIntegrations(root) {
           : r.skipped
             ? '<span style="color:var(--text-muted)">skipped</span>'
             : '<span style="color:var(--error)">not stored</span>') + '</td>' +
-        '<td style="font-size:12px;color:var(--text-muted);white-space:normal;max-width:420px">' +
+        '<td style="font-size:13px;color:var(--text-muted);white-space:normal;max-width:420px">' +
           escapeHtml(r.error || '') +
           (failed.length ? '<br>Metrics refused: ' + escapeHtml(failed.join(', ')) : '') +
           ((r.missing_days || []).length ? '<br>No data on ' + r.missing_days.length + ' day(s)' : '') +
         '</td></tr>';
     }).join('');
 
-    out.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') + '</p>' +
+    out.innerHTML = '<p style="font-size:14px;color:var(--text-muted)">' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') + '</p>' +
       '<table><thead><tr><th>Account</th><th>Stored</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
   });
 
   document.getElementById('meta-calibrate-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Pulling reach both ways over a week&hellip;</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Pulling reach both ways over a week&hellip;</p>';
 
     const res = await api('GET', '/admin/api/meta/calibrate');
     if (res.error) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
       return;
     }
 
@@ -2819,36 +2809,36 @@ function renderIntegrations(root) {
 
     const colour = res.verdict === 'aligned' ? 'var(--success)' : res.verdict === 'off_by_one' ? 'var(--error)' : 'var(--text-muted)';
     out.innerHTML =
-      '<p style="font-size:14px;font-weight:600;color:' + colour + '">' + escapeHtml(res.verdict || '') + '</p>' +
-      '<p style="font-size:13px;color:var(--text-muted);white-space:normal;max-width:70ch">' + escapeHtml(res.note || '') + '</p>' +
-      '<p style="font-size:12px;color:var(--text-muted)">Same-day agreements: ' + res.matches + ' &middot; agreements one day back: ' + res.matches_shifted_back + '</p>' +
+      '<p style="font-size:15px;font-weight:600;color:' + colour + '">' + escapeHtml(res.verdict || '') + '</p>' +
+      '<p style="font-size:14px;color:var(--text-muted);white-space:normal;max-width:70ch">' + escapeHtml(res.note || '') + '</p>' +
+      '<p style="font-size:13px;color:var(--text-muted)">Same-day agreements: ' + res.matches + ' &middot; agreements one day back: ' + res.matches_shifted_back + '</p>' +
       '<table><thead><tr><th>Date asked for</th><th class="r">Dated series</th><th class="r">total_value</th><th>Agreement</th></tr></thead><tbody>' + rows + '</tbody></table>';
   });
 
   document.getElementById('meta-sample-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Fetching one raw response&hellip;</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Fetching one raw response&hellip;</p>';
 
     // `views` over three days: enough to show whether Meta returns one total or
     // a value per day, which is the whole question.
     const res = await api('GET', '/admin/api/meta/sample?platform=instagram&metric=views&form=total_value&days=3');
     out.innerHTML =
-      '<p style="font-size:13px;color:var(--text-muted)">' +
+      '<p style="font-size:14px;color:var(--text-muted)">' +
         escapeHtml(res.account || '') + ' &middot; ' + escapeHtml(res.metric || '') +
         ' (' + escapeHtml(res.form || '') + ') &middot; ' + escapeHtml(res.since || '') + ' to ' + escapeHtml(res.until || '') +
       '</p>' +
-      '<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-word">' +
+      '<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-word">' +
         escapeHtml(JSON.stringify(res.raw || res.error || res, null, 2)) +
       '</pre>';
   });
 
   document.getElementById('meta-probe-btn').addEventListener('click', async () => {
     const out = document.getElementById('meta-result');
-    out.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Trying every candidate metric name against the API. This takes a minute&hellip;</p>';
+    out.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Trying every candidate metric name against the API. This takes a minute&hellip;</p>';
 
     const res = await api('POST', '/admin/api/meta/probe-metrics');
     if (res.error && !(res.results || []).length) {
-      out.innerHTML = '<p style="font-size:13px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
+      out.innerHTML = '<p style="font-size:14px;color:var(--error)">' + escapeHtml(res.error) + '</p>';
       return;
     }
 
@@ -2858,12 +2848,12 @@ function renderIntegrations(root) {
       return '<div style="margin-bottom:20px">' +
         '<div style="font-weight:600;margin-bottom:6px">' + escapeHtml(r.platform) + ' &middot; ' + escapeHtml(r.account_name || '') + '</div>' +
         (ok.length
-          ? '<div style="font-size:13px;margin-bottom:6px"><span style="color:var(--success)">Accepted:</span> ' +
-            ok.map(function (p) { return escapeHtml(p.metric) + ' <span style="color:var(--text-muted);font-size:11px">(' + escapeHtml(p.form) + ')</span>'; }).join(', ') +
+          ? '<div style="font-size:14px;margin-bottom:6px"><span style="color:var(--success)">Accepted:</span> ' +
+            ok.map(function (p) { return escapeHtml(p.metric) + ' <span style="color:var(--text-muted);font-size:13px">(' + escapeHtml(p.form) + ')</span>'; }).join(', ') +
             '</div>'
-          : '<div style="font-size:13px;color:var(--error);margin-bottom:6px">Nothing accepted.</div>') +
+          : '<div style="font-size:14px;color:var(--error);margin-bottom:6px">Nothing accepted.</div>') +
         (bad.length
-          ? '<div style="font-size:12px;color:var(--text-muted)">Rejected: ' + bad.map(function (p) { return escapeHtml(p.metric); }).join(', ') +
+          ? '<div style="font-size:13px;color:var(--text-muted)">Rejected: ' + bad.map(function (p) { return escapeHtml(p.metric); }).join(', ') +
             // The reason matters: "not a valid metric" is a name problem,
             // anything about permissions is an access problem, and they send
             // you to completely different screens.
@@ -2871,10 +2861,10 @@ function renderIntegrations(root) {
             '</div>'
           : '') +
         (r.hint
-          ? '<div style="margin-top:8px;font-size:12px;color:var(--text-muted);white-space:normal">' +
+          ? '<div style="margin-top:8px;font-size:13px;color:var(--text-muted);white-space:normal">' +
             '<strong>Meta&rsquo;s own list of what it accepts:</strong><br>' + escapeHtml(r.hint) + '</div>'
           : '') +
-        (r.error ? '<div style="font-size:12px;color:var(--error)">' + escapeHtml(r.error) + '</div>' : '') +
+        (r.error ? '<div style="font-size:13px;color:var(--error)">' + escapeHtml(r.error) + '</div>' : '') +
         '</div>';
     }).join('');
   });
@@ -2895,7 +2885,7 @@ function renderUpload(root) {
     <div class="upload-actions" id="upload-actions" style="display:none">
       <button class="btn btn-small" id="upload-btn">Upload All</button>
       <button class="btn btn-small btn-outline" id="upload-clear">Clear</button>
-      <span id="upload-count" style="color:var(--text-muted);font-size:12px"></span>
+      <span id="upload-count" style="color:var(--text-muted);font-size:13px"></span>
     </div>
     <div class="upload-progress" id="upload-progress"><div class="fill" id="upload-progress-fill"></div></div>
     <div class="upload-summary" id="upload-summary"></div>
@@ -3036,7 +3026,7 @@ function initUpload() {
     summary.style.display = 'block';
     summary.innerHTML = `<div class="ustat"><span class="ulabel">Total</span><span>${uploadFiles.length}</span></div>
       <div class="ustat"><span class="ulabel">Ingested</span><span style="color:var(--success)">${ok}</span></div>
-      ${warn > 0 ? `<div class="ustat"><span class="ulabel">Warnings</span><span style="color:#e8c840">${warn}</span></div>` : ''}
+      ${warn > 0 ? `<div class="ustat"><span class="ulabel">Warnings</span><span style="color:var(--warn)">${warn}</span></div>` : ''}
       ${err > 0 ? `<div class="ustat"><span class="ulabel">Errors</span><span style="color:var(--error)">${err}</span></div>` : ''}`;
   }
 }
@@ -3140,7 +3130,7 @@ async function renderRoleMatrix(container) {
       items.length ? '<ul class="' + cls + '">' + items.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : '';
     html += '<h4>' + esc(info.label) + '</h4>' + list(info.can, 'ra-can') + list(info.cannot, 'ra-cannot') +
       (info.blocked_tools.length
-        ? '<div style="color:var(--text-muted);font-size:11px;margin-top:3px">Refused ' +
+        ? '<div style="color:var(--text-muted);font-size:13px;margin-top:3px">Refused ' +
           info.blocked_tools.length + ' of ' + (info.tools.length + info.blocked_tools.length) +
           ' data tools: ' + esc(info.blocked_tools.join(', ')) + '</div>'
         : '');
@@ -3226,7 +3216,7 @@ function showResetPassword(userId, email) {
   overlay.innerHTML = `
     <div class="modal">
       <h3>Reset password</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">${email}</p>
+      <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px">${email}</p>
       <input type="password" id="reset-pw-input" placeholder="New password">
       <div class="modal-btns">
         <button class="btn btn-small btn-outline" id="reset-cancel">Cancel</button>

@@ -1284,3 +1284,22 @@ test('chat and plan share one saved-conversations sidebar, on the left', () => {
   const footer = plan.slice(plan.indexOf('<footer>'), plan.indexOf('</footer>'));
   assert.ok(footer.includes('id="progress"'), 'the progress board belongs under the input bar, in the footer');
 });
+
+test('every page wears the shared look, and none brings back its own palette', () => {
+  /**
+   * The warm light look (13 Oct 2026) lives in /theme.css. Each page used to
+   * carry its own :root of colours, which is how six pages ended up as six
+   * slightly different darks. A page that skips the file, or redefines the
+   * page background in its own :root, is a page that will not change next time.
+   */
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<link rel="stylesheet" href="\/theme\.css">/, `${page} does not load /theme.css`);
+    assert.match(html, /<link rel="preload" href="\/vendor\/fonts\/inter-latin-400-normal\.woff2"/, `${page} does not preload the body font`);
+    // Paper is the one place a page may set its own: white, for printing.
+    for (const m of html.matchAll(/:root\s*\{[^}]*--bg\s*:/g)) {
+      const before = html.slice(Math.max(0, m.index! - 300), m.index);
+      assert.match(before, /@media print/, `${page} defines its own --bg; colours belong in theme.css`);
+    }
+  }
+});

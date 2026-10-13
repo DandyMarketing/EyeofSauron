@@ -28,6 +28,7 @@ import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { countUnresolved } from './ingest/resolved.js';
 import { askSauron } from './ai/engine.js';
+import { relightCharts } from './ai/chart-svg.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
 import { queryTools } from './ai/tools.js';
@@ -2442,6 +2443,8 @@ app.get('/api/recommendations', async (c) => {
     withheld_for_role: withheld > 0 ? withheld : undefined,
     recommendations: permitted.map((r: any) => ({
       ...r,
+      // Stored as SVG, so a chart drawn before the light look is repainted here.
+      charts: relightCharts(r.charts),
       venue: r.venues?.name ?? 'Unknown venue',
       /**
        * The QUERIES behind the claim, not the rows they returned. Re-runnable

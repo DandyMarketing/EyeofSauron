@@ -24,28 +24,28 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = 'report-issue-css';
   style.textContent = `
-    #ri-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.55); }
+    #ri-overlay { position: fixed; inset: 0; z-index: 90; background: var(--scrim); }
     #ri-sheet { position: fixed; z-index: 91; left: 50%; top: 50%; transform: translate(-50%, -50%);
       width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; scrollbar-width: none;
-      background: var(--surface, #14141f); color: var(--text, #e4e4ef); border: 1px solid var(--border, #2a2a3a);
-      border-radius: 12px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 14px; }
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px; box-shadow: 0 10px 30px rgba(46,42,37,0.15); font-size: 15px; }
     #ri-sheet::-webkit-scrollbar { display: none; }
-    #ri-sheet h3 { font-size: 16px; margin: 0 0 4px; }
-    #ri-sheet .ri-sub { color: var(--text-muted, #8888a0); font-size: 12px; margin-bottom: 12px; line-height: 1.5; }
+    #ri-sheet h3 { font-size: 17px; margin: 0 0 4px; }
+    #ri-sheet .ri-sub { color: var(--text-muted); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
     #ri-sheet label.ri-kind { display: flex; gap: 8px; align-items: center; padding: 8px 10px; margin-bottom: 6px;
-      border: 1px solid var(--border, #2a2a3a); border-radius: 8px; cursor: pointer; }
-    #ri-sheet label.ri-kind:has(input:checked) { border-color: var(--accent, #e8933a); background: rgba(232,147,58,.1); }
-    #ri-sheet input[type=radio] { accent-color: var(--accent, #e8933a); margin: 0; }
+      border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+    #ri-sheet label.ri-kind:has(input:checked) { border-color: var(--accent); background: rgba(176,96,42,.1); }
+    #ri-sheet input[type=radio] { accent-color: var(--accent); margin: 0; }
     #ri-sheet textarea { width: 100%; box-sizing: border-box; margin-top: 8px; min-height: 84px; resize: vertical;
-      background: var(--bg, #0a0a0f); color: var(--text, #e4e4ef); border: 1px solid var(--border, #2a2a3a);
-      border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }
     #ri-sheet .ri-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-    #ri-sheet button { border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; border: 1px solid var(--border, #2a2a3a);
-      background: transparent; color: var(--text, #e4e4ef); }
-    #ri-sheet button.ri-send { background: var(--accent, #e8933a); border-color: var(--accent, #e8933a); color: #111; font-weight: 600; }
+    #ri-sheet button { border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer; border: 1px solid var(--border);
+      background: transparent; color: var(--text); }
+    #ri-sheet button.ri-send { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     #ri-sheet button:disabled { opacity: .6; cursor: default; }
-    #ri-sheet .ri-msg { font-size: 12px; margin-top: 8px; color: var(--error, #e84040); }
-    #ri-sheet .ri-done { color: var(--success, #40c060); font-size: 14px; line-height: 1.5; }
+    #ri-sheet .ri-msg { font-size: 13px; margin-top: 8px; color: var(--error); }
+    #ri-sheet .ri-done { color: var(--success); font-size: 15px; line-height: 1.5; }
   `;
   document.head.appendChild(style);
 }

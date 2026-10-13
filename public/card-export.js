@@ -17,10 +17,11 @@
 
 const PNG_W = 1080;           /* WhatsApp shows this at full width without resampling. */
 const PNG_PAD = 48;
-const PNG_BG = '#14141f';
-const PNG_TEXT = '#e4e4ef';
-const PNG_MUTED = '#8888a0';
-const PNG_ACCENT = '#e8933a';
+/* The warm light look (13 Oct 2026), so a shared image matches the app. */
+const PNG_BG = '#ffffff';
+const PNG_TEXT = '#2e2a25';
+const PNG_MUTED = '#6f685f';
+const PNG_ACCENT = '#b0602a';
 
 /** Wrap text to a width, returning the lines. */
 export function wrapText(ctx, text, maxWidth) {
@@ -234,8 +235,8 @@ export async function cardToPng(card, opts = {}) {
 
   for (const chart of charts) {
     y += 28;
-    // The chart is drawn for a dark app and carries no background of its own.
-    ctx.fillStyle = '#14141c';
+    // The chart carries no background of its own.
+    ctx.fillStyle = PNG_BG;
     ctx.fillRect(PNG_PAD, y, chart.width, chart.height);
     ctx.drawImage(chart.img, PNG_PAD, y, chart.width, chart.height);
     y += chart.height;

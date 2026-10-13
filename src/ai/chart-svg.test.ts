@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { renderChartSvg } from './chart-svg.js';
+import { renderChartSvg, relightChart, relightCharts } from './chart-svg.js';
 import type { CompositionSpec } from './charts.js';
 
 /**
@@ -107,7 +107,7 @@ test('a thin bucket has its total drawn in the warning colour', () => {
     buckets: [{ label: '2026-09', slices: [{ label: 'First visit', value: 27 }], total: 27 }],
     low_sample: ['2026-09'],
   }));
-  assert.match(svg, /fill="#d4a03a" font-size="10" text-anchor="middle">27</);
+  assert.match(svg, /fill="#8a6100" font-size="10" text-anchor="middle">27</);
 });
 
 test('a chart stored before composition existed still renders as a series', () => {
@@ -161,4 +161,28 @@ test('a thin band is not drawn as a floating pill', () => {
 
   assert.ok(thin, 'expected a thin segment');
   assert.ok(thin!.rx <= thin!.h / 4 + 0.05, `rx ${thin!.rx} is too round for a ${thin!.h}px band`);
+});
+
+test('a chart stored in the dark colours is repainted for the light look', () => {
+  /**
+   * Charts are kept as SVG inside recommendations and saved chats. Before
+   * 13 Oct 2026 they were drawn for a dark page: near-white text, which on the
+   * cream page is invisible. Every old colour must map, or that part vanishes.
+   */
+  const old = '<text fill="#E4E4EF">Covers</text><line stroke="#2a2a3a"/><rect fill="#e8933a"/><text fill="#8888a0">Mon</text><text fill="#12121a">40%</text>';
+  const lit = relightChart(old);
+  for (const dark of ['#e4e4ef', '#2a2a3a', '#e8933a', '#8888a0', '#12121a']) {
+    assert.ok(!lit.toLowerCase().includes(dark), `still dark: ${dark}`);
+  }
+  assert.match(lit, /fill="#2e2a25">Covers/);
+  assert.match(lit, /fill="#b0602a"/);
+  assert.match(lit, /fill="#ffffff">40%/);
+  // A chart drawn today is already light, and repainting it changes nothing.
+  const fresh = renderChartSvg(comp({
+    type: 'stacked_pct', categories: ['First visit'],
+    buckets: [{ label: '2026-09', slices: [{ label: 'First visit', value: 27 }], total: 27 }], low_sample: [],
+  }));
+  assert.equal(relightChart(fresh), fresh);
+  assert.deepEqual(relightCharts([{ title: 'x', svg: old }])[0].title, 'x');
+  assert.equal(relightCharts(null), null);
 });

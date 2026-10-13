@@ -13,7 +13,10 @@ import { toPercent } from '../lib/composition.js';
  */
 
 /**
- * Tuned against the app's dark palette (--bg #0a0a0f, --accent #e8933a).
+ * Tuned for the warm light look (13 Oct 2026: --bg #f6f2ec, cards #ffffff,
+ * --accent #b0602a). Until then these were tuned for the dark app, and charts
+ * already stored -- inside recommendations and saved chats -- still carry
+ * those colours; relightChart() below repaints them as they are served.
  *
  * SIX, BECAUSE MAX_SLICES IS SIX. It was four until 24 Sep 2026, when the
  * part-to-whole charts arrived and a five-channel donut drew its fifth slice in
@@ -21,27 +24,46 @@ import { toPercent } from '../lib/composition.js';
  * became one colour in a chart whose entire content is which colour is which.
  * A time-series chart never hit it because nothing plots five venues.
  *
- * THE FIRST FOUR KEEP THEIR POSITIONS, deliberately. Colour follows the entity
- * and the entity here is the slot, so reordering to make room would have
- * repainted every chart already drawn and every one stored inside a
- * recommendation -- for no gain a reader could name.
- *
- * Validated as a categorical palette against this surface: worst adjacent pair
- * ΔE 10.9 under deuteranopia and 16.8 under normal vision, chroma clear of the
- * grey floor, every step at least 3:1 on the background. The one check it does
- * not pass is the dark-mode lightness band -- all six sit around L 0.70-0.76
- * where the band wants 0.48-0.67, which is a glare judgement rather than a
- * legibility one, and predates this change. Tritan separation is low, which is
- * why no chart here rests on colour alone: every slice is named in a legend and
- * the large ones are labelled directly.
+ * THE SLOTS KEEP THEIR HUES. Colour follows the entity and the entity here is
+ * the slot: orange, blue, green, purple, gold, red, as before, each darkened
+ * until it holds at least 3:1 against a white card (graphics need 3:1; the
+ * old values were bright enough to glare on dark and vanish on cream). Tritan
+ * separation is still low, which is why no chart here rests on colour alone:
+ * every slice is named in a legend and the large ones are labelled directly.
  */
-const SERIES_COLOURS = ['#e8933a', '#5aa9d6', '#7cc47f', '#c88fd4', '#c2b44e', '#e0655f'];
-const AXIS = '#8888a0';
-const GRID = '#2a2a3a';
-const TEXT = '#e4e4ef';
-const MUTED = '#8888a0';
+const SERIES_COLOURS = ['#b0602a', '#2f73a8', '#3a8a4f', '#8e5aa8', '#9a7d14', '#c0473f'];
+const AXIS = '#6f685f';
+const GRID = '#e5ddd1';
+const TEXT = '#2e2a25';
+const MUTED = '#6f685f';
 // Amber, for a weekday average resting on too few trading days to trust.
-const WARN = '#d4a03a';
+const WARN = '#8a6100';
+// A percentage written inside a coloured segment.
+const ON_FILL = '#ffffff';
+
+/**
+ * Charts are stored as SVG, so every chart drawn before the light look
+ * arrived still carries dark-app colours: near-white text that disappears on
+ * a cream page. Repainting them where they are served, one colour for one
+ * colour, is exact because the old renderer used only these values; redrawing
+ * from the data is not possible, since the SVG is all that was kept.
+ */
+const DARK_TO_LIGHT: Record<string, string> = {
+  '#e8933a': SERIES_COLOURS[0], '#5aa9d6': SERIES_COLOURS[1], '#7cc47f': SERIES_COLOURS[2],
+  '#c88fd4': SERIES_COLOURS[3], '#c2b44e': SERIES_COLOURS[4], '#e0655f': SERIES_COLOURS[5],
+  '#8888a0': MUTED, '#2a2a3a': GRID, '#e4e4ef': TEXT, '#d4a03a': WARN, '#12121a': ON_FILL,
+};
+const DARK_COLOUR = new RegExp(Object.keys(DARK_TO_LIGHT).join('|'), 'gi');
+
+export function relightChart(svg: string): string {
+  return typeof svg === 'string' ? svg.replace(DARK_COLOUR, c => DARK_TO_LIGHT[c.toLowerCase()]) : svg;
+}
+
+/** Every chart in a stored list, repainted. Anything that is not a chart passes through. */
+export function relightCharts<T>(charts: T): T {
+  if (!Array.isArray(charts)) return charts;
+  return charts.map(c => (c && typeof (c as any).svg === 'string' ? { ...c, svg: relightChart((c as any).svg) } : c)) as any;
+}
 
 const W = 720;
 const H = 360;
@@ -137,10 +159,10 @@ function renderSeriesSvg(spec: ChartSpec): string {
   // No max-width: the viewBox lets this scale to whatever container it lands
   // in, so the same markup serves the small inline card and the full-screen
   // view without re-rendering at a second size.
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
   // Deliberately no root <title>: browsers render it as an unstyled OS tooltip
   // over every part of the chart not covered by a more specific one, which both
-  // clashes with the dark theme and shadows the per-point tooltips below. The
+  // clashes with the page and shadows the per-point tooltips below. The
   // aria-label above is the accessible name; the text below is the visible one.
   parts.push(`<text x="${PAD.left}" y="20" fill="${TEXT}" font-size="14" font-weight="600">${esc(spec.title)}</text>`);
   parts.push(`<text x="${PAD.left}" y="36" fill="${MUTED}" font-size="10">Source: ${esc(spec.source)} · by ${spec.granularity}</text>`);
@@ -309,7 +331,7 @@ function renderPieSvg(spec: CompositionSpec): string {
   const rInner = 62;
 
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 330" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 330" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
   parts.push(`<text x="20" y="22" fill="${TEXT}" font-size="14" font-weight="600">${esc(spec.title)}</text>`);
   parts.push(`<text x="20" y="38" fill="${MUTED}" font-size="10">Source: ${esc(spec.source)}</text>`);
 
@@ -404,7 +426,7 @@ function renderStackedSvg(spec: CompositionSpec): string {
   const plotH = H2 - pad.top - pad.bottom;
 
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H2}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H2}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(spec.title)}" style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`);
   parts.push(`<text x="${pad.left}" y="22" fill="${TEXT}" font-size="14" font-weight="600">${esc(spec.title)}</text>`);
   parts.push(`<text x="${pad.left}" y="38" fill="${MUTED}" font-size="10">Source: ${esc(spec.source)} · share of each month, with the count above each column</text>`);
 
@@ -459,7 +481,7 @@ function renderStackedSvg(spec: CompositionSpec): string {
         // 16px, not 22: a 10px glyph fits, and lowering it brings the 8-12%
         // bands into the picture. Below that the legend carries the figure.
         if (hFull >= 16 && barW >= 30) {
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(yTop + hFull / 2 + 4).toFixed(1)}" fill="#12121a" font-size="10" font-weight="600" text-anchor="middle">${pct(share)}</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(yTop + hFull / 2 + 4).toFixed(1)}" fill="${ON_FILL}" font-size="10" font-weight="600" text-anchor="middle">${pct(share)}</text>`);
         }
         acc += share;
       });

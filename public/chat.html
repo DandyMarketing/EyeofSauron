@@ -24,26 +24,15 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/report-issue.js">
+<link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/theme.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  :root {
-    --bg: #0a0a0f;
-    --surface: #14141f;
-    --surface-hover: #1a1a2a;
-    --border: #2a2a3a;
-    --text: #e4e4ef;
-    --text-muted: #8888a0;
-    --accent: #e8933a;
-    --accent-dim: #c47520;
-    --user-bg: #1e1e30;
-    --assistant-bg: #12121c;
-    --error: #e84040;
-  }
 
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font);
     background: var(--bg);
     color: var(--text);
     margin: 0;
@@ -75,19 +64,19 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8b3500 70%, #2a0e00 100%);
-    box-shadow: 0 0 20px rgba(232, 147, 58, 0.3);
+    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 70%, #5a2f12 100%);
+    box-shadow: 0 0 20px rgba(176,96,42,0.3);
     flex-shrink: 0;
   }
 
   header h1 {
-    font-size: 18px;
+    font-size: 19px;
     font-weight: 600;
     letter-spacing: 0.5px;
   }
 
   header .subtitle {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
     margin-top: 2px;
   }
@@ -119,7 +108,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
   }
 
@@ -130,15 +119,15 @@
   }
 
   .message.assistant .avatar {
-    background: radial-gradient(circle, var(--accent) 0%, #6b2800 100%);
-    box-shadow: 0 0 8px rgba(232, 147, 58, 0.2);
+    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 100%);
+    box-shadow: 0 0 8px rgba(176,96,42,0.2);
   }
 
   .bubble {
     padding: 12px 16px;
     border-radius: 12px;
     line-height: 1.6;
-    font-size: 14px;
+    font-size: 15px;
     max-width: 85%;
   }
 
@@ -177,30 +166,30 @@
   /* Taking an answer away with you. Sits in the same bar as "Teach Sauron
      this", because both are things you do to a reply you have just read. */
   .export-btn {
-    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
-    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    background: none; border: 1px solid rgba(46,42,37,0.18); color: var(--text-muted);
+    font-size: 13px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
     font-family: inherit; margin-left: 6px;
   }
-  .export-btn:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
+  .export-btn:hover { color: var(--text); border-color: rgba(46,42,37,0.4); }
   .export-btn.working { color: var(--accent); border-color: var(--accent); }
 
-  .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
+  .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(46,42,37,0.07); }
   .teach-bar .report-btn { margin-left: auto; }
   .teach-btn, .teach-save, .teach-cancel {
-    background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
-    font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
+    background: none; border: 1px solid rgba(46,42,37,0.18); color: var(--text-muted);
+    font-size: 13px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
   }
-  .teach-btn:hover, .teach-save:hover, .teach-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
-  .teach-save { border-color: rgba(120,180,255,0.5); color: #9cc6ff; }
-  .teach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .teach-btn:hover, .teach-save:hover, .teach-cancel:hover { color: var(--text); border-color: rgba(46,42,37,0.4); }
+  .teach-save { border-color: rgba(59,111,196,0.5); color: var(--info); }
+  .teach-hint { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
   .teach-text {
-    width: 100%; background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 13px;
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;
+    width: 100%; background: var(--surface); color: inherit; font-family: inherit; font-size: 14px;
+    border: 1px solid rgba(46,42,37,0.15); border-radius: 6px; padding: 8px; resize: vertical;
   }
   .teach-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
   .teach-row select {
-    background: rgba(0,0,0,0.3); color: inherit; font-family: inherit; font-size: 12px;
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 6px;
+    background: var(--surface); color: inherit; font-family: inherit; font-size: 13px;
+    border: 1px solid rgba(46,42,37,0.15); border-radius: 6px; padding: 4px 6px;
   }
   .message.assistant .bubble {
     background: var(--assistant-bg);
@@ -218,7 +207,7 @@
     object-fit: cover;
     vertical-align: middle;
     margin: 4px 6px 4px 0;
-    background: rgba(255,255,255,0.04);
+    background: rgba(46,42,37,0.04);
   }
   /* A URL that has expired. Collapsed rather than left as a broken-image icon,
      because a broken icon reads as data we lost. */
@@ -228,7 +217,7 @@
     margin: 0;
     opacity: 0;
   }
-  .bubble a { color: var(--accent, #e8a33d); text-decoration: underline; }
+  .bubble a { color: var(--accent); text-decoration: underline; }
 
   .bubble p { margin-bottom: 8px; }
   .bubble p:last-child { margin-bottom: 0; }
@@ -263,7 +252,7 @@
     position: absolute;
     top: 10px;
     right: 14px;
-    font-size: 10px;
+    font-size: 13px;
     color: var(--text-muted);
     opacity: 0;
     transition: opacity 0.15s;
@@ -274,7 +263,7 @@
   #chart-modal {
     position: fixed;
     inset: 0;
-    background: rgba(5,5,10,0.92);
+    background: rgba(246,242,236,0.97);
     display: none;
     align-items: center;
     justify-content: center;
@@ -310,16 +299,16 @@
   #chart-modal-close:hover { color: var(--text); }
 
   .bubble code {
-    background: rgba(255,255,255,0.06);
+    background: rgba(46,42,37,0.06);
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .bubble table {
     border-collapse: collapse;
     margin: 8px 0;
-    font-size: 13px;
+    font-size: 14px;
     width: 100%;
     overflow-x: auto;
     display: block;
@@ -332,7 +321,7 @@
   }
 
   .bubble th {
-    background: rgba(255,255,255,0.04);
+    background: rgba(46,42,37,0.04);
     font-weight: 600;
   }
 
@@ -341,15 +330,13 @@
     color: var(--accent);
   }
 
-  .bubble h3 { font-size: 15px; }
+  .bubble h3 { font-size: 16px; }
 
   /**
-   * PRINT: one reply, as a light document with dark chart panels.
+   * PRINT: one reply, as a light document.
    *
-   * Same reasoning as the briefing's. chart-svg.ts paints its text at #e4e4ef
-   * on a background it does not draw, so on white paper it is invisible ink;
-   * giving the chart the dark panel it was drawn for is one rule that cannot
-   * rot, where recolouring it by selector would guess which <text> is a title.
+   * The charts are drawn for the light look since 13 Oct 2026 (and older
+   * stored ones are repainted as they are served), so they print as they are.
    *
    * Only the marked reply prints. A chat is a transcript, and nobody wants to
    * send somebody forty turns to deliver one table.
@@ -377,7 +364,7 @@
     .bubble code { background: #f2f3f5 !important; }
 
     .chart-card {
-      background: #14141c !important; border: none !important;
+      background: var(--surface) !important; border: none !important;
       break-inside: avoid; page-break-inside: avoid;
     }
     .chart-card::after { display: none !important; }
@@ -387,7 +374,7 @@
 
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   }
-  .bubble h4 { font-size: 14px; }
+  .bubble h4 { font-size: 15px; }
 
   /* --- chat history ------------------------------------------------------ */
 
@@ -462,7 +449,7 @@
     gap: 9px;
     cursor: pointer;
     list-style: none;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.35;
   }
 
@@ -474,7 +461,7 @@
   .progress-count {
     margin-left: auto;
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-muted);
   }
 
@@ -501,7 +488,7 @@
     display: flex;
     align-items: center;
     gap: 9px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.35;
     color: var(--text-muted);
     /* Steps arrive while the reader is looking at the panel, so they fade in
@@ -563,14 +550,14 @@
 
   /* The elapsed seconds, so a long answer is visibly long rather than stuck. */
   .progress-elapsed {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-muted);
     opacity: 0.7;
     margin-left: 16px;
   }
 
   .tool-indicator {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
     padding: 4px 0;
     display: flex;
@@ -597,7 +584,7 @@
     padding: 10px 12px;
     border-left: 2px solid var(--border);
     background: transparent;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
   }
 
@@ -605,7 +592,7 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    font-size: 10px;
+    font-size: 13px;
     margin-bottom: 8px;
   }
 
@@ -627,14 +614,14 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
   }
   #model-row select {
-    font-size: 12px;
+    font-size: 13px;
     padding: 2px 6px;
   }
-  #model-note { font-size: 11px; }
+  #model-note { font-size: 13px; }
   .input-row {
     max-width: 780px;
     margin: 0 auto;
@@ -650,7 +637,7 @@
     border-radius: 12px;
     padding: 12px 16px;
     color: var(--text);
-    font-size: 14px;
+    font-size: 15px;
     font-family: inherit;
     line-height: 1.5;
     resize: none;
@@ -664,7 +651,7 @@
 
   #send {
     background: var(--accent);
-    color: #000;
+    color: var(--on-accent);
     border: none;
     border-radius: 10px;
     width: 40px;
@@ -696,19 +683,19 @@
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8b3500 60%, #2a0e00 100%);
-    box-shadow: 0 0 40px rgba(232, 147, 58, 0.25);
+    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 60%, #5a2f12 100%);
+    box-shadow: 0 0 40px rgba(176,96,42,0.25);
     margin: 0 auto 20px;
   }
 
   .welcome h2 {
-    font-size: 22px;
+    font-size: 23px;
     margin-bottom: 8px;
   }
 
   .welcome p {
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 15px;
     margin-bottom: 24px;
     line-height: 1.5;
   }
@@ -725,7 +712,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 10px 14px;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text);
     cursor: pointer;
     transition: border-color 0.2s;
@@ -735,23 +722,23 @@
 
   .error-msg {
     color: var(--error);
-    font-size: 13px;
+    font-size: 14px;
     padding: 8px 12px;
-    background: rgba(232, 64, 64, 0.08);
+    background: rgba(179,38,30,0.08);
     border-radius: 8px;
-    border: 1px solid rgba(232, 64, 64, 0.2);
+    border: 1px solid rgba(179,38,30,0.2);
   }
 
   @media (max-width: 600px) {
     header { padding: 12px 16px; }
     #chat { padding: 12px; gap: 12px; }
-    .bubble { max-width: 92%; font-size: 14px; }
+    .bubble { max-width: 92%; font-size: 15px; }
     #input-area { padding: 12px 16px; }
     .welcome { padding: 24px 16px; }
-    .welcome h2 { font-size: 20px; }
-    .welcome p { font-size: 13px; }
+    .welcome h2 { font-size: 21px; }
+    .welcome p { font-size: 14px; }
     .suggestions { flex-direction: column; }
-    .suggestion { font-size: 13px; padding: 10px 12px; }
+    .suggestion { font-size: 14px; padding: 10px 12px; }
   }
 </style>
 </head>
@@ -763,7 +750,7 @@
       <h1>Sauron</h1>
       <div class="subtitle">The Dandy Collection - AI Business Advisor</div>
     </div>
-    <nav id="nav" style="margin-left:auto;display:flex;gap:16px;font-size:14px">
+    <nav id="nav" style="margin-left:auto;display:flex;gap:16px;font-size:15px">
       <a href="/" style="color:var(--text-muted);text-decoration:none">Dashboard</a>
       <a href="/chat.html" style="color:var(--accent);text-decoration:none">Chat</a>
       <a href="/plan.html" style="color:var(--text-muted);text-decoration:none">Plan</a>

@@ -1,0 +1,107 @@
+/*
+ * Sauron's look, in ONE place (13 Oct 2026).
+ *
+ * Khai: "I need a softer feeling UI in terms of colour, font and font size."
+ * Chosen from three looks shown side by side: WARM LIGHT -- cream background,
+ * white cards, warm dark text, terracotta accent -- in Inter, with 15px body
+ * text and nothing smaller than 13px.
+ *
+ * Every page loads this BEFORE its own <style>, and pages use these variables
+ * rather than colour codes, so the next change to the look is made here once.
+ * Each page used to carry its own copy of the colours.
+ *
+ * CONTRAST, MEASURED (WCAG ratio against white; 4.5 is the floor for small
+ * text): text 14.3, muted 5.5, accent 4.6 (and white text on accent buttons
+ * 4.6), error 6.5, success 5.1. The look shown had a lighter grey (4.1) and
+ * terracotta (3.6) that fell short, so both were darkened a step.
+ *
+ * Inter is served from /vendor/fonts, never a font CDN: nothing on these pages
+ * loads from a third party (see CLAUDE.md, "Every page is built for the load").
+ * SIL Open Font License, alongside the files.
+ */
+
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/vendor/fonts/inter-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/vendor/fonts/inter-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/vendor/fonts/inter-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/vendor/fonts/inter-latin-700-normal.woff2') format('woff2'); }
+
+:root {
+  /* Surfaces */
+  --bg: #f6f2ec;            /* cream page */
+  --surface: #ffffff;       /* cards */
+  --surface-hover: #f1ebe2;
+  --border: #e5ddd1;
+
+  /* Text */
+  --text: #2e2a25;
+  --text-muted: #6f685f;
+
+  /* Accent: terracotta */
+  --accent: #b0602a;
+  --accent-dim: #934e20;    /* hover / pressed */
+  --accent-soft: rgba(176, 96, 42, 0.10);
+  --on-accent: #ffffff;     /* text on an accent fill */
+
+  /* States */
+  --error: #b3261e;
+  --error-soft: rgba(179, 38, 30, 0.08);
+  --success: #2f7d4a;
+  --success-soft: rgba(47, 125, 74, 0.10);
+  --warn: #8a6100;
+  --warn-soft: rgba(138, 97, 0, 0.10);
+  --info: #3b6fc4;
+  --info-soft: rgba(59, 111, 196, 0.10);
+
+  /* Chat */
+  --user-bg: #f3e6d9;       /* the person's own message: a warm tint */
+  --assistant-bg: #ffffff;
+  --bubble: #eef4ee;
+
+  /* Overlays and lines on a light page */
+  --hairline: rgba(46, 42, 37, 0.08);
+  --shade: rgba(46, 42, 37, 0.04);
+  --scrim: rgba(46, 42, 37, 0.35);
+  --shadow: 0 6px 24px rgba(46, 42, 37, 0.12);
+
+  --radius: 12px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  color-scheme: light;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+/* Form controls do not inherit the font by default. */
+button, input, select, textarea { font-family: inherit; }
+/*
+ * Drop-downs, everywhere. Most pages styled their inputs and never their
+ * <select>s, which drew as the browser's default -- a hard black outline in
+ * the middle of a soft page. A page's own rule still wins where it has one.
+ */
+select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: inherit;
+  accent-color: var(--accent);
+}
+select:focus { outline: none; border-color: var(--accent); }
+
+/*
+ * On a phone the links move under the title when they do not fit beside it,
+ * rather than squeezing the title into a column of single words or running
+ * off the edge. Inter at 15px is wider than the old 14px system font, and an
+ * owner sees five links.
+ */
+@media (max-width: 600px) {
+  header { flex-wrap: wrap; row-gap: 8px; }
+  header nav { flex-wrap: wrap; column-gap: 14px; row-gap: 4px; }
+}

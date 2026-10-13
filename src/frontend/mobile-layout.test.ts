@@ -59,8 +59,8 @@ test('every input is styled, not just the ones inside a known form', () => {
   );
   assert.match(
     html,
-    /\n\s*input\s*\{[^}]*color-scheme:\s*dark/,
-    'without color-scheme: dark the date picker icon is drawn black on black by the browser, and CSS cannot reach it',
+    /\n\s*input\s*\{[^}]*color-scheme:\s*light/,
+    'the date picker icon is drawn by the browser for whatever color-scheme says, and CSS cannot reach it -- it must match the light look (13 Oct 2026)',
   );
 });
 

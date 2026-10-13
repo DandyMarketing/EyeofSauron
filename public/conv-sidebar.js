@@ -37,17 +37,17 @@
     z-index: 20;
   }
   #conv-sidebar .cs-top { display: flex; align-items: center; gap: 8px; }
-  #conv-sidebar .cs-heading { flex: 1; font-size: 12px; font-weight: 600; color: var(--text-muted);
+  #conv-sidebar .cs-heading { flex: 1; font-size: 13px; font-weight: 600; color: var(--text-muted);
     text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; overflow: hidden; }
   #conv-sidebar .cs-icon {
     background: none; border: 1px solid var(--border); color: var(--text-muted);
     border-radius: 8px; width: 32px; height: 32px; padding: 0; cursor: pointer;
-    font: inherit; font-size: 15px; line-height: 1; flex-shrink: 0;
+    font: inherit; font-size: 16px; line-height: 1; flex-shrink: 0;
   }
   #conv-sidebar .cs-icon:hover { color: var(--accent); border-color: var(--accent); }
   #conv-sidebar .cs-new {
-    width: 100%; background: var(--accent); color: #000; border: none; border-radius: 8px;
-    padding: 9px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    width: 100%; background: var(--accent); color: var(--on-accent); border: none; border-radius: 8px;
+    padding: 9px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
   }
   #conv-sidebar .cs-list { flex: 1; overflow-y: auto; min-height: 0; margin: 0 -4px; }
   #conv-sidebar .cs-item { display: flex; align-items: center; gap: 2px; border-radius: 8px; margin-bottom: 2px; }
@@ -55,24 +55,24 @@
   #conv-sidebar .cs-item.current .cs-title { color: var(--accent); }
   #conv-sidebar .cs-open {
     flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--text);
-    font: inherit; font-size: 13px; line-height: 1.35; padding: 8px; cursor: pointer;
+    font: inherit; font-size: 14px; line-height: 1.35; padding: 8px; cursor: pointer;
   }
   #conv-sidebar .cs-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #conv-sidebar .cs-when { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  #conv-sidebar .cs-when { display: block; font-size: 13px; color: var(--text-muted); margin-top: 2px; }
   #conv-sidebar .cs-act {
     background: none; border: none; color: var(--text-muted); cursor: pointer;
-    font: inherit; font-size: 13px; min-width: 28px; min-height: 28px; padding: 4px;
+    font: inherit; font-size: 14px; min-width: 28px; min-height: 28px; padding: 4px;
   }
   #conv-sidebar .cs-act:hover { color: var(--accent); }
   #conv-sidebar .cs-act.cs-del:hover { color: var(--error); }
-  #conv-sidebar .cs-section { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); padding: 8px 8px 4px; }
+  #conv-sidebar .cs-section { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); padding: 8px 8px 4px; }
   #conv-sidebar .cs-pin svg { width: 14px; height: 14px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.8; }
   #conv-sidebar .cs-item:not(.pinned) .cs-pin { opacity: .45; }
   #conv-sidebar .cs-item:not(.pinned):hover .cs-pin { opacity: 1; }
   #conv-sidebar .cs-item.pinned .cs-pin { color: var(--accent); }
   #conv-sidebar .cs-item.pinned .cs-pin svg { fill: currentColor; }
-  #conv-sidebar .cs-empty { color: var(--text-muted); font-size: 13px; padding: 8px 4px; line-height: 1.5; }
-  #conv-sidebar .cs-note { font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border);
+  #conv-sidebar .cs-empty { color: var(--text-muted); font-size: 14px; padding: 8px 4px; line-height: 1.5; }
+  #conv-sidebar .cs-note { font-size: 13px; color: var(--text-muted); border-top: 1px solid var(--border);
     padding-top: 8px; line-height: 1.5; }
 
   /* Minimised on a laptop: a strip with expand and new, nothing else. */
@@ -94,7 +94,7 @@
       /* No transition until mounted: otherwise every page load on a phone
          shows the list sliding away. Added by mount() a frame later. */
       transform: translateX(-102%);
-      z-index: 60; box-shadow: 8px 0 30px rgba(0,0,0,.5);
+      z-index: 60; box-shadow: 8px 0 30px rgba(46,42,37,0.15);
     }
     #conv-sidebar.collapsed .cs-heading, #conv-sidebar.collapsed .cs-list,
     #conv-sidebar.collapsed .cs-note, #conv-sidebar.collapsed .cs-new { display: revert; }
@@ -116,12 +116,12 @@
       order: 3; flex-basis: 100%; margin-left: 0 !important; gap: 18px !important;
       overflow-x: auto; white-space: nowrap;
     }
-    #cs-overlay.show { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.45); }
+    #cs-overlay.show { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim); }
     #cs-menu {
       display: inline-flex; align-items: center; justify-content: center;
       background: none; border: 1px solid var(--border); color: var(--text);
       border-radius: 8px; width: 34px; height: 34px; padding: 0; margin-right: 2px;
-      font: inherit; font-size: 17px; cursor: pointer; flex-shrink: 0;
+      font: inherit; font-size: 18px; cursor: pointer; flex-shrink: 0;
     }
   }
   @media print { #conv-sidebar, #cs-menu, #cs-overlay { display: none !important; } }

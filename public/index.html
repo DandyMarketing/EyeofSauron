@@ -15,21 +15,11 @@
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
+<link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/theme.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  :root {
-    --bg: #0a0a0f;
-    --surface: #14141f;
-    --surface-hover: #1a1a2a;
-    --border: #2a2a3a;
-    --text: #e4e4ef;
-    --text-muted: #8888a0;
-    --accent: #e8933a;
-    --accent-dim: #c47520;
-    --error: #e84040;
-    --success: #40c060;
-  }
 
   /* `hidden` works through the BROWSER's stylesheet, so any author rule that
      sets display beats it. That cost a shipped bug once -- a panel with
@@ -40,7 +30,7 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
@@ -54,61 +44,61 @@
   }
   .logo {
     width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
-    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim) 60%, #5a2f08);
+    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim) 60%, #5a2f12);
   }
-  header h1 { font-size: 15px; font-weight: 600; }
-  .subtitle { font-size: 11px; color: var(--text-muted); }
-  header nav { margin-left: auto; display: flex; gap: 14px; font-size: 13px; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .subtitle { font-size: 13px; color: var(--text-muted); }
+  header nav { margin-left: auto; display: flex; gap: 14px; font-size: 14px; }
   header nav a { color: var(--text-muted); text-decoration: none; }
   header nav a.active, header nav a:hover { color: var(--accent); }
 
   main { max-width: 760px; margin: 0 auto; padding: 16px; }
 
-  .loading { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
+  .loading { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 15px; }
 
   /* --- venue switcher ------------------------------------------------- */
   .periods { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .period-chip {
-    padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    padding: 6px 12px; border-radius: 8px; font-size: 14px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
   }
-  .period-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
+  .period-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
   /* A caveat the figures cannot show — one fewer Saturday, or a month end with
      no matching date. Both land as a movement and neither is the business. */
   /* A bill-derived figure whose coverage is too low to mean anything. Said in
      words, never printed as a small percentage — an under-covered beverage cost
      of 2% looks like the best bar in Singapore. */
   .unusable { color: var(--text-muted); font-style: italic; }
-  .cov { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
-  .window-warn { color: var(--accent); font-size: 12px; line-height: 1.5; margin-top: 4px; }
+  .cov { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+  .window-warn { color: var(--accent); font-size: 13px; line-height: 1.5; margin-top: 4px; }
   .venues { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .venue-chip {
-    padding: 6px 12px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    padding: 6px 12px; border-radius: 999px; font-size: 14px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
   }
-  .venue-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
+  .venue-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
 
   /* --- the window label ----------------------------------------------- */
-  .window { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
+  .window { font-size: 14px; color: var(--text-muted); margin-bottom: 14px; }
   .window strong { color: var(--text); font-weight: 600; }
   .window .thin { color: var(--accent); }
 
   /* --- headline tiles -------------------------------------------------- */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
   .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-  .tile .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .tile .label { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
   .tile .value { font-size: 24px; font-weight: 600; line-height: 1.25; margin-top: 2px; }
-  .tile .delta { font-size: 12px; margin-top: 2px; }
-  .tile .hint { font-size: 11px; line-height: 1.35; color: var(--text-muted); margin-top: 6px; }
+  .tile .delta { font-size: 13px; margin-top: 2px; }
+  .tile .hint { font-size: 13px; line-height: 1.35; color: var(--text-muted); margin-top: 6px; }
   .up { color: var(--success); }
   .down { color: var(--error); }
   .flat, .unknown { color: var(--text-muted); }
 
   /* --- the week's line -------------------------------------------------- */
   .chart { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
-  .chart h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .chart h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   .chart svg { width: 100%; height: auto; display: block; }
-  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); margin: -4px 0 6px; }
+  .legend { display: flex; gap: 14px; font-size: 13px; color: var(--text-muted); margin: -4px 0 6px; }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   /* The period share, next to the colour it belongs to. */
   .legend b { color: var(--text); font-weight: 600; }
@@ -116,8 +106,8 @@
   svg.fc { width: 100%; height: auto; display: block; padding: 4px 6px 0; }
   /* The track record. Small, because it is the footnote to the bars -- but a
      table, because four numbers per row is past what a sentence can carry. */
-  table.acc { font-size: 12px; }
-  table.acc th { font-size: 10px; padding: 6px 8px; }
+  table.acc { font-size: 13px; }
+  table.acc th { font-size: 13px; padding: 6px 8px; }
   table.acc td { padding: 6px 8px; }
   table.acc td:nth-child(2), table.acc td:nth-child(3), table.acc th:nth-child(2), table.acc th:nth-child(3) {
     text-align: right; font-variant-numeric: tabular-nums;
@@ -125,12 +115,12 @@
 
 
   /* --- detail table ----------------------------------------------------- */
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
-  th { font-weight: 600; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  th { font-weight: 600; font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
   td:last-child, th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
-  .panel > h2 { font-size: 13px; font-weight: 600; padding: 12px 14px 8px; }
+  .panel > h2 { font-size: 14px; font-weight: 600; padding: 12px 14px 8px; }
   .panel table tr:last-child td { border-bottom: none; }
 
   /* The definition line. Smaller, muted, visibly subordinate to the figures --
@@ -141,7 +131,7 @@
     font-style: normal; padding: 8px 14px 12px;
   }
   /* A figure that will still move. Amber, not red: nothing is wrong with it. */
-  .figure-note.provisional { color: #f0a050; padding-top: 0; }
+  .figure-note.provisional { color: var(--warn); padding-top: 0; }
 
   /* --- forward book ------------------------------------------------------ */
   .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; }
@@ -149,21 +139,21 @@
     flex: 0 0 auto; min-width: 58px; text-align: center;
     border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; background: var(--bg);
   }
-  .book .day .dow { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-  .book .day .n { font-size: 17px; font-weight: 600; }
+  .book .day .dow { font-size: 13px; color: var(--text-muted); text-transform: uppercase; }
+  .book .day .n { font-size: 18px; font-weight: 600; }
   .book .day.today { border-color: var(--accent); }
   /* A day the venue is shut. Said in words, never as a 0 -- Firangi closes
      every Sunday, and a zero in a row of covers reads as nobody having booked.
      Same rule as plotting a closed day as a gap rather than a zero bar. */
   .book .day.shut { opacity: 0.55; }
-  .book .day .shut-label { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+  .book .day .shut-label { font-size: 13px; font-weight: 500; color: var(--text-muted); }
   /* THE BASIS, ON EVERY CELL. A settled day, a point-in-time snapshot and a
      forward booking are three different measurements, and a strip of bare
      numbers invites the comparison that treats them as one. Past days are
      dimmed so the eye reads left-to-right as done → now → promised. */
-  .book .day .basis { font-size: 9px; letter-spacing: 0.04em; color: var(--text-muted); margin-top: 2px; }
+  .book .day .basis { font-size: 13px; letter-spacing: 0.04em; color: var(--text-muted); margin-top: 2px; }
   .book .day.past { opacity: 0.72; }
-  .book .day.now { border-color: var(--accent); background: rgba(232,147,58,0.07); }
+  .book .day.now { border-color: var(--accent); background: rgba(176,96,42,0.07); }
   .book .day.now .n { color: var(--accent); }
   /* Tonight, split three ways. Not a table: three figures that sum to the
      headline above them, which is a shape a reader can check at a glance. */
@@ -172,20 +162,20 @@
     flex: 1 1 0; border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 6px; text-align: center; background: var(--bg); min-width: 0;
   }
-  .nowbar b { display: block; font-size: 18px; font-weight: 600; }
-  .nowbar span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .nowbar b { display: block; font-size: 19px; font-weight: 600; }
+  .nowbar span { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
   /* An estimate must not look like a measurement — but only the two that ARE
      estimates. Where seating is not recorded, "eaten" and "in the room" are
      read off the diary; "still to come" is the book and is exactly as solid as
      it ever was. Greying all three would retract a figure that is fine. */
   .nowbar div.est b { color: var(--text-muted); }
-  .stale { color: #e8933a; }
+  .stale { color: var(--accent); }
   .figure-note a { color: var(--accent); }
   /* One heading over the monthly panels. The page carries three periods and a
      reader on a phone will not track three — introducing the two monthly ones
      together means the context switch happens once. */
   .section-head {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em;
     color: var(--text-muted); margin: 22px 0 8px 2px;
   }
   .section-head strong { color: var(--text); font-weight: 600; text-transform: none; letter-spacing: 0; }
@@ -194,15 +184,15 @@
   /* --- advice ------------------------------------------------------------ */
   .rec { border-bottom: 1px solid var(--border); padding: 12px 14px; }
   .rec:last-child { border-bottom: none; }
-  .rec-venue { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  .rec-headline { font-size: 14px; font-weight: 600; color: var(--accent); margin: 2px 0 6px; }
-  .rec-body { font-size: 13px; }
+  .rec-venue { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .rec-headline { font-size: 15px; font-weight: 600; color: var(--accent); margin: 2px 0 6px; }
+  .rec-body { font-size: 14px; }
   .rec-body p { margin-bottom: 8px; }
   /* `display: block; overflow-x: auto` so a wide recommendation table scrolls
      itself instead of widening the whole page on a phone. These tables carry
      no min-width, so the table may be its own scrolling box -- the admin
      page's .table-scroll wrapper is only needed where a minimum exists. */
-  .rec-body table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; display: block; overflow-x: auto; }
+  .rec-body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: 100%; display: block; overflow-x: auto; }
   .rec-body th, .rec-body td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
   .rec-body th { background: var(--surface-hover); }
   .rec-body svg { max-width: 100%; height: auto; }
@@ -211,7 +201,7 @@
   .rec-body a { color: var(--accent); }
 
 
-  .empty { color: var(--text-muted); font-size: 13px; padding: 14px; }
+  .empty { color: var(--text-muted); font-size: 14px; padding: 14px; }
 
   /* --- the advice, as one line that opens in place ---------------------- */
   /* WEEKLY content in a DAILY surface. As a full panel it meant scrolling past
@@ -225,20 +215,20 @@
   .advice.stale { border-left-color: var(--error); }
   .advice > summary {
     display: grid; grid-template-columns: 1fr auto; align-items: center;
-    gap: 2px 10px; padding: 9px 14px; cursor: pointer; list-style: none; font-size: 13px;
+    gap: 2px 10px; padding: 9px 14px; cursor: pointer; list-style: none; font-size: 14px;
   }
   .advice > summary::-webkit-details-marker { display: none; }
   .advice > summary::after {
     content: '›'; grid-column: 2; grid-row: 1 / span 2;
-    color: var(--text-muted); font-size: 18px; line-height: 1;
+    color: var(--text-muted); font-size: 19px; line-height: 1;
   }
   .advice[open] > summary::after { content: '⌄'; }
   .advice-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .advice-count {
-    background: var(--accent); color: #1a1008; font-weight: 700; font-size: 11px;
+    background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 13px;
     border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
   }
-  .advice-when { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+  .advice-when { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
   /* Two lines at most. A long headline is a reason to open it, not to let the
      collapsed line grow back into the panel this replaced. */
   .advice-head {
@@ -257,7 +247,7 @@
     position: fixed; left: 0; right: 0; bottom: 62px; z-index: 19;
     max-height: 70vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
     background: var(--surface); border-top: 1px solid var(--border);
-    box-shadow: 0 -12px 28px rgba(0,0,0,0.5);
+    box-shadow: 0 -12px 28px rgba(46,42,37,0.15);
     padding: 14px 16px 18px;
   }
   .ask-close {
@@ -265,16 +255,16 @@
     background: none; border: none; color: var(--text-muted);
     font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px;
   }
-  .ask-q { font-size: 15px; font-weight: 600; margin-bottom: 2px; overflow-wrap: anywhere; }
+  .ask-q { font-size: 16px; font-weight: 600; margin-bottom: 2px; overflow-wrap: anywhere; }
   /* Shown, not hidden. The venue and period were appended to the question, and
      adding to somebody's words without showing them is how a figure ends up
      answering a question nobody asked. */
-  .ask-ctx { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
-  .ask-progress { font-size: 13px; color: var(--accent); padding: 6px 0; }
-  .ask-answer { font-size: 14px; line-height: 1.6; }
+  .ask-ctx { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+  .ask-progress { font-size: 14px; color: var(--accent); padding: 6px 0; }
+  .ask-answer { font-size: 15px; line-height: 1.6; }
   .ask-answer p { margin-bottom: 8px; }
   .ask-answer table {
-    border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%;
+    border-collapse: collapse; margin: 8px 0; font-size: 13px; width: 100%;
     display: block; overflow-x: auto;
   }
   .ask-answer th, .ask-answer td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
@@ -310,7 +300,7 @@
   .ask-size {
     position: sticky; top: 0; float: right; margin: -6px 2px 0 0;
     background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted);
-    font-size: 11px; line-height: 1; cursor: pointer; padding: 5px 8px;
+    font-size: 13px; line-height: 1; cursor: pointer; padding: 5px 8px;
   }
   @media (min-width: 1100px) {
     /* A full-height column has nothing to expand into. */
@@ -320,7 +310,7 @@
     body.answer-open .ask-sheet {
       top: 0; bottom: 0; left: auto; right: 0; width: var(--side-w);
       max-height: none; border-top: none; border-left: 1px solid var(--border);
-      box-shadow: -12px 0 28px rgba(0,0,0,0.35); padding: 18px 22px 24px; z-index: 21;
+      box-shadow: -12px 0 28px rgba(46,42,37,0.15); padding: 18px 22px 24px; z-index: 21;
     }
     body.answer-open .askbar { right: var(--side-w); }
   }
@@ -331,14 +321,14 @@
      of new guests. */
   .pie-row { display: flex; gap: 14px; align-items: center; padding: 4px 14px 10px; flex-wrap: wrap; }
   .pie { width: 104px; height: 104px; flex-shrink: 0; }
-  .pie-key { flex: 1; min-width: 160px; font-size: 13px; }
-  .pie-total { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
-  .pie-total span { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+  .pie-key { flex: 1; min-width: 160px; font-size: 14px; }
+  .pie-total { font-size: 21px; font-weight: 600; margin-bottom: 6px; }
+  .pie-total span { font-size: 13px; color: var(--text-muted); font-weight: 400; margin-left: 6px; }
   .slice { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
   .slice i { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
   .slice-label { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
   .slice-n { margin-left: auto; font-variant-numeric: tabular-nums; }
-  .slice-pct { color: var(--text-muted); font-size: 11px; min-width: 38px; text-align: right; }
+  .slice-pct { color: var(--text-muted); font-size: 13px; min-width: 38px; text-align: right; }
   /* --- the ask bar, pinned ------------------------------------------------ */
   /* The only unbounded thing on the page, and it was last after five panels.
      Fixed to the VIEWPORT rather than the document, so it rides above the
@@ -350,13 +340,13 @@
   }
   .askbar-inner { display: flex; gap: 8px; max-width: 760px; margin: 0 auto; }
   .askbar input {
-    flex: 1; min-width: 0; padding: 11px 14px; font-size: 16px;
+    flex: 1; min-width: 0; padding: 11px 14px; font-size: 17px;
     background: var(--bg); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
   }
   .askbar input:focus { outline: none; border-color: var(--accent); }
   .askbar button {
-    padding: 11px 16px; font-size: 14px; border: none; border-radius: 10px;
-    background: var(--accent); color: #1a1008; font-weight: 600; cursor: pointer;
+    padding: 11px 16px; font-size: 15px; border: none; border-radius: 10px;
+    background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer;
   }
   /* Room for the bar, so it never covers the last panel. */
   main { padding-bottom: 86px; }
@@ -371,33 +361,33 @@
     /* Three tiles in two columns leaves the last one stranded beside a hole.
        Let an odd last tile take the full width instead. */
     .tiles .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
-    .tile .value { font-size: 20px; }
+    .tile .value { font-size: 21px; }
   }
   /* --- export: period and format chosen at export time (Khai, 12 Oct 2026) --- */
   .export-chip {
-    margin-left: auto; padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    margin-left: auto; padding: 6px 12px; border-radius: 8px; font-size: 14px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text);
   }
   .export-chip:hover { border-color: var(--accent); color: var(--accent); }
-  #export-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.5); }
+  #export-overlay { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }
   #export-sheet {
     position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(360px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+    border-radius: 12px; padding: 16px; box-shadow: 0 10px 30px rgba(46,42,37,0.15);
   }
-  #export-sheet h3 { font-size: 15px; margin-bottom: 10px; }
-  #export-sheet .ex-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 6px; }
+  #export-sheet h3 { font-size: 16px; margin-bottom: 10px; }
+  #export-sheet .ex-label { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 6px; }
   #export-sheet .ex-opts { display: flex; flex-wrap: wrap; gap: 6px; }
   #export-sheet .ex-opt {
-    padding: 7px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    padding: 7px 12px; border-radius: 8px; font-size: 14px; cursor: pointer;
     border: 1px solid var(--border); background: var(--bg); color: var(--text-muted);
   }
-  #export-sheet .ex-opt.on { border-color: var(--accent); color: var(--accent); background: rgba(232,147,58,0.08); }
-  #export-sheet .ex-hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
+  #export-sheet .ex-opt.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
+  #export-sheet .ex-hint { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
   #export-sheet .ex-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  #export-sheet .ex-row button { padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
-  #export-sheet .ex-row .ex-go { background: var(--accent); color: #17110a; border-color: var(--accent); font-weight: 600; }
-  #export-sheet .ex-msg { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+  #export-sheet .ex-row button { padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
+  #export-sheet .ex-row .ex-go { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  #export-sheet .ex-msg { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
 
   /*
    * PDF = the dashboard as it looks, through the browser's print. The ask bar,
@@ -866,8 +856,8 @@ function tile(label, value, deltaHtml, hint) {
  * numbers -- just not one per bar. The switch is on the DATA, not the period
  * name, so a part-week and a part-month both land in the right layout.
  */
-const FOOD_FILL = '#e8933a';
-const BEV_FILL = '#3fa9a0';
+const FOOD_FILL = 'var(--accent)';
+const BEV_FILL = '#2a8780';
 
 function chartPanel(v) {
   const days = v.daily;
@@ -893,8 +883,8 @@ function chartPanel(v) {
     [0, 0.5, 1].forEach(f => {
       const y = padTop + plot - f * plot;
       svg += '<line x1="' + padX + '" y1="' + y + '" x2="' + (W - padX) + '" y2="' + y +
-             '" stroke="#2a2a3a" stroke-width="0.5"></line>' +
-             '<text x="' + (padX - 2) + '" y="' + (y + 3) + '" text-anchor="end" font-size="7" fill="#8888a0">' +
+             '" stroke="var(--border)" stroke-width="0.5"></line>' +
+             '<text x="' + (padX - 2) + '" y="' + (y + 3) + '" text-anchor="end" font-size="7" fill="var(--text-muted)">' +
              (f === 0 ? '0' : k(max * f)) + '</text>';
     });
   }
@@ -908,7 +898,7 @@ function chartPanel(v) {
       // Said in words. A zero bar on a closed day reads as a collapse, and
       // Firangi closes every Sunday.
       svg += '<text x="' + mid + '" y="' + (padTop + plot - 3) + '" text-anchor="middle" ' +
-             'font-size="' + (dense ? 6 : 8) + '" fill="#8888a0">' + (dense ? '–' : 'closed') + '</text>';
+             'font-size="' + (dense ? 6 : 8) + '" fill="var(--text-muted)">' + (dense ? '–' : 'closed') + '</text>';
     } else {
       const h = Math.max(1, (d.gross_sales / max) * plot);
       const foodH = d.gross_sales > 0 ? h * ((d.food_sales ?? 0) / d.gross_sales) : 0;
@@ -924,7 +914,7 @@ function chartPanel(v) {
 
       if (!dense) {
         svg += '<text x="' + mid + '" y="' + (top - 4) + '" text-anchor="middle" ' +
-               'font-size="9" fill="#e4e4ef">' + k(d.gross_sales) + '</text>';
+               'font-size="9" fill="var(--text)">' + k(d.gross_sales) + '</text>';
 
         /**
          * THE SHARE, INSIDE ITS OWN SEGMENT.
@@ -946,8 +936,8 @@ function chartPanel(v) {
                  'font-size="7.5" font-weight="600" fill="' + fill + '">' +
                  Math.round(part / d.gross_sales * 100) + '%</text>';
         };
-        svg += share(d.beverage_sales ?? 0, top, bevH, '#06302e');
-        svg += share(d.food_sales ?? 0, top + bevH, foodH, '#3a1f05');
+        svg += share(d.beverage_sales ?? 0, top, bevH, '#ffffff');
+        svg += share(d.food_sales ?? 0, top + bevH, foodH, 'var(--on-accent)');
       }
     }
 
@@ -957,7 +947,7 @@ function chartPanel(v) {
     if (!dense || i % 7 === 0 || i === days.length - 1) {
       const date = new Date(d.date + 'T00:00:00Z');
       svg += '<text x="' + mid + '" y="' + (H - 5) + '" text-anchor="middle" ' +
-             'font-size="' + (dense ? 8 : 10) + '" fill="#8888a0">' +
+             'font-size="' + (dense ? 8 : 10) + '" fill="var(--text-muted)">' +
              esc(dense ? String(date.getUTCDate())
                        : date.toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' })) +
              '</text>';
@@ -1170,16 +1160,16 @@ function forecastPanel(payload, v) {
     const cx = x + w / 2;
     const dow = new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-SG', { weekday: 'short', timeZone: 'UTC' });
 
-    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 25) + '" text-anchor="middle" font-size="10" fill="#8888a0">' + esc(dow) + '</text>';
+    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 25) + '" text-anchor="middle" font-size="10" fill="var(--text-muted)">' + esc(dow) + '</text>';
 
     if (d.closed) {
-      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" fill="#8888a0">closed</text>';
+      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" fill="var(--text-muted)">closed</text>';
       return;
     }
 
     // What is booked: the fact, drawn solid.
     const bTop = y(d.booked);
-    svg += '<rect x="' + x + '" y="' + bTop + '" width="' + w + '" height="' + (padTop + plot - bTop) + '" fill="#3fa9a0"></rect>';
+    svg += '<rect x="' + x + '" y="' + bTop + '" width="' + w + '" height="' + (padTop + plot - bTop) + '" fill="#2a8780"></rect>';
     /**
      * THE BOOKED NUMBER, ALWAYS. Inside the solid bar where it fits; where the
      * book is too small for that, just above it in light text -- a short bar is
@@ -1187,21 +1177,21 @@ function forecastPanel(payload, v) {
      * numbers on it" is the complaint this page was rebuilt around.
      */
     if (padTop + plot - bTop >= 12) {
-      svg += '<text x="' + cx + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#06302e">' + num(d.booked) + '</text>';
+      svg += '<text x="' + cx + '" y="' + (padTop + plot - 4) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#ffffff">' + num(d.booked) + '</text>';
     } else {
-      svg += '<text x="' + cx + '" y="' + (bTop - 3) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#9fd8d2">' + num(d.booked) + '</text>';
+      svg += '<text x="' + cx + '" y="' + (bTop - 3) + '" text-anchor="middle" font-size="8" font-weight="600" fill="#1f6f68">' + num(d.booked) + '</text>';
     }
 
     if (d.mid === null) {
       // No forecast: the book stands alone, and says why in the note.
-      svg += '<text x="' + cx + '" y="' + (bTop - 5) + '" text-anchor="middle" font-size="10" fill="#8888a0">—</text>';
+      svg += '<text x="' + cx + '" y="' + (bTop - 5) + '" text-anchor="middle" font-size="10" fill="var(--text-muted)">—</text>';
       return;
     }
 
     // What usually arrives on top of it, lighter, because it is an estimate.
     if (d.mid > d.booked) {
       svg += '<rect x="' + x + '" y="' + y(d.mid) + '" width="' + w + '" height="' + (bTop - y(d.mid)) +
-             '" fill="#3fa9a0" opacity="0.32"></rect>';
+             '" fill="#2a8780" opacity="0.32"></rect>';
     } else if (d.mid < d.booked) {
       /**
        * BELOW THE BOOK, which is real: on some nights more people cancel or do
@@ -1210,38 +1200,38 @@ function forecastPanel(payload, v) {
        * smaller than it is.
        */
       svg += '<line x1="' + (x - 2) + '" y1="' + y(d.mid) + '" x2="' + (x + w + 2) + '" y2="' + y(d.mid) +
-             '" stroke="#e8933a" stroke-width="1.5"></line>';
+             '" stroke="var(--accent)" stroke-width="1.5"></line>';
     }
 
     // The likely range, as a whisker.
-    svg += '<line x1="' + cx + '" y1="' + y(d.hi) + '" x2="' + cx + '" y2="' + y(d.lo) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>' +
-           '<line x1="' + (cx - 4) + '" y1="' + y(d.hi) + '" x2="' + (cx + 4) + '" y2="' + y(d.hi) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>' +
-           '<line x1="' + (cx - 4) + '" y1="' + y(d.lo) + '" x2="' + (cx + 4) + '" y2="' + y(d.lo) + '" stroke="#e4e4ef" stroke-width="1" opacity="0.7"></line>';
+    svg += '<line x1="' + cx + '" y1="' + y(d.hi) + '" x2="' + cx + '" y2="' + y(d.lo) + '" stroke="var(--text)" stroke-width="1" opacity="0.7"></line>' +
+           '<line x1="' + (cx - 4) + '" y1="' + y(d.hi) + '" x2="' + (cx + 4) + '" y2="' + y(d.hi) + '" stroke="var(--text)" stroke-width="1" opacity="0.7"></line>' +
+           '<line x1="' + (cx - 4) + '" y1="' + y(d.lo) + '" x2="' + (cx + 4) + '" y2="' + y(d.lo) + '" stroke="var(--text)" stroke-width="1" opacity="0.7"></line>';
 
     // Last year's method, beside the bar.
     if (d.last_year !== null) {
-      svg += '<circle cx="' + (x + w + 7) + '" cy="' + y(d.last_year) + '" r="3" fill="none" stroke="#a0a0b8" stroke-width="1.2"></circle>';
+      svg += '<circle cx="' + (x + w + 7) + '" cy="' + y(d.last_year) + '" r="3" fill="none" stroke="var(--text-muted)" stroke-width="1.2"></circle>';
     }
 
     // The forecast itself, above everything, as the number to read.
     const labelY = Math.min(y(d.hi), bTop) - 6;
-    svg += '<text x="' + cx + '" y="' + labelY + '" text-anchor="middle" font-size="10.5" font-weight="700" fill="#e8933a">' +
+    svg += '<text x="' + cx + '" y="' + labelY + '" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--accent)">' +
            num(d.mid) + (d.beyond_history ? ' ⚑' : '') + '</text>';
 
     // The range in words under the day, because a whisker has no numbers on it.
-    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 13) + '" text-anchor="middle" font-size="8" fill="#8888a0">' +
+    svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 13) + '" text-anchor="middle" font-size="8" fill="var(--text-muted)">' +
            num(d.lo) + '–' + num(d.hi) + '</text>';
     if (d.holiday) {
-      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 3) + '" text-anchor="middle" font-size="7.5" font-weight="600" fill="#e8933a">holiday</text>';
+      svg += '<text x="' + (padX + i * bw + bw / 2) + '" y="' + (H - 3) + '" text-anchor="middle" font-size="7.5" font-weight="600" fill="var(--accent)">holiday</text>';
     }
   });
 
   const legend =
     '<div class="legend" style="padding:2px 14px 8px;flex-wrap:wrap;row-gap:4px;margin:0">' +
-      '<span><i style="background:#3fa9a0"></i>booked</span>' +
-      '<span><i style="background:#3fa9a0;opacity:0.32"></i>expected to arrive</span>' +
-      '<span><i style="background:none;border-left:1px solid #e4e4ef;border-radius:0;width:1px"></i>likely range</span>' +
-      '<span><i style="background:none;border:1.2px solid #a0a0b8;border-radius:50%"></i>last year’s pattern</span>' +
+      '<span><i style="background:#2a8780"></i>booked</span>' +
+      '<span><i style="background:#2a8780;opacity:0.32"></i>expected to arrive</span>' +
+      '<span><i style="background:none;border-left:1px solid var(--text);border-radius:0;width:1px"></i>likely range</span>' +
+      '<span><i style="background:none;border:1.2px solid var(--text-muted);border-radius:50%"></i>last year’s pattern</span>' +
     '</div>';
 
   /**
@@ -1487,8 +1477,8 @@ function retentionPanel(payload, v) {
    */
   const total = r.counts.booked_guests;
   const slices = [
-    { label: 'New to the group', n: r.counts.new_to_group, fill: '#e8933a' },
-    { label: 'Been here before', n: r.counts.returning_here, fill: '#3fa9a0' },
+    { label: 'New to the group', n: r.counts.new_to_group, fill: 'var(--accent)' },
+    { label: 'Been here before', n: r.counts.returning_here, fill: '#2a8780' },
     { label: 'From a sister venue', n: r.counts.crossed_from_sister, fill: '#7a6ff0' },
   ].filter(x => x.n > 0);
 

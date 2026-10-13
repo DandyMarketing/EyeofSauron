@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 62 migrations, 25 query tools, 11 ingest sources, 1,583 tests.
+started.** 62 migrations, 25 query tools, 11 ingest sources, 1,585 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1071,6 +1071,26 @@ list, saved on the server so they match across devices.
 
 **Not built:** reading Done / Stuck back into the brief.
 
+### The look: warm light, Inter, settled 13 Oct 2026
+
+Khai: "a softer feeling UI in terms of colour, font and font size." Chosen from
+three looks shown side by side: cream page, white cards, warm dark text, a
+terracotta accent, **Inter**, **15px body and nothing under 13px**. It lives in
+ONE file, `public/theme.css`, which every page loads before its own styles;
+pages use its variables (`--bg`, `--surface`, `--text`, `--accent`,
+`--on-accent`...) rather than colour codes, and `pages.test.ts` fails on a page
+that skips it or defines its own `--bg`. Inter is vendored in
+`public/vendor/fonts` -- never a font CDN. Text colours were measured against
+white (WCAG): body 14.3, muted 5.5, accent 4.6.
+
+**Charts are stored as SVG**, inside recommendations and saved chats, so the
+ones drawn for the old dark look carried near-white text that vanishes on
+cream. `relightChart()` (`src/ai/chart-svg.ts`) repaints them colour for colour
+where they are served -- exact, because the old renderer used a fixed set of
+values, and the only option, because the SVG is all that was kept. The series
+palette keeps each slot's hue (orange, blue, green, purple, gold, red), each
+darkened to hold 3:1 on white.
+
 ### Report an issue: built 13 Oct 2026
 
 With Sauron live with the team, Khai: "a button, report this issue, that sends
@@ -1144,7 +1164,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,583 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,585 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
