@@ -292,7 +292,10 @@ export const PLAYBOOK: PlaybookRow[] = [
   {
     key: 'owners_and_deadlines',
     stage: 'follow_through',
-    decision: 'A name against every item.',
+    // "A name against every item" was read as the DJ's NAME for the task "book
+    // the rooftop act", so the decision could never settle while the act was
+    // unbooked (Khai, 13 Oct 2026). It is about WHO and WHEN, nothing else.
+    decision: 'A person who owns every task, and a date for each. Only who and when: a task whose own subject is not known yet (which DJ, which supplier) still counts once it has an owner and a date.',
     ask: 'Who does each of these, and by when?',
     weak: '"The team will handle it."',
     challenge:

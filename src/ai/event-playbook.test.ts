@@ -380,3 +380,11 @@ test('a parked task stays parked, and a reply asks at most one question', () => 
   assert.match(EVENT_AGENT_PROMPT, /Parked tasks with an owner and a date\s+do NOT stop it being ready/);
   assert.match(EVENT_AGENT_PROMPT, /"Prepare the\s+brief"[\s\S]*"Create this\s+event"/);
 });
+
+test('owners and deadlines is about who and when, not the name of what the task is about', () => {
+  // Khai, 13 Oct 2026: "A name against every item" was read as the DJ's name.
+  const row = PLAYBOOK.find(r => r.key === 'owners_and_deadlines')!;
+  assert.doesNotMatch(row.decision, /^A name against every item/);
+  assert.match(row.decision, /A person who owns every task, and a date/);
+  assert.match(row.decision, /which DJ/);
+});

@@ -291,6 +291,7 @@
     border: 1px solid var(--border); background: none; color: var(--text-muted);
   }
   .pg-row .pg-mark:hover { border-color: var(--accent); color: var(--accent); }
+  .not-ready .nr-mark { margin-left: 6px; padding: 2px 10px; font-size: 12px; }
   .pg-row .sum { color: var(--text-muted); }
   .pg-note { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
   .pg-busy { opacity: .6; }
@@ -956,11 +957,20 @@ async function prepareDraft(force) {
         '<ul>' + blocking.map(o => {
           const re = (p.reopened || []).find(r => r.key === o.key);
           const why = o.partial ? 'missing ' + o.partial.missing : re ? 'reopened: ' + re.why : o.hint;
-          return '<li><strong>' + escapeHtml(o.label) + '</strong>' + (why ? ' — ' + escapeHtml(why) : '') + '</li>';
+          // Your word beats the board's reading: one tap marks it decided.
+          return '<li><strong>' + escapeHtml(o.label) + '</strong>' + (why ? ' — ' + escapeHtml(why) : '') +
+            (conversationId ? ' <button class="secondary nr-mark" data-key="' + escapeHtml(o.key) + '">It is decided</button>' : '') + '</li>';
         }).join('') + '</ul>' +
         (p.next ? '<p>Next: <strong>' + escapeHtml(p.next.label) + '</strong>.</p>' : '') +
         '<button class="secondary anyway">Prepare a draft anyway</button></div>');
       el.querySelector('.anyway').addEventListener('click', (e) => { e.target.disabled = true; prepareDraft(true); });
+      el.querySelectorAll('.nr-mark').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true; b.textContent = 'Marked';
+        await markDecision(b.dataset.key, true);
+        // Once nothing blocking is left, carry straight on to the brief.
+        const left = (lastProgress?.open || []).filter(o => o.blocking);
+        if (left.length === 0) { el.remove(); prepareDraft(); }
+      }));
       return;
     }
   }

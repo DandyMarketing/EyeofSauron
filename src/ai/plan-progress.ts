@@ -66,7 +66,7 @@ export const DECISION_HINTS: Record<string, string> = {
   alternative_channels: 'Borrowed trust: communities, clubs, concierges, institutions',
   content_plan: 'Every post with a date: what goes out when',
   direct_outreach: 'Who gets a personal message, and on which days',
-  owners_and_deadlines: 'A named person and a date against every task',
+  owners_and_deadlines: 'A person and a date against every task',
   abort_condition: 'Bookings needed by when, and what we do if short',
 };
 
