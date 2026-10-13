@@ -45,7 +45,7 @@ import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
 import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
-import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
+import { listPlanningBoards, readBoardForPlan, readPeople, readInactiveNames, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -1474,7 +1474,9 @@ app.post('/api/plan/monday/preview', async (c) => {
       ]);
 
       const boardUsers = users.filter(u => board.subscribers.includes(u.id));
-      const items = buildItems({ steps: board.template, deadlines, tasks: grouped, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date });
+      const known = new Set(users.map(u => Number(u.id)));
+      const inactive = await readInactiveNames([...new Set(board.template.flatMap(t => [...t.owner_ids, ...t.assigned_ids]))].filter(id => !known.has(id)));
+      const items = buildItems({ steps: board.template, deadlines, tasks: grouped, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date, inactive });
       const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
       const exists = !!there;
       const key = (n: string) => n.trim().toLowerCase();

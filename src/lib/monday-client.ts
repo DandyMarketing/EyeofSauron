@@ -222,6 +222,23 @@ export async function readPeople(): Promise<{ users: MondayUser[]; me: MondayUse
 }
 
 /**
+ * Names of people no longer active on Monday. They are not in the normal user
+ * list, so a template step that still carries one can only say "a person"
+ * unless they are looked up here. Best effort: a failure names nobody.
+ */
+export async function readInactiveNames(ids: number[]): Promise<Map<number, string>> {
+  if (ids.length === 0) return new Map();
+  try {
+    const d = await gql<{ users: Array<{ id: string; name: string }> }>(
+      'query ($ids: [ID!]) { users(ids: $ids, non_active: true) { id name } }', { ids },
+    );
+    return new Map((d.users ?? []).map(u => [Number(u.id), u.name]));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
  * Create the group and its items, in order -- or FINISH a group already there.
  *
  * Items are created one after another, each placed after the last, because

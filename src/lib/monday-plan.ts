@@ -448,6 +448,8 @@ export function buildItems(input: {
   today: string;
   start: string;
   end: string;
+  /** Names of deactivated Monday users, by id, so a flag can say who. */
+  inactive?: Map<number, string>;
 }): PreviewItem[] {
   const nameOf = new Map(input.users.map(u => [Number(u.id), u.name]));
   const label = (ids: number[]) => ids.map(id => nameOf.get(id) ?? `#${id}`).join(', ');
@@ -461,9 +463,15 @@ export function buildItems(input: {
     const d = byIndex.get(i);
     const due = d?.due && /^\d{4}-\d{2}-\d{2}$/.test(d.due) ? d.due : null;
     const owners = active(s.owner_ids), assigned = active(s.assigned_ids);
-    const gone = s.owner_ids.length + s.assigned_ids.length - owners.length - assigned.length;
+    const goneIds = [...new Set([...s.owner_ids, ...s.assigned_ids].filter(id => !nameOf.has(id)))];
     const flags = deadlineFlags(due, d?.phase ?? 'before', input.today, input.start, input.end);
-    if (gone) flags.push(`${gone === 1 ? 'A person' : `${gone} people`} on the board's template ${gone === 1 ? 'is' : 'are'} no longer active on Monday -- left off`);
+    if (goneIds.length) {
+      // Named where Monday will say who, so the fix is obvious: the person is
+      // on this step of the board's own Event Template, and only the team can
+      // take them off it there (13 Oct 2026: "again cannot find the person").
+      const who = goneIds.map(id => input.inactive?.get(id) ?? 'a person').join(', ');
+      flags.push(`${who} ${goneIds.length === 1 ? 'is' : 'are'} no longer active on Monday but still on this step in the board's Event Template -- left off here. Replace them on that step in Monday to clear this.`);
+    }
     return {
       name: s.name.slice(0, 255),
       source: 'template',

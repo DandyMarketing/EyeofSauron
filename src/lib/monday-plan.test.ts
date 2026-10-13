@@ -219,7 +219,16 @@ test('a person no longer active on Monday is left off a template step and said',
   });
   assert.deepEqual(items[0].owner_ids, [99680353]);
   assert.equal(items[0].owner_label, 'salvin');
-  assert.match(items[0].flags.join(), /A person on the board's template is no longer active on Monday -- left off/);
+  assert.match(items[0].flags.join(), /a person is no longer active on Monday but still on this step in the board's Event Template/);
+  // Named when Monday says who, so the team knows whom to replace on the template.
+  const named = buildItems({
+    steps: [{ name: '7. Submit GR Event Booking Rules Form', owner_ids: [48376983, 99680353], assigned_ids: [] }],
+    deadlines: [{ index: 0, due: '2026-11-01', phase: 'before', reason: 'r' }],
+    tasks: [], users: [salvin], sender: null,
+    today: '2026-10-13', start: '2026-12-31', end: '2026-12-31',
+    inactive: new Map([[48376983, 'Sanaya Soonawalla']]),
+  });
+  assert.match(named[0].flags.join(), /^Sanaya Soonawalla is no longer active on Monday .* Replace them on that step in Monday/);
 });
 
 // --- A re-send updates what is already there (Khai, 13 Oct 2026) ---
