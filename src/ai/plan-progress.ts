@@ -37,6 +37,10 @@ export const DECISION_LABELS: Record<string, string> = {
   alternative_channels: 'Other channels',
   content_plan: 'Content schedule',
   direct_outreach: 'Direct outreach',
+  staffing: 'Staffing',
+  photography: 'Photography',
+  food_menu: 'Food menu',
+  drink_menu: 'Drink menu',
   owners_and_deadlines: 'Owners & deadlines',
   abort_condition: 'Abort condition',
 };
@@ -66,16 +70,23 @@ export const DECISION_HINTS: Record<string, string> = {
   alternative_channels: 'Borrowed trust: communities, clubs, concierges, institutions',
   content_plan: 'Every post with a date: what goes out when',
   direct_outreach: 'Who gets a personal message, and on which days',
+  staffing: 'Extra people per room and shift, roster owner, the cost',
+  photography: 'Photos or video before or on the night: who, what, cost',
+  food_menu: 'What we serve, who writes it, sign-off date, fits price',
+  drink_menu: 'What we pour, who writes it, sign-off date, fits price',
   owners_and_deadlines: 'A person and a date against every task',
   abort_condition: 'Bookings needed by when, and what we do if short',
 };
 
+// Short, because six sit side by side under the bar on a phone and longer
+// names were cut to "The camp..." and "Running t...".
 export const STAGE_LABELS: Record<Stage, string> = {
-  point: 'The point',
-  shape: 'The shape',
-  money: 'The money',
-  campaign: 'The campaign',
-  follow_through: 'Follow-through',
+  point: 'Point',
+  shape: 'Shape',
+  money: 'Money',
+  campaign: 'Campaign',
+  running: 'The night',
+  follow_through: 'Follow-up',
 };
 
 const KEYS = PLAYBOOK.map(r => r.key);
@@ -259,7 +270,7 @@ export function summariseProgress(raw: unknown, rows: PlaybookRow[] = PLAYBOOK):
       ...(partials.has(row.key) ? { partial: partials.get(row.key)! } : {}),
     }));
 
-  const stageOrder: Stage[] = ['point', 'shape', 'money', 'campaign', 'follow_through'];
+  const stageOrder: Stage[] = ['point', 'shape', 'money', 'campaign', 'running', 'follow_through'];
   const stages = stageOrder.map(stage => {
     const applicable = rows.filter(row => row.stage === stage && !na.has(row.key));
     return {

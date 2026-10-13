@@ -415,3 +415,16 @@ test('the P&L has its own pass, with the same shape as the brief\'s', () => {
   assert.deepEqual(own, inBrief);
   assert.deepEqual(eventPnlTool().input_schema.required, ['pnl']);
 });
+
+test('running the night: staffing, photography and both menus are decisions, the rest are tasks', () => {
+  // Khai, 13 Oct 2026, going through the board's Event Template.
+  const running = PLAYBOOK.filter(r => r.stage === 'running').map(r => r.key);
+  assert.deepEqual(running, ['staffing', 'photography', 'food_menu', 'drink_menu']);
+  assert.match(PLAYBOOK.find(r => r.key === 'staffing')!.challenge, /SECURITY IS LABOUR/);
+  assert.match(PLAYBOOK.find(r => r.key === 'staffing')!.challenge, /marked a proposal, never "the standard ratio"/);
+  assert.equal(PLAYBOOK.find(r => r.key === 'food_menu')!.applies_when, 'the event sells food');
+  assert.match(PLAYBOOK.find(r => r.key === 'photography')!.challenge, /"No" is a valid answer/);
+  // Booking rules stay a task on the board's template, not a decision.
+  assert.equal(PLAYBOOK.some(r => /booking_rules/.test(r.key)), false);
+  assert.match(EVENT_AGENT_PROMPT, /RUNNING THE NIGHT/);
+});

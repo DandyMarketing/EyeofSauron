@@ -418,7 +418,28 @@ with 24 hours left, which is the most expensive time to think of it.
 
 ---
 
-## E. The follow-through
+## E. Running the night (added 13 Oct 2026)
+
+Khai, reading the plan against the Monday Event Template: four of its steps are
+decisions the plan must settle, and the rest of the template are tasks that
+need only an owner and a date. All four rows are blocking; the two menu rows
+apply only when the event sells food or drinks.
+
+- **`staffing`** — extra people per room and shift, who owns the roster, what it
+  costs. The cost belongs in the P&L, not as an afterthought to it.
+- **`photography`** — photos or video before or on the night: who, what, cost.
+- **`food_menu`** — what we serve, who writes it, the sign-off date, and that it
+  fits the price.
+- **`drink_menu`** — the same for what we pour.
+
+**Booking rules stay a task**, not a decision (Khai renames the template step
+"Booking Rules" on Monday). So do the template's other steps. The brief carries a
+"Running the night" section, and the progress board shows these under "The
+night".
+
+---
+
+## F. The follow-through
 
 **18. `owners_and_deadlines`** · blocking · universal
 

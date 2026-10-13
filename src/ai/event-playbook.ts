@@ -26,7 +26,7 @@
  * direction is worse than no agent.
  */
 
-export type Stage = 'point' | 'shape' | 'money' | 'campaign' | 'follow_through';
+export type Stage = 'point' | 'shape' | 'money' | 'campaign' | 'running' | 'follow_through';
 
 export interface PlaybookRow {
   key: string;
@@ -288,7 +288,63 @@ export const PLAYBOOK: PlaybookRow[] = [
     blocking_when: 'the product is not a walk-in product',
   },
 
-  // --- E. The follow-through ---------------------------------------------
+  // --- E. Running the night ---------------------------------------------
+  // Khai, 13 Oct 2026, going through the board's Event Template: staffing,
+  // photography and the food and drink menus need DISCUSSING, so they are
+  // decisions. Booking rules, artwork, printing, comms and the debrief need
+  // only an owner and a date, and the board's template already creates those.
+  {
+    key: 'staffing',
+    stage: 'running',
+    decision: 'Extra people beyond a normal night, per room and shift (bar, floor, kitchen, door, security), who builds the roster and by when, and what it costs.',
+    ask: 'Compared with a normal night, how many extra people do you need, in which rooms, from what time? Who builds the roster, and by when?',
+    weak: '"The usual team." Or labour simply missing from the costs.',
+    challenge:
+      'PROPOSE THE NUMBERS from what the plan already says: covers per room, the hours, free flow or a la carte, a door to run. Pull the venue\'s normal staffing on a comparable night with query_labour and say what is EXTRA; every number you suggest is marked a proposal, never "the standard ratio". SECURITY IS LABOUR. Each extra person is a line in the P&L\'s labour section -- people x hours x rate. Salaried staff may not be on the roster, so ask who is working who is not on it. Name the person who builds the roster and the date it is due.',
+    measurable: true,
+    sharpen_with: ['query_labour', 'query_hourly_sales', 'query_reservations'],
+    blocking: true,
+  },
+  {
+    key: 'photography',
+    stage: 'running',
+    decision: 'Whether we need a photographer or videographer -- before the event for the campaign, on the night, or both -- who, the shot list, and the cost.',
+    ask: 'Do we need photos or video -- to sell it beforehand, to capture the night, or both? Who shoots it, and what must they get?',
+    weak: 'Nobody decided, so the campaign launches on last year\'s photos and nobody films the night.',
+    challenge:
+      'The campaign needs pictures before the event exists: if the posts need the room, the dishes or the team, that is a shoot with a date BEFORE the first post. The night itself is next year\'s campaign. Settle: needed or not, before and/or on the night, who shoots it, a short shot list, and the cost as a line in the P&L. PROPOSE it from the content plan and what the posts need. "No" is a valid answer and settles it.',
+    measurable: false,
+    sharpen_with: ['query_post_patterns', 'query_top_posts'],
+    blocking: true,
+  },
+  {
+    key: 'food_menu',
+    stage: 'running',
+    decision: 'What food is served, who writes the menu, when it is signed off, and that it fits the price and the food cost.',
+    ask: 'What are we serving, who is writing it, and when is it signed off? Does it fit the price we set?',
+    weak: '"Chef will sort it." A menu with no owner or date, priced without checking the cost.',
+    challenge:
+      'For a dining ticket the menu IS the product, and printing has a lead time. Settle the format (set, sharing, canapes, a la carte), the chef who owns it, dietary options, and a sign-off date before printing and before the menu post. Check it against the price with the venue\'s measured food cost (query_food_beverage_cost) and what already sells (query_product_mix).',
+    measurable: true,
+    sharpen_with: ['query_food_beverage_cost', 'query_product_mix'],
+    blocking: true,
+    applies_when: 'the event sells food',
+  },
+  {
+    key: 'drink_menu',
+    stage: 'running',
+    decision: 'What drinks are served -- free flow list, tokens, signature cocktails, bottles -- who writes it, when it is signed off, and that it fits the price and the drink cost.',
+    ask: 'What are we pouring, who is writing the list, and when is it signed off? Does it fit what the ticket charges?',
+    weak: '"Bar will sort it." A free flow with no list, or a token with no value.',
+    challenge:
+      'A free flow or a drink token is a promise with a cost per head: name exactly what is in it, who owns the list at the bar, and the sign-off date before printing. Check it against the price with the venue\'s measured drink cost (query_food_beverage_cost) and what already sells (query_product_mix). A brand partner pouring free changes the cost line -- say so.',
+    measurable: true,
+    sharpen_with: ['query_food_beverage_cost', 'query_product_mix'],
+    blocking: true,
+    applies_when: 'the event sells drinks',
+  },
+
+  // --- F. The follow-through ---------------------------------------------
   {
     key: 'owners_and_deadlines',
     stage: 'follow_through',
@@ -337,6 +393,7 @@ export function renderPlaybook(rows: PlaybookRow[] = PLAYBOOK): string {
     ['shape', 'THE SHAPE — what it is, where, when, with whom'],
     ['money', 'THE MONEY — price, cost, paid spend'],
     ['campaign', 'THE CAMPAIGN — how anybody hears about it'],
+    ['running', 'RUNNING THE NIGHT — staffing, photography, the menus'],
     ['follow_through', 'THE FOLLOW-THROUGH — owners, dates, the abort'],
   ];
 
