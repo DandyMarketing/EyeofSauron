@@ -689,6 +689,16 @@
   .r-who { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
   .r-text { white-space: pre-wrap; }
   .r-run { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  /* Open / Resolved (Khai, 13 Oct 2026: resolved issues "need a place to go so
+     it doesn't clutter that tab"). */
+  .r-views { display: flex; gap: 8px; margin: 0 0 12px; }
+  .r-view { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; min-height: 0; }
+  .r-view.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  /* The exchange that was reported, marked; what came long before it folds. */
+  .r-msg.r-reported { background: var(--accent-soft); border-radius: 0 6px 6px 0; padding-right: 8px; }
+  .r-flag { font-size: 13px; color: var(--accent); font-weight: 600; margin-left: 6px; text-transform: none; letter-spacing: 0; }
+  details.r-earlier > summary { cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0; }
   .r-trace summary { cursor: pointer; font-size: 13px; color: var(--text-muted); margin-top: 6px; }
   .r-tool { margin: 8px 0; font-size: 13px; }
   .r-detail .m-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
@@ -1451,6 +1461,9 @@ async function loadAccounting(panel) {
  */
 const REPORT_KIND = { wrong: 'Answered incorrectly', cannot_answer: 'Could not answer', error: 'Showed an error', other: 'Something else' };
 const REPORT_STATUS = { new: 'New', looking: 'Looking into it', fixed: 'Fixed', wont_fix: 'Will not fix' };
+/** Fixed and will-not-fix leave the main list; the server stamps resolved_at for the same two. */
+const RESOLVED = ['fixed', 'wont_fix'];
+let reportView = 'open';
 
 async function loadReports(panel) {
   const data = await api('GET', '/admin/api/reports');
@@ -1461,10 +1474,20 @@ async function loadReports(panel) {
     panel.appendChild(section);
     return;
   }
-  const reports = data.reports || [];
+  const all = data.reports || [];
+  const open = all.filter(r => !RESOLVED.includes(r.status));
+  const resolved = all.filter(r => RESOLVED.includes(r.status));
+  const reports = reportView === 'resolved' ? resolved : open;
   const when = iso => new Date(iso).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  section.innerHTML = '<h2>Issues (' + reports.length + ')</h2>' +
-    (reports.length === 0 ? '<div class="muted">No issues yet. Wrong answers, questions it could not answer and errors arrive here from the "Report an issue" link under every answer.</div>' :
+  const empty = all.length === 0
+    ? 'No issues yet. Wrong answers, questions it could not answer and errors arrive here from the "Report an issue" link under every answer.'
+    : reportView === 'resolved' ? 'Nothing resolved yet. A report set to Fixed or Will not fix moves here.' : 'Nothing open. Everything reported has been resolved.';
+  section.innerHTML = '<h2>Issues</h2>' +
+    '<div class="r-views" role="tablist">' +
+      '<button type="button" class="r-view' + (reportView === 'open' ? ' on' : '') + '" data-view="open">Open (' + open.length + ')</button>' +
+      '<button type="button" class="r-view' + (reportView === 'resolved' ? ' on' : '') + '" data-view="resolved">Resolved (' + resolved.length + ')</button>' +
+    '</div>' +
+    (reports.length === 0 ? '<div class="muted">' + empty + '</div>' :
     '<div class="ulist">' + reports.map(r =>
       '<div class="rrow" data-id="' + r.id + '">' +
         '<div class="r-head">' +
@@ -1478,6 +1501,35 @@ async function loadReports(panel) {
   panel.appendChild(section);
 
   section.querySelectorAll('.rrow .r-head, .rrow .r-snip').forEach(h => h.addEventListener('click', () => toggleReport(h.closest('.rrow'))));
+  section.querySelectorAll('.r-view').forEach(b => b.addEventListener('click', () => {
+    reportView = b.dataset.view;
+    loadReports(panel);
+  }));
+}
+
+/**
+ * A long conversation, readable (Khai, 13 Oct 2026: a 108-message plan "looks
+ * like it copied every session in the world"). Nothing is dropped: the
+ * reported exchange is marked, it and the three exchanges before it -- and
+ * anything after -- are shown, and everything earlier folds under "Show
+ * earlier messages". "Copy for Claude" still carries all of it.
+ */
+const KEEP_EXCHANGES = 4;
+function foldConversation(list, question, render) {
+  const norm = x => String(x || '').trim();
+  let at = -1;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'user' && norm(list[i].content) === norm(question)) { at = i; break; }
+  }
+  if (at < 0) for (let i = list.length - 1; i >= 0; i--) if (list[i].role === 'user') { at = i; break; }
+  // Where the kept part starts: the KEEP_EXCHANGES-th question back, counting the reported one.
+  let from = at < 0 ? 0 : at, seen = 0;
+  for (let i = at; i >= 0; i--) if (list[i].role === 'user' && ++seen === KEEP_EXCHANGES) { from = i; break; }
+  if (seen < KEEP_EXCHANGES) from = 0;
+  const html = (m, i) => render(m, i === at || (i === at + 1 && list[i] && list[i].role !== 'user'));
+  const earlier = list.slice(0, from).map(html).join('');
+  const kept = list.slice(from).map((m, j) => html(m, from + j)).join('');
+  return (earlier ? '<details class="r-earlier"><summary>Show earlier messages (' + from + ')</summary>' + earlier + '</details>' : '') + kept;
 }
 
 async function toggleReport(row) {
@@ -1488,8 +1540,9 @@ async function toggleReport(row) {
   const data = await api('GET', '/admin/api/reports/' + row.dataset.id);
   if (data.error) { box.innerHTML = '<div class="u-warn">' + esc(data.error) + '</div>'; return; }
   const r = data.report;
-  const transcript = (r.transcript || []).map(m =>
-    '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + '</div>' +
+  const transcript = foldConversation(r.transcript || [], r.question, (m, reported) =>
+    '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + (reported ? ' r-reported' : '') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') +
+      (reported ? '<span class="r-flag">reported</span>' : '') + '</div>' +
       '<div class="r-text">' + esc(m.content || '') + '</div>' +
       (m.run ? '<div class="r-run">' + esc((m.run.rounds || 0) + ' tool round(s) · ' + ((m.run.ms || 0) / 1000).toFixed(1) + 's' +
         (m.run.calls && m.run.calls.length ? ' · ' + [...new Set(m.run.calls.map(c => c.model))].join(', ') : '') +
@@ -1500,7 +1553,7 @@ async function toggleReport(row) {
           '<pre>' + esc(JSON.stringify(t.input || {}, null, 1)) + '</pre>' +
           (t.result ? '<div class="muted">Returned:</div><pre>' + esc(t.result) + '</pre>' : '') + '</div>').join('') +
       '</details>' : '') +
-    '</div>').join('');
+    '</div>');
   const ctx = r.context || {};
   /**
    * The conversation as it was on their screen, shown when it holds more than
@@ -1513,7 +1566,7 @@ async function toggleReport(row) {
   const screenHtml = showScreen
     ? '<div class="r-block"><div class="m-label">On their screen (' + screen.length + ' messages)</div>' +
       '<div class="muted" style="font-size:13px;margin-bottom:6px">' + ((r.transcript || []).length ? 'More than was saved: an exchange that failed is never saved.' : 'Nothing of this conversation was saved, so this is the only record.') + '</div>' +
-      screen.map(m => '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + '</div><div class="r-text">' + esc(m.content) + '</div></div>').join('') + '</div>'
+      foldConversation(screen, r.question, (m, reported) => '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + (reported ? ' r-reported' : '') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + (reported ? '<span class="r-flag">reported</span>' : '') + '</div><div class="r-text">' + esc(m.content) + '</div></div>') + '</div>'
     : '';
   const ctxLine = ['role', 'venues', 'model', 'commit'].filter(k => ctx[k]).map(k => k + ': ' + (k === 'commit' ? String(ctx[k]).slice(0, 7) : ctx[k])).join(' · ');
   box.innerHTML =
@@ -1537,6 +1590,11 @@ async function toggleReport(row) {
     const st = box.querySelector('.r-status-pick').value;
     pill.className = 'r-status r-' + st; pill.textContent = REPORT_STATUS[st];
     loadBadges();
+    // Resolved leaves the open list (and reopened leaves the resolved one).
+    if (RESOLVED.includes(st) !== (reportView === 'resolved')) {
+      toast('success', RESOLVED.includes(st) ? 'Saved, and moved to Resolved' : 'Saved, and moved back to Open');
+      loadReports(row.closest('.section').parentNode);
+    }
   });
   // The whole report as text, to paste into a session with Claude.
   box.querySelector('.r-copy').addEventListener('click', async () => {

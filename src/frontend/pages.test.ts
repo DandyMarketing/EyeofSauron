@@ -1573,3 +1573,19 @@ test('the service strip settles on whole days, with no bar across the cells on a
   assert.match(home, /\.book \.day \{ scroll-snap-align: start; \}/);
   assert.match(home, /@media \(hover: none\) \{\s*\.book \{ scrollbar-width: none; \}/);
 });
+
+test('Issues: resolved reports have their own list, and long conversations fold', () => {
+  /**
+   * Khai, 13 Oct 2026: a 108-message plan "looks like it copied every session
+   * in the world", and resolved issues "need a place to go so it doesn't
+   * clutter that tab". Nothing is dropped -- the fold is display only.
+   */
+  const admin = readFileSync('public/admin.html', 'utf8');
+  assert.match(admin, /const RESOLVED = \['fixed', 'wont_fix'\];/);
+  assert.match(admin, /data-view="open">Open \(/);
+  assert.match(admin, /data-view="resolved">Resolved \(/);
+  assert.match(admin, /function foldConversation\(list, question, render\)/);
+  assert.match(admin, /Show earlier messages \(/);
+  // Copy for Claude still gives the whole report, built on the server.
+  assert.match(admin, /navigator\.clipboard\.writeText\(data\.markdown\)/);
+});

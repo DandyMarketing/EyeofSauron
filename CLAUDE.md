@@ -1289,6 +1289,15 @@ description under three characters is refused by the page and the server.
 gives the whole thing as one block of text (`reportMarkdown()`), to paste into
 a session for review.
 
+**Open and Resolved** (Khai, same day: resolved issues "need a place to go so
+it doesn't clutter that tab"). The Issues tab opens on Open (new, looking);
+Fixed and Will not fix move to Resolved on save. A long conversation is shown
+folded: the reported exchange marked, it and the three before it in full, and
+everything earlier under "Show earlier messages" -- because a 108-message plan
+"looked like it copied every session in the world". It is still ONE
+conversation, fetched by id and owner; nothing is dropped, and Copy for Claude
+carries all of it.
+
 ### The weekly brief is in every menu, 13 Oct 2026
 
 Khai: "no one actually knows it's there." No menu linked to it -- the only way
