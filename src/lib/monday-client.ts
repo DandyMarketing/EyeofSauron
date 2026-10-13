@@ -262,6 +262,8 @@ export async function createGroupWithItems(
   existing?: { groupId: string; names: string[]; lastId: string | null; items?: BoardItem[] },
   /** Names for the people tagged in a sub-item's detail update. */
   nameOf: (id: number) => string = id => `#${id}`,
+  /** Called as each item is made or found already there: how far, of how many. */
+  onProgress: (done: number, total: number, name: string) => void = () => {},
 ): Promise<{ group_id: string; created: number; skipped: number; item_ids: Array<string | null>; notes: string[]; error?: string }> {
   let groupId: string;
   let previous: string | null = null;
@@ -310,12 +312,14 @@ export async function createGroupWithItems(
     );
   };
 
+  let done = 0;
+  const step = (name: string) => onProgress(++done, items.length, name);
   // Top-level items first, in order, so every parent exists before its sub-items.
   const isSub = (it: typeof items[number]) => !!(it.parent && board.subBoardId && board.subColumns);
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (isSub(item)) continue;
-    if (already.has(key(item.name))) { skipped++; continue; }
+    if (already.has(key(item.name))) { skipped++; step(item.name); continue; }
     try {
       let r: { create_item: { id: string } };
       try {
@@ -329,6 +333,7 @@ export async function createGroupWithItems(
       itemIds[i] = previous;
       parentId.set(key(item.name), previous);
       created++;
+      step(item.name);
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }
@@ -341,11 +346,12 @@ export async function createGroupWithItems(
     const pid = parentId.get(key(item.parent!));
     if (!pid) {
       notes.push(`"${item.name}" was not added: its parent "${item.parent}" is not in the group.`);
+      step(item.name);
       continue;
     }
     const under = subNames.get(pid) ?? new Set<string>();
     // Its own name, or the long name an earlier send used before names were shortened.
-    if ([item.name, ...(item.aliases ?? [])].some(n => under.has(key(n)))) { skipped++; continue; }
+    if ([item.name, ...(item.aliases ?? [])].some(n => under.has(key(n)))) { skipped++; step(item.name); continue; }
     try {
       let r: { create_subitem: { id: string } };
       try {
@@ -375,6 +381,7 @@ export async function createGroupWithItems(
           notes.push(`"${item.name}" was made, but its detail note was not posted: ${e?.message ?? e}`);
         }
       }
+      step(item.name);
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }
@@ -390,6 +397,7 @@ export async function createGroupWithItems(
  */
 export async function updateItems(
   board: BoardForPlan, updates: Array<ItemUpdate & { name?: string; sub?: boolean }>,
+  onProgress: (done: number, total: number, name: string) => void = () => {},
 ): Promise<{ updated: number; notes: string[]; error?: string }> {
   const notes: string[] = [];
   let updated = 0;
@@ -412,6 +420,7 @@ export async function updateItems(
         notes.push(`"${u.name ?? u.item_id}": the date was changed but not the people -- Monday refused one of them. Assign it on the board.`);
       }
       updated++;
+      onProgress(updated, updates.length, u.name ?? u.item_id);
     } catch (e: any) {
       return { updated, notes, error: `Stopped changing items at "${u.name ?? u.item_id}": ${e?.message ?? e}` };
     }

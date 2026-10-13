@@ -804,7 +804,7 @@ async function draftRequest(user: SessionUser, history: ChatMessage[]) {
   const facts = `THE PERSON PLANNING is ${user.fullName || user.email}. Where the conversation makes "you" or "me" the owner of a task, write that name -- never "Planner" or "You".\n` +
     `OUR VENUES -- the only values allowed in venue_slugs: ${scoped.map(v => `${v.slug} (${v.name})`).join(', ') || 'none'}. A space being rented or a partner's venue is NOT one of ours: describe it in the concept and the brief, never in venue_slugs.\n\n`;
   return {
-    model: modelFor('lookup', process.env).model,
+    model: modelFor('planning', process.env).model,
     max_tokens: 16384,
     system: [{
       type: 'text' as const,
@@ -971,8 +971,8 @@ app.post('/api/plan/progress', async (c) => {
 
   try {
     const res = await anthropic.messages.create({
-      model: modelFor('lookup', process.env).model,
-      max_tokens: 4096,
+      model: modelFor('planning', process.env).model,
+      max_tokens: modelFor('planning', process.env).maxTokens,
       system: [{
         type: 'text',
         text: 'You read an event-planning conversation and record which decisions THE PERSON PLANNING has settled -- by saying so, or by agreeing when the director proposed it. A question the director asked that was not answered is not settled. Be strict: a vague answer settles nothing. File each fact under the decision it actually answers, using the definitions below; one fact can settle at most the decisions it plainly answers. Summaries use the conversation\'s own words and never add a figure that is not in it.\n\nTHE DECISIONS:\n' + decisionGuide(),
@@ -1394,8 +1394,8 @@ async function withTaskTitles(tasks: PlannerTask[]): Promise<PlannerTask[]> {
   if (missing.length === 0) return tasks;
   try {
     const res = await anthropic.messages.create({
-      model: modelFor('lookup', process.env).model,
-      max_tokens: 4096,
+      model: modelFor('planning', process.env).model,
+      max_tokens: modelFor('planning', process.env).maxTokens,
       system: [{ type: 'text', text: TITLE_SYSTEM, cache_control: { type: 'ephemeral' } }],
       tools: [titleTool(missing.length) as any],
       tool_choice: { type: 'tool', name: 'record_task_titles' },
@@ -1480,8 +1480,8 @@ app.post('/api/plan/monday/preview', async (c) => {
         (async (): Promise<StepDeadline[]> => {
           if (board.template.length === 0) return [];
           const res = await anthropic.messages.create({
-            model: modelFor('lookup', process.env).model,
-            max_tokens: 4096,
+            model: modelFor('planning', process.env).model,
+            max_tokens: modelFor('planning', process.env).maxTokens,
             system: [{ type: 'text', text: DEADLINE_SYSTEM, cache_control: { type: 'ephemeral' } }],
             tools: [deadlineTool(board.template.length) as any],
             tool_choice: { type: 'tool', name: 'record_checklist_deadlines' },
@@ -1501,8 +1501,8 @@ app.post('/api/plan/monday/preview', async (c) => {
           if (!subitems || tasks.length === 0) return tasks;
           try {
             const res = await anthropic.messages.create({
-              model: modelFor('lookup', process.env).model,
-              max_tokens: 4096,
+              model: modelFor('planning', process.env).model,
+              max_tokens: modelFor('planning', process.env).maxTokens,
               system: [{ type: 'text', text: PARENT_SYSTEM, cache_control: { type: 'ephemeral' } }],
               tools: [parentTool(tasks.length) as any],
               tool_choice: { type: 'tool', name: 'record_task_parents' },
@@ -1581,131 +1581,191 @@ app.post('/api/plan/monday/preview', async (c) => {
  * this user, the board against the planning workspace, and the group name
  * against the board, so pressing twice cannot make two groups.
  */
+type SendBody = {
+  event_id?: string;
+  venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown; updates?: unknown }>;
+  attach?: { brief?: boolean; pnl?: boolean };
+  draft?: any;
+};
+
+/**
+ * What a send says while it works (Khai, 13 Oct 2026: a spinning wheel "that
+ * doesn't tell whether it stalled or not"). Per venue: the stage, and for the
+ * items how many of how many, with the one just written.
+ */
+type SendProgress = { venue: string; stage: string; done?: number; total?: number; name?: string };
+
+async function sendPlanToMonday(
+  user: SessionUser, body: SendBody, progress: (p: SendProgress) => void = () => {},
+): Promise<{ status: number; json: any }> {
+  const issued = await issuedEvent(user, body.event_id!);
+  if (!issued) return { status: 404, json: { error: 'That event was not found, or none of its venues are yours.' } };
+  const expected = groupTitle(issued.ev.name, issued.ev.start_date, issued.ev.end_date);
+  const { account, users: people } = await readPeople();
+  const personName = new Map(people.map(u => [Number(u.id), u.name]));
+
+  const results = await Promise.all(body.venues!.map(async v => {
+    const venue = issued.venues.find(x => x.slug === v.slug);
+    if (!venue) return { slug: v.slug, error: 'Not a venue of this event that you can see.' };
+    const items = sanitiseItems(v.items);
+    if (!items) return { slug: v.slug, venue: venue.name, error: 'The items did not come back intact. Preview again.' };
+    const title = typeof v.group_title === 'string' && v.group_title.trim() ? v.group_title.trim().slice(0, 255) : expected;
+    const say = (p: Omit<SendProgress, 'venue'>) => progress({ venue: venue.name, ...p });
+    say({ stage: 'Reading the board' });
+    let board;
+    try { board = await readBoardForPlan(String(v.board_id)); }
+    catch (e: any) { return { slug: v.slug, venue: venue.name, error: String(e?.message ?? e) }; }
+    // A group with this name already there is FINISHED, not duplicated:
+    // items already in it are skipped and the rest added after them.
+    const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
+    const existing = there
+      ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null, items: board.groupItems.get(there.id)?.items ?? [] }
+      : undefined;
+    const r = await createGroupWithItems(board, title, items, existing, id => personName.get(id) ?? `#${id}`,
+      (done, total, name) => say({ stage: 'Items', done, total, name }));
+
+    /**
+     * The ticked changes to items already there. Checked against the board
+     * as it is NOW, not as the preview saw it: an item must be in this
+     * group, and one marked finished since the preview is still left alone.
+     */
+    const onBoard = existing ? board.groupItems.get(existing.groupId)?.items ?? [] : [];
+    const finishedIn = (cols: typeof board.columns | null) => new Set((cols?.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+    const finished = finishedIn(board.columns);
+    const finishedSub = finishedIn(board.subColumns);
+    const asked = sanitiseUpdates(v.updates);
+    const allowed = asked.flatMap(u => {
+      const it = u.sub
+        ? onBoard.flatMap(i => i.subitems ?? []).find(i => i.id === u.item_id)
+        : onBoard.find(i => i.id === u.item_id);
+      const done = u.sub ? finishedSub : finished;
+      return it && !(it.status && done.has(it.status.trim().toLowerCase())) ? [{ ...u, name: it.name }] : [];
+    });
+    const changed = allowed.length && !r.error
+      ? await updateItems(board, allowed, (done, total, name) => say({ stage: 'Changes', done, total, name }))
+      : { updated: 0, notes: [] as string[], error: undefined };
+    if (asked.length > allowed.length) changed.notes.push(`${asked.length - allowed.length} change${asked.length - allowed.length === 1 ? ' was' : 's were'} not made: the item is no longer in this group, or was marked finished since the preview.`);
+
+    /**
+     * The brief to Concept & Mechanics and the P&L to Financial Forecast,
+     * each only if it was ticked. An attachment that fails is reported
+     * beside the group, never undoes it: the tasks are the point, and a
+     * missing file is put right by downloading it and dropping it in.
+     */
+    const attached: { brief?: string; pnl?: string } = {};
+    const targets = attachTargets(items.map(i => i.name));
+    const d = body.draft ?? {};
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    /**
+     * The item to post on: the one made in this run, or -- on a re-send --
+     * the one already in the group. A re-send posts the brief or P&L as a
+     * NEW update marked revised, so the earlier version stays below it as
+     * history; one whose text is already on the item is not posted twice.
+     */
+    const targetId = (idx: number | null) => {
+      if (idx === null) return { id: undefined, revised: false };
+      const made = r.item_ids[idx];
+      if (made) return { id: made, revised: false };
+      const there = onBoard.find(i => i.name.trim().toLowerCase() === items[idx].name.trim().toLowerCase());
+      return { id: there?.id, revised: !!there };
+    };
+    const post = async (id: string, revised: boolean, html: string, file: { name: string; type: string; data: Buffer | ArrayBuffer }) => {
+      if (revised && alreadyPosted(html, await itemUpdateTexts(id))) return 'unchanged';
+      const head = revised ? `<p><strong>Revised ${today}</strong> -- this replaces the earlier version below.</p>` : '';
+      await postUpdateWithFile(id, head + html, file);
+      return revised ? 'revised' : 'ok';
+    };
+    if (body.attach?.brief) {
+      const t = targetId(targets.brief);
+      if (typeof d.brief !== 'string' || !d.brief.trim()) attached.brief = 'Not attached: the brief had no text.';
+      else if (!t.id) attached.brief = 'Not attached: there is no "Concept & Mechanics" item in this group.';
+      else {
+        say({ stage: 'Attaching the brief' });
+        try {
+          const doc = await briefDocx(d.brief.slice(0, 100_000), { title: issued.ev.name, generatedOn: today });
+          attached.brief = await post(t.id, t.revised, briefMondayHtml(d.brief, issued.ev.name), { name: `${safeFileName(issued.ev.name, 'Event')}_Brief.docx`, type: DOCX_TYPE, data: doc });
+        } catch (e: any) { attached.brief = `Not attached: ${e?.message ?? e}`; }
+      }
+    }
+    if (body.attach?.pnl) {
+      const t = targetId(targets.pnl);
+      if (!hasPnl(d)) attached.pnl = 'Not attached: the brief has no revenue lines for a P&L.';
+      else if (!t.id) attached.pnl = 'Not attached: there is no "Financial Forecast" item in this group.';
+      else {
+        say({ stage: 'Attaching the P&L' });
+        try {
+          const p = await eventPnlFile({ ...d, name: issued.ev.name }, venue, [venue.name], today);
+          attached.pnl = await post(t.id, t.revised, pnlUpdateHtml(issued.ev.name, p.figures, p.rates as any), { name: p.file, type: XLSX_TYPE, data: p.buf });
+        } catch (e: any) { attached.pnl = `Not attached: ${e?.message ?? e}`; }
+      }
+    }
+    say({ stage: 'Done' });
+
+    console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}, ${changed.updated} changed${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}${changed.error ? ` -- ${changed.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
+    return {
+      slug: v.slug, venue: venue.name, board: board.name, group_title: title,
+      url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
+      created: r.created, skipped: r.skipped, finished_existing: !!existing, notes: [...r.notes, ...changed.notes],
+      updated: changed.updated, total: items.length, error: r.error ?? changed.error, attached,
+    };
+  }));
+  return { status: 200, json: { results } };
+}
+
+async function readSendBody(c: any): Promise<SendBody | null> {
+  const body = await c.req.json().catch(() => null) as SendBody | null;
+  return body?.event_id && Array.isArray(body.venues) && body.venues.length > 0 ? body : null;
+}
+
 app.post('/api/plan/monday/send', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
   const gated = requireTerms(c, user);
   if (gated) return gated;
-
-  const body = await c.req.json<{
-    event_id?: string;
-    venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown; updates?: unknown }>;
-    attach?: { brief?: boolean; pnl?: boolean };
-    draft?: any;
-  }>().catch(() => null);
-  if (!body?.event_id || !Array.isArray(body.venues) || body.venues.length === 0) {
-    return c.json({ error: 'Nothing to send.' }, 400);
-  }
-
+  const body = await readSendBody(c);
+  if (!body) return c.json({ error: 'Nothing to send.' }, 400);
   try {
-    const issued = await issuedEvent(user, body.event_id);
-    if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
-    const expected = groupTitle(issued.ev.name, issued.ev.start_date, issued.ev.end_date);
-    const { account, users: people } = await readPeople();
-    const personName = new Map(people.map(u => [Number(u.id), u.name]));
-
-    const results = await Promise.all(body.venues.map(async v => {
-      const venue = issued.venues.find(x => x.slug === v.slug);
-      if (!venue) return { slug: v.slug, error: 'Not a venue of this event that you can see.' };
-      const items = sanitiseItems(v.items);
-      if (!items) return { slug: v.slug, venue: venue.name, error: 'The items did not come back intact. Preview again.' };
-      const title = typeof v.group_title === 'string' && v.group_title.trim() ? v.group_title.trim().slice(0, 255) : expected;
-      let board;
-      try { board = await readBoardForPlan(String(v.board_id)); }
-      catch (e: any) { return { slug: v.slug, venue: venue.name, error: String(e?.message ?? e) }; }
-      // A group with this name already there is FINISHED, not duplicated:
-      // items already in it are skipped and the rest added after them.
-      const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
-      const existing = there
-        ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null, items: board.groupItems.get(there.id)?.items ?? [] }
-        : undefined;
-      const r = await createGroupWithItems(board, title, items, existing, id => personName.get(id) ?? `#${id}`);
-
-      /**
-       * The ticked changes to items already there. Checked against the board
-       * as it is NOW, not as the preview saw it: an item must be in this
-       * group, and one marked finished since the preview is still left alone.
-       */
-      const onBoard = existing ? board.groupItems.get(existing.groupId)?.items ?? [] : [];
-      const finishedIn = (cols: typeof board.columns | null) => new Set((cols?.doneLabels ?? []).map(l => l.trim().toLowerCase()));
-      const finished = finishedIn(board.columns);
-      const finishedSub = finishedIn(board.subColumns);
-      const asked = sanitiseUpdates(v.updates);
-      const allowed = asked.flatMap(u => {
-        const it = u.sub
-          ? onBoard.flatMap(i => i.subitems ?? []).find(i => i.id === u.item_id)
-          : onBoard.find(i => i.id === u.item_id);
-        const done = u.sub ? finishedSub : finished;
-        return it && !(it.status && done.has(it.status.trim().toLowerCase())) ? [{ ...u, name: it.name }] : [];
-      });
-      const changed = allowed.length && !r.error ? await updateItems(board, allowed) : { updated: 0, notes: [] as string[], error: undefined };
-      if (asked.length > allowed.length) changed.notes.push(`${asked.length - allowed.length} change${asked.length - allowed.length === 1 ? ' was' : 's were'} not made: the item is no longer in this group, or was marked finished since the preview.`);
-
-      /**
-       * The brief to Concept & Mechanics and the P&L to Financial Forecast,
-       * each only if it was ticked. An attachment that fails is reported
-       * beside the group, never undoes it: the tasks are the point, and a
-       * missing file is put right by downloading it and dropping it in.
-       */
-      const attached: { brief?: string; pnl?: string } = {};
-      const targets = attachTargets(items.map(i => i.name));
-      const d = body.draft ?? {};
-      const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-      /**
-       * The item to post on: the one made in this run, or -- on a re-send --
-       * the one already in the group. A re-send posts the brief or P&L as a
-       * NEW update marked revised, so the earlier version stays below it as
-       * history; one whose text is already on the item is not posted twice.
-       */
-      const targetId = (idx: number | null) => {
-        if (idx === null) return { id: undefined, revised: false };
-        const made = r.item_ids[idx];
-        if (made) return { id: made, revised: false };
-        const there = onBoard.find(i => i.name.trim().toLowerCase() === items[idx].name.trim().toLowerCase());
-        return { id: there?.id, revised: !!there };
-      };
-      const post = async (id: string, revised: boolean, html: string, file: { name: string; type: string; data: Buffer | ArrayBuffer }) => {
-        if (revised && alreadyPosted(html, await itemUpdateTexts(id))) return 'unchanged';
-        const head = revised ? `<p><strong>Revised ${today}</strong> -- this replaces the earlier version below.</p>` : '';
-        await postUpdateWithFile(id, head + html, file);
-        return revised ? 'revised' : 'ok';
-      };
-      if (body.attach?.brief) {
-        const t = targetId(targets.brief);
-        if (typeof d.brief !== 'string' || !d.brief.trim()) attached.brief = 'Not attached: the brief had no text.';
-        else if (!t.id) attached.brief = 'Not attached: there is no "Concept & Mechanics" item in this group.';
-        else {
-          try {
-            const doc = await briefDocx(d.brief.slice(0, 100_000), { title: issued.ev.name, generatedOn: today });
-            attached.brief = await post(t.id, t.revised, briefMondayHtml(d.brief, issued.ev.name), { name: `${safeFileName(issued.ev.name, 'Event')}_Brief.docx`, type: DOCX_TYPE, data: doc });
-          } catch (e: any) { attached.brief = `Not attached: ${e?.message ?? e}`; }
-        }
-      }
-      if (body.attach?.pnl) {
-        const t = targetId(targets.pnl);
-        if (!hasPnl(d)) attached.pnl = 'Not attached: the brief has no revenue lines for a P&L.';
-        else if (!t.id) attached.pnl = 'Not attached: there is no "Financial Forecast" item in this group.';
-        else {
-          try {
-            const p = await eventPnlFile({ ...d, name: issued.ev.name }, venue, [venue.name], today);
-            attached.pnl = await post(t.id, t.revised, pnlUpdateHtml(issued.ev.name, p.figures, p.rates as any), { name: p.file, type: XLSX_TYPE, data: p.buf });
-          } catch (e: any) { attached.pnl = `Not attached: ${e?.message ?? e}`; }
-        }
-      }
-
-      console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}, ${changed.updated} changed${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}${changed.error ? ` -- ${changed.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
-      return {
-        slug: v.slug, venue: venue.name, board: board.name, group_title: title,
-        url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
-        created: r.created, skipped: r.skipped, finished_existing: !!existing, notes: [...r.notes, ...changed.notes],
-        updated: changed.updated, total: items.length, error: r.error ?? changed.error, attached,
-      };
-    }));
-    return c.json({ results });
+    const r = await sendPlanToMonday(user, body);
+    return c.json(r.json, r.status as any);
   } catch (e: any) {
     console.error(`[plan/monday/send] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
   }
+});
+
+/**
+ * The same send, saying how far it has got as it goes -- the same stream and
+ * heartbeat as the brief's draft. Progress events are `{kind: 'progress'}`,
+ * then one `{kind: 'done', results}` or `{kind: 'error'}`.
+ */
+app.post('/api/plan/monday/send-stream', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const body = await readSendBody(c);
+  if (!body) return c.json({ error: 'Nothing to send.' }, 400);
+
+  return streamSSE(c, async (stream) => {
+    let chain: Promise<void> = Promise.resolve();
+    const push = (event: Record<string, unknown>) => {
+      chain = chain.then(() => stream.writeSSE({ data: JSON.stringify(event) })).catch(() => {});
+    };
+    const heartbeat = setInterval(() => {
+      chain = chain.then(async () => { await stream.write(': ping\n\n'); }).catch(() => {});
+    }, 15_000);
+    try {
+      push({ kind: 'progress', venue: '', stage: 'Starting' });
+      const r = await sendPlanToMonday(user, body, p => push({ kind: 'progress', ...p }));
+      push(r.status === 200 ? { kind: 'done', ...r.json } : { kind: 'error', error: r.json.error });
+    } catch (e: any) {
+      console.error(`[plan/monday/send-stream] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+      push({ kind: 'error', error: humanApiError(e) });
+    } finally {
+      clearInterval(heartbeat);
+      await chain;
+    }
+  });
 });
 
 // --- Admin API (owner only) ---

@@ -28,7 +28,13 @@ export type Purpose =
   /** "What were sales yesterday" — a lookup, not analysis. */
   | 'lookup'
   /** Re-stating data already gathered after a turn produced no text. */
-  | 'recovery';
+  | 'recovery'
+  /**
+   * The event planner's own passes: the brief and its P&L, the progress board,
+   * and the Monday deadlines, grouping and names. Khai, 13 Oct 2026: "as this
+   * contains analytics, ALWAYS OPUS". They had run on the lookup model.
+   */
+  | 'planning';
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -133,6 +139,9 @@ const DEFAULTS: Record<Purpose, ModelChoice> = {
   // Restating data already in the conversation. Deep thought cannot help, and
   // this path only runs when something has already gone wrong.
   recovery: { model: SONNET, effort: 'low', maxTokens: 4096, toolBudgetMs: null },
+  // A brief people will act on, a P&L, and the board's reading of what is
+  // decided: analysis, not lookup, so Opus every time.
+  planning: { model: OPUS, effort: 'medium', maxTokens: 16384, toolBudgetMs: null },
 };
 
 /**
@@ -148,6 +157,7 @@ const ENV_KEY: Record<Purpose, string> = {
   recommendation: 'SAURON_MODEL_RECOMMENDATION',
   lookup: 'SAURON_MODEL_LOOKUP',
   recovery: 'SAURON_MODEL_RECOVERY',
+  planning: 'SAURON_MODEL_PLANNING',
 };
 
 /**

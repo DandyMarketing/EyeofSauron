@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import {
   modelFor,
   isModelFeatureError,
@@ -54,7 +55,7 @@ test('no purpose can express "do not think" any more', () => {
   // thinking on Opus 5: with thinking off the model occasionally writes a tool
   // call into its visible TEXT, which succeeds, never runs, raises nothing, and
   // then pollutes every later round of the loop.
-  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery'] as const) {
+  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery', 'planning'] as const) {
     assert.ok(modelFor(purpose).effort, `${purpose} has no effort`);
     assert.equal((modelFor(purpose) as any).thinking, undefined);
   }
@@ -152,7 +153,7 @@ test('a missing usage object does not throw', () => {
  * xhigh thinking had taken the budget and the analysis was truncated.
  */
 test('every purpose has an output ceiling', () => {
-  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery'] as const) {
+  for (const purpose of ['chat', 'recommendation', 'lookup', 'recovery', 'planning'] as const) {
     const choice = modelFor(purpose);
     assert.ok(choice.maxTokens > 0, `${purpose} has no maxTokens`);
   }
@@ -279,4 +280,12 @@ test('an unknown model is ignored, never passed through', () => {
 test('an unknown choice still lets the environment override stand', () => {
   const choice = modelFor('chat', { SAURON_MODEL_CHAT: 'operator-chosen' }, 'nonsense');
   assert.equal(choice.model, 'operator-chosen');
+});
+
+test('the event planner runs on Opus in every pass (Khai, 13 Oct 2026: "always Opus")', () => {
+  assert.equal(modelFor('planning', {}).model, 'claude-opus-5');
+  const src = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  // The planner's own passes: brief and P&L, progress board, names, deadlines, grouping.
+  assert.equal((src.match(/modelFor\('planning', process\.env\)\.model/g) ?? []).length, 5);
+  assert.doesNotMatch(src, /modelFor\('lookup'/);
 });

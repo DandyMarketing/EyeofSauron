@@ -247,6 +247,8 @@
   #monday-sheet tr.md-sub .md-task { padding-left: 18px; }
   @media (max-width: 640px) { #monday-sheet tr.md-sub { margin-left: 16px; width: calc(100% - 16px); box-sizing: border-box; border-left: 2px solid var(--accent); } }
   #monday-sheet .md-arrow { color: var(--text-muted); margin-right: 4px; }
+  #monday-sheet .md-progress { font-size: 13px; line-height: 1.5; }
+  #monday-sheet .md-clock { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
   #monday-sheet .md-detail { display: block; font-weight: 400; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
   #monday-sheet tr.md-parent .md-task { font-weight: 600; }
   #monday-sheet .md-parent-pick { max-width: 100%; }
@@ -919,7 +921,14 @@ async function openMonday(eventId, venues, d) {
   };
 
   const runPreview = async () => {
-    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board\'s Event Template and fitting its deadlines to the plan… this takes a few seconds.</div>';
+    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board, fitting the deadlines to the plan, and grouping the tasks. Nothing is written yet. This usually takes under a minute.</div><div class="md-clock"></div>';
+    // A clock, so a long preview reads as working rather than stalled.
+    const started = Date.now();
+    const clockEl = sheet.querySelector('.md-clock');
+    const tick = setInterval(() => {
+      const t = Math.floor((Date.now() - started) / 1000);
+      if (clockEl.isConnected) clockEl.textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') + ' so far';
+    }, 1000);
     try {
       const res = await fetch('/api/plan/monday/preview', {
         method: 'POST',
@@ -928,10 +937,12 @@ async function openMonday(eventId, venues, d) {
       });
       const out = await res.json();
       if (!res.ok || out.error) throw new Error(out.error || 'Could not build the preview.');
+      clearInterval(tick);
       preview = out;
       venues.forEach(v => chosen[v.slug] && rememberBoard(v.slug, chosen[v.slug]));
       drawPreview();
     } catch (e) {
+      clearInterval(tick);
       sheet.innerHTML = '<h3>Send to Monday</h3><div class="err">' + escapeHtml(String(e.message || e)) + '</div>' +
         '<div class="md-row"><button type="button" class="secondary md-back">Back</button></div>';
       sheet.querySelector('.md-back').addEventListener('click', pick);
@@ -1134,19 +1145,55 @@ async function openMonday(eventId, venues, d) {
     sending = true;
     btn.disabled = true; btn.textContent = 'Writing…';
     sheet.querySelector('.md-back').disabled = true;
-    msg.textContent = 'Writing to Monday, one item at a time so the order holds…';
+    /**
+     * Progress as it happens (Khai, 13 Oct 2026: a spinning wheel "that
+     * doesn't tell whether it stalled or not"): per venue, the stage and how
+     * many of how many, the item just written, a clock, and how long since
+     * the last step -- so a slow Monday reads differently from a stall.
+     */
+    const started = Date.now();
+    let lastStep = Date.now();
+    const lines = {};
+    msg.innerHTML = '<div class="md-progress"></div><div class="md-clock"></div>';
+    const prog = msg.querySelector('.md-progress'), clock = msg.querySelector('.md-clock');
+    const mmss = ms => { const t = Math.floor(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+    const drawClock = () => {
+      const quiet = Math.floor((Date.now() - lastStep) / 1000);
+      clock.textContent = mmss(Date.now() - started) + ' so far' +
+        (quiet >= 20 ? ' · waiting on Monday for ' + quiet + 's (it can be slow; this is still running)' : '');
+    };
+    const tick = setInterval(drawClock, 1000);
+    drawClock();
+    const onProgress = ev => {
+      lastStep = Date.now();
+      if (!ev.venue) { prog.textContent = 'Starting…'; return; }
+      lines[ev.venue] = ev.stage === 'Items'
+        ? 'Writing items: ' + ev.done + ' of ' + ev.total + (ev.name ? ' · ' + ev.name : '')
+        : ev.stage === 'Changes' ? 'Making changes: ' + ev.done + ' of ' + ev.total
+        : ev.stage === 'Done' ? 'Finished' : ev.stage + '…';
+      prog.innerHTML = Object.entries(lines).map(([v, l]) => '<div><strong>' + escapeHtml(v) + ':</strong> ' + escapeHtml(l) + '</div>').join('');
+      drawClock();
+    };
+    const sendBody = JSON.stringify({
+      event_id: eventId, venues: payload,
+      attach: { brief: attach.brief && !!brief, pnl: attach.pnl && hasPnl },
+      draft: { name: d.name, brief: d.brief, pnl: d.pnl, start_date: d.start_date, end_date: d.end_date },
+    });
     try {
-      const res = await fetch('/api/plan/monday/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({
-          event_id: eventId, venues: payload,
-          attach: { brief: attach.brief && !!brief, pnl: attach.pnl && hasPnl },
-          draft: { name: d.name, brief: d.brief, pnl: d.pnl, start_date: d.start_date, end_date: d.end_date },
-        }),
-      });
-      const out = await res.json();
-      if (!res.ok || out.error) throw new Error(out.error || 'Could not send.');
+      let out;
+      try {
+        out = await sendStream(sendBody, onProgress);
+      } catch (streamErr) {
+        // The stream never started: the plain route does the same work.
+        onProgress({ venue: '', stage: 'Starting' });
+        const res = await fetch('/api/plan/monday/send', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: sendBody,
+        });
+        out = await res.json();
+        if (!res.ok && !out.error) out = { error: 'Could not send (' + res.status + ').' };
+      }
+      clearInterval(tick);
+      if (out.error) throw new Error(out.error);
       sheet.innerHTML = '<h3>Sent to Monday</h3>' + (out.results || []).map(r =>
         '<div class="md-venue"><h4>' + escapeHtml(r.venue || r.slug) + (r.board ? ' → ' + escapeHtml(r.board) : '') + '</h4>' +
         (r.error && !r.created
@@ -1164,6 +1211,7 @@ async function openMonday(eventId, venues, d) {
       sending = false;
       sheet.querySelector('.md-done').addEventListener('click', close);
     } catch (e) {
+      clearInterval(tick);
       sending = false;
       btn.disabled = false; btn.textContent = sendLabel();
       sheet.querySelector('.md-back').disabled = false;
@@ -1187,6 +1235,46 @@ async function openMonday(eventId, venues, d) {
  * back to the plain route; a stream that breaks part-way says so instead of
  * silently starting the whole draft again.
  */
+/**
+ * Send to Monday over a stream: progress events as each item is written, then
+ * the results. Throws only when the stream cannot be had at all, so the caller
+ * can use the plain route. A stream that drops part-way is NOT retried here:
+ * what was written stays, and sending again finishes the group.
+ */
+async function sendStream(body, onProgress) {
+  const res = await fetch('/api/plan/monday/send-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body,
+  });
+  if (res.status === 401 || res.status === 403 || res.status === 400) {
+    const err = await res.json().catch(() => ({}));
+    return { error: err.error || ('Could not send (' + res.status + ').') };
+  }
+  if (!res.ok || !res.body) throw new Error('stream unavailable: ' + res.status);
+  const { createEventParser } = await import('/sse-parse.js');
+  const parser = createEventParser();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let heard = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const ev of parser.push(decoder.decode(value, { stream: true }))) {
+        heard = true;
+        if (ev.kind === 'progress') onProgress(ev);
+        else if (ev.kind === 'done') return { results: ev.results };
+        else if (ev.kind === 'error') return { error: ev.error };
+      }
+    }
+  } catch (e) {
+    if (!heard) throw e;
+  }
+  if (!heard) throw new Error('stream ended before it started');
+  return { error: 'The connection dropped while writing to Monday. What was written stays on the board; press the button again and Sauron finishes the group without duplicating anything.' };
+}
+
 async function draftStream(onStage) {
   const res = await fetch('/api/plan/draft-stream', {
     method: 'POST',

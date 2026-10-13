@@ -555,6 +555,7 @@ is routing and its last is analysis, through the same call site.
 | `recommendation` | Opus 5 | adaptive, xhigh | Nobody waiting; a weak proactive suggestion teaches people to ignore the feature |
 | `lookup` | Sonnet 5 | none | A date and a number. Latency beats depth |
 | `recovery` | Sonnet 5 | none | Restating data already gathered, after something already failed |
+| `planning` | Opus 5 | medium | The event planner's own passes -- brief and P&L, progress board, Monday deadlines, grouping and names. Khai, 13 Oct 2026: "as this contains analytics, ALWAYS OPUS". They had run on `lookup`; a test fails if one goes back |
 
 **Thinking is `{type: 'adaptive'}` and never `budget_tokens`** -- the older form
 is rejected with a 400 on Opus 5 and Sonnet 5, so a stale prior there takes the
@@ -769,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 60 migrations, 25 query tools, 11 ingest sources, 1,578 tests.
+started.** 60 migrations, 25 query tools, 11 ingest sources, 1,579 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1050,6 +1051,14 @@ update with the full task, its date and its people, TAGGING everyone on it
 (`create_update`'s `mentions_list`, which notifies them). A sub-item an
 earlier send made under the long name is still recognised.
 
+**Sending says how far it has got** (`/api/plan/monday/send-stream`, 13 Oct
+2026: a spinning wheel "that doesn't tell whether it stalled or not"): per
+venue, items written of how many with the one just written, a clock, and --
+after 20 quiet seconds -- how long Monday has taken to answer, so a slow API
+reads differently from a stall. A dropped stream is not retried: what was
+written stays, and sending again finishes the group. The preview has a clock
+too.
+
 **Plans and chats can be pinned** to the top of the left sidebar (migration
 058, `conversations.pinned_at`; 13 Oct 2026). Pins are listed under their own
 heading however old they are -- the recent list is a top-50 -- up to 20 per
@@ -1104,7 +1113,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,578 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,579 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
