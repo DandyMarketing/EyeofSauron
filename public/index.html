@@ -226,7 +226,19 @@
   details.explain .figure-note { padding: 2px 0 0; }
 
   /* --- forward book ------------------------------------------------------ */
-  .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; }
+  .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px;
+          /* A swipe settles on a whole day at the left edge, never half a cell
+             (Khai, 13 Oct 2026: the strip's scrolling "is not aligned right"). */
+          scroll-snap-type: x mandatory; scroll-padding-left: 0; }
+  .book .day { scroll-snap-align: start; }
+  /* On a phone the bar was drawn ACROSS the cells' bottom edge; the cut-off
+     last cell already says there is more to swipe. With a mouse it stays,
+     below the cells, because dragging it is how a mouse scrolls sideways. */
+  @media (hover: none) {
+    .book { scrollbar-width: none; }
+    .book::-webkit-scrollbar { display: none; }
+  }
+  @media (hover: hover) and (pointer: fine) { .book { padding-bottom: 10px; } }
   .book .day {
     flex: 0 0 auto; min-width: 58px; text-align: center;
     border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; background: var(--bg);

@@ -1565,3 +1565,11 @@ test('the dashboard folds its explanations behind "How to read this"', () => {
   assert.match(home, /'<p class="figure-note provisional">' \+ text/);
   assert.match(home, /'<p class="figure-note provisional">' \+ esc\(c\.month\.label\) \+ ' is still open in Xero/);
 });
+
+test('the service strip settles on whole days, with no bar across the cells on a phone', () => {
+  // Khai, 13 Oct 2026, on a phone: the strip's scroll bar "is not aligned right".
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /\.book \{[^}]*scroll-snap-type: x mandatory/);
+  assert.match(home, /\.book \.day \{ scroll-snap-align: start; \}/);
+  assert.match(home, /@media \(hover: none\) \{\s*\.book \{ scrollbar-width: none; \}/);
+});
