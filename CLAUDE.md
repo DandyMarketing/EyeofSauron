@@ -1147,8 +1147,9 @@ every answer and every error, in the chat and the planner (also on answers in
 reopened conversations), opens `/report-issue.js`: what kind of problem, and
 what they expected. The server SNAPSHOTS the conversation into `issue_reports`
 (migration 061) so a later rename or delete cannot change what was reported.
-Decided with Khai: admins hear through the **Reports** tab's badge on the admin
-console; the reporter gets a thank-you and nothing more.
+Decided with Khai: admins hear through the **Issues** tab's badge on the admin
+console (called Reports until 13 Oct 2026; Khai: it records faults,
+wrong answers and errors, and "report" already means the daily figures); the reporter gets a thank-you and nothing more.
 
 **Every answer now saves its tool trace** (`conversation_messages.tool_trace`):
 each data tool's input, an excerpt of what it RETURNED, and how long it took --

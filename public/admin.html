@@ -1177,7 +1177,7 @@ const TABS = [
   { id: 'connections', label: 'Connections', load: loadConnections },
   { id: 'accounting',  label: 'Accounting',  load: loadAccounting },
   { id: 'knowledge',   label: 'Knowledge',   load: loadKnowledge },
-  { id: 'reports',     label: 'Reports',     load: loadReports },
+  { id: 'issues',      label: 'Issues',      load: loadReports },
 ];
 
 const DEFAULT_TAB = 'attention';
@@ -1239,6 +1239,9 @@ function buildTabs() {
 const loaded = new Set();
 
 async function openTab(id, { reload = false } = {}) {
+  // The tab was 'Reports' until 13 Oct 2026 (Khai: it records faults, not
+  // reports); an old #reports link still lands on it.
+  if (id === 'reports') id = 'issues';
   if (!TABS.some(t => t.id === id)) id = DEFAULT_TAB;
 
   /**
@@ -1373,14 +1376,14 @@ async function loadReports(panel) {
   panel.innerHTML = '';
   const section = el('div', 'section');
   if (data.error) {
-    section.innerHTML = '<h2>Reports</h2><div class="u-warn">' + esc(data.error) + '</div>';
+    section.innerHTML = '<h2>Issues</h2><div class="u-warn">' + esc(data.error) + '</div>';
     panel.appendChild(section);
     return;
   }
   const reports = data.reports || [];
   const when = iso => new Date(iso).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  section.innerHTML = '<h2>Reports (' + reports.length + ')</h2>' +
-    (reports.length === 0 ? '<div class="muted">No reports yet. They arrive from the "Report an issue" link under every answer.</div>' :
+  section.innerHTML = '<h2>Issues (' + reports.length + ')</h2>' +
+    (reports.length === 0 ? '<div class="muted">No issues yet. Wrong answers, questions it could not answer and errors arrive here from the "Report an issue" link under every answer.</div>' :
     '<div class="ulist">' + reports.map(r =>
       '<div class="rrow" data-id="' + r.id + '">' +
         '<div class="r-head">' +
@@ -1488,7 +1491,7 @@ async function loadBadges() {
   const counts = {
     attention: (summary.alerts || 0) + (summary.pending_notes || 0) + (summary.ingestion_errors || 0),
     knowledge: summary.pending_notes || 0,
-    reports: summary.new_reports || 0,
+    issues: summary.new_reports || 0,
   };
 
   for (const [id, n] of Object.entries(counts)) {
