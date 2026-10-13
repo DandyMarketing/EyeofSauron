@@ -1485,3 +1485,19 @@ test('signed-in pages offer the home-screen install, once', () => {
   assert.match(js, /pointer: coarse/, 'it would show on computers');
   assert.match(js, /beforeinstallprompt/);
 });
+
+test('every page with a password box can show what is being typed', () => {
+  /**
+   * Khai, 13 Oct 2026, signing in on a phone: "should be able to reveal
+   * password when keying in". /password-reveal.js adds the eye to every
+   * password box on the page; a page with a box and without the script has none.
+   */
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    if (!/<input[^>]*type="password"/.test(html)) continue;
+    if (page === 'admin.html') continue;   // its one box is in a modal an owner opens for someone else
+    assert.match(html, /<script src="\/password-reveal\.js" defer><\/script>/, `${page} has a password box with no way to show it`);
+  }
+  const js = readFileSync('public/password-reveal.js', 'utf8');
+  assert.match(js, /addEventListener\('submit'[\s\S]*input\.type = 'password'/, 'a shown password must be hidden again before the form is sent');
+});

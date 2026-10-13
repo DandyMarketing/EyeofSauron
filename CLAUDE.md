@@ -1218,6 +1218,12 @@ is the versioned copy, pasted into Authentication -> Email Templates -> Invite
 user. It carries the set-up button and the homepage link with the home-screen
 steps.
 
+**Show the password** (Khai, same day, signing in on a phone): every password
+box on the sign-in, set-password and reset-password pages has an eye that
+shows what is typed (`/password-reveal.js`, one file for all three), and it
+hides again when the form is sent. Sign-in also tells the browser which box is
+the username and which the current password, so password managers fill them.
+
 ### Report an issue: built 13 Oct 2026
 
 With Sauron live with the team, Khai: "a button, report this issue, that sends
