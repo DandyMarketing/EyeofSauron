@@ -23,6 +23,7 @@
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
+<link rel="modulepreload" href="/board-suggest.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -221,6 +222,13 @@
   #monday-sheet .md-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   #monday-sheet .md-msg { font-size: 13px; margin-top: 8px; }
   #monday-sheet a { color: var(--accent); }
+  #monday-sheet .md-sugg { color: var(--text-muted); font-size: 12px; }
+  .draft .next-step {
+    margin-top: 12px; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--accent); background: rgba(232,147,58,0.08);
+  }
+  .draft .next-step .ns-title { font-weight: 600; color: var(--accent); }
+  .draft .next-step .note { margin: 4px 0 10px; }
   #monday-sheet .md-pick-l { display: block; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
   #monday-sheet .md-pick { max-width: 100%; margin-top: 2px; padding: 3px 4px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg); color: var(--text); font-size: 12px; }
   #monday-sheet .md-attach { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; }
@@ -705,15 +713,29 @@ function renderDraft(d) {
         btn.disabled = false; btn.textContent = 'Create this event';
         return;
       }
+      el.querySelector('.excel-msg').textContent = '';
       el.querySelector('.action-row').innerHTML =
-        '<div class="saved">Created at ' + escapeHtml((out.venues || []).join(', ')) +
-        (out.tasks ? ' with ' + out.tasks + ' task' + (out.tasks === 1 ? '' : 's') : '') + '.' +
-        (out.warning ? ' ' + escapeHtml(out.warning) : '') + '</div>' +
-        // Only an ISSUED brief goes to Monday: the event is recorded first, so a
-        // draft can never put tasks in people's inboxes.
-        (out.id ? '<button data-act="monday">Send to Monday</button>' : '');
-      el.querySelector('[data-act="monday"]')?.addEventListener('click', () =>
-        openMonday(out.id, out.venue_list || [], d));
+        '<div class="saved">✓ Event saved at ' + escapeHtml((out.venues || []).join(', ')) +
+        (out.tasks ? ', with ' + out.tasks + ' task' + (out.tasks === 1 ? '' : 's') : '') + '.' +
+        (out.warning ? ' ' + escapeHtml(out.warning) : '') + '</div>';
+      /**
+       * The next step is its OWN panel, not the Create button relabelled
+       * (Khai, 13 Oct 2026: "the button just changes text and I didn't realise
+       * I have to press it again"). Only an issued brief goes to Monday: the
+       * event is recorded first, so a draft can never put tasks in inboxes.
+       */
+      if (out.id) {
+        const next = document.createElement('div');
+        next.className = 'next-step';
+        next.innerHTML =
+          '<div class="ns-title">Next step: send the tasks to Monday</div>' +
+          '<div class="note">Opens a preview first. Nothing goes on a board until you press "Create in Monday" there.</div>' +
+          '<button data-act="monday">Send to Monday →</button>';
+        el.appendChild(next);
+        next.querySelector('[data-act="monday"]').addEventListener('click', () =>
+          openMonday(out.id, out.venue_list || [], d));
+        next.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     } catch (e) {
       el.querySelector('.excel-msg').innerHTML = '<span class="err">' + escapeHtml(String(e.message || e)) + '</span>';
       btn.disabled = false; btn.textContent = 'Create this event';
@@ -793,6 +815,7 @@ async function openMonday(eventId, venues, d) {
   overlay.addEventListener('click', close);
 
   const chosen = {};
+  const why = {};      // why a board was pre-selected, while it still is
   let preview = null;
 
   const pick = async () => {
@@ -810,10 +833,18 @@ async function openMonday(eventId, venues, d) {
         return;
       }
     }
+    // Your last choice for the venue first; otherwise a suggestion from the
+    // board names (venue initials, "Activations", the event's year), shown
+    // with its reason. Either way you see it and the preview before anything
+    // is written.
+    const { suggestBoard } = await import('/board-suggest.js');
+    const year = Number(String(d.start_date || '').slice(0, 4)) || new Date().getFullYear();
     for (const v of venues) {
       if (chosen[v.slug]) continue;
       const id = rememberedBoard(v.slug);
-      if (id && mondayBoards.some(b => b.id === id)) chosen[v.slug] = id;
+      if (id && mondayBoards.some(b => b.id === id)) { chosen[v.slug] = id; why[v.slug] = { id, text: 'your last choice' }; continue; }
+      const sug = suggestBoard(v.name, mondayBoards, year);
+      if (sug) { chosen[v.slug] = sug.id; why[v.slug] = { id: sug.id, text: 'suggested: ' + sug.why }; }
     }
 
     sheet.innerHTML =
@@ -848,7 +879,8 @@ async function openMonday(eventId, venues, d) {
               escapeHtml(b.name) + (b.folder ? '<small>' + escapeHtml(b.folder) + '</small>' : '') + '</button>').join('')
           : '<div class="md-empty">No board matches.</div>';
         const b = mondayBoards.find(x => x.id === chosen[slug]);
-        shown.innerHTML = b ? 'Board: <b>' + escapeHtml(b.name) + '</b>' : 'No board chosen yet.';
+        const reason = why[slug] && why[slug].id === chosen[slug] ? ' <span class="md-sugg">(' + escapeHtml(why[slug].text) + ')</span>' : '';
+        shown.innerHTML = b ? 'Board: <b>' + escapeHtml(b.name) + '</b>' + reason : 'No board chosen yet. Search below.';
       };
       input.addEventListener('input', draw);
       list.addEventListener('click', e => {
