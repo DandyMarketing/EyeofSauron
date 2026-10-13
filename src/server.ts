@@ -44,8 +44,8 @@ import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
-import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
-import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, postUpdateWithFile } from './lib/monday-client.js';
+import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
@@ -1452,6 +1452,12 @@ app.post('/api/plan/monday/preview', async (c) => {
       const exists = !!there;
       const alreadyNames = new Set((there ? board.groupItems.get(there.id)?.names ?? [] : []).map(n => n.trim().toLowerCase()));
       const already = items.filter(it => alreadyNames.has(it.name.trim().toLowerCase())).length;
+      // The plan moved on since the first send: what would change on the items
+      // already there. Shown with ticks; nothing here is written by a preview.
+      const nameOf = new Map(users.map(u => [Number(u.id), u.name]));
+      const changes = there
+        ? planChanges(items, board.groupItems.get(there.id)?.items ?? [], board.columns, id => nameOf.get(id) ?? `#${id}`)
+        : [];
       const warnings: string[] = [];
       if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');
       if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
@@ -1465,7 +1471,7 @@ app.post('/api/plan/monday/preview', async (c) => {
           pnl: targets.pnl === null ? null : items[targets.pnl].name,
         },
         board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
-        group_title: title, exists, already,
+        group_title: title, exists, already, changes,
         member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
         items, warnings,
       };
@@ -1495,7 +1501,7 @@ app.post('/api/plan/monday/send', async (c) => {
 
   const body = await c.req.json<{
     event_id?: string;
-    venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown }>;
+    venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown; updates?: unknown }>;
     attach?: { brief?: boolean; pnl?: boolean };
     draft?: any;
   }>().catch(() => null);
@@ -1527,6 +1533,21 @@ app.post('/api/plan/monday/send', async (c) => {
       const r = await createGroupWithItems(board, title, items, existing);
 
       /**
+       * The ticked changes to items already there. Checked against the board
+       * as it is NOW, not as the preview saw it: an item must be in this
+       * group, and one marked finished since the preview is still left alone.
+       */
+      const onBoard = existing ? board.groupItems.get(existing.groupId)?.items ?? [] : [];
+      const finished = new Set((board.columns.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+      const asked = sanitiseUpdates(v.updates);
+      const allowed = asked.flatMap(u => {
+        const it = onBoard.find(i => i.id === u.item_id);
+        return it && !(it.status && finished.has(it.status.trim().toLowerCase())) ? [{ ...u, name: it.name }] : [];
+      });
+      const changed = allowed.length && !r.error ? await updateItems(board, allowed) : { updated: 0, notes: [] as string[], error: undefined };
+      if (asked.length > allowed.length) changed.notes.push(`${asked.length - allowed.length} change${asked.length - allowed.length === 1 ? ' was' : 's were'} not made: the item is no longer in this group, or was marked finished since the preview.`);
+
+      /**
        * The brief to Concept & Mechanics and the P&L to Financial Forecast,
        * each only if it was ticked. An attachment that fails is reported
        * beside the group, never undoes it: the tasks are the point, and a
@@ -1535,41 +1556,55 @@ app.post('/api/plan/monday/send', async (c) => {
       const attached: { brief?: string; pnl?: string } = {};
       const targets = attachTargets(items.map(i => i.name));
       const d = body.draft ?? {};
+      const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+      /**
+       * The item to post on: the one made in this run, or -- on a re-send --
+       * the one already in the group. A re-send posts the brief or P&L as a
+       * NEW update marked revised, so the earlier version stays below it as
+       * history; one whose text is already on the item is not posted twice.
+       */
+      const targetId = (idx: number | null) => {
+        if (idx === null) return { id: undefined, revised: false };
+        const made = r.item_ids[idx];
+        if (made) return { id: made, revised: false };
+        const there = onBoard.find(i => i.name.trim().toLowerCase() === items[idx].name.trim().toLowerCase());
+        return { id: there?.id, revised: !!there };
+      };
+      const post = async (id: string, revised: boolean, html: string, file: { name: string; type: string; data: Buffer | ArrayBuffer }) => {
+        if (revised && alreadyPosted(html, await itemUpdateTexts(id))) return 'unchanged';
+        const head = revised ? `<p><strong>Revised ${today}</strong> -- this replaces the earlier version below.</p>` : '';
+        await postUpdateWithFile(id, head + html, file);
+        return revised ? 'revised' : 'ok';
+      };
       if (body.attach?.brief) {
-        const id = targets.brief === null ? undefined : r.item_ids[targets.brief];
+        const t = targetId(targets.brief);
         if (typeof d.brief !== 'string' || !d.brief.trim()) attached.brief = 'Not attached: the brief had no text.';
-        else if (!id && targets.brief !== null && existing) attached.brief = 'Not attached again: "Concept & Mechanics" was already on the board from the first send.';
-        else if (!id) attached.brief = 'Not attached: no "Concept & Mechanics" item was created on this board.';
+        else if (!t.id) attached.brief = 'Not attached: there is no "Concept & Mechanics" item in this group.';
         else {
           try {
-            const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
             const doc = await briefDocx(d.brief.slice(0, 100_000), { title: issued.ev.name, generatedOn: today });
-            await postUpdateWithFile(id, briefMondayHtml(d.brief, issued.ev.name), { name: `${safeFileName(issued.ev.name, 'Event')}_Brief.docx`, type: DOCX_TYPE, data: doc });
-            attached.brief = 'ok';
+            attached.brief = await post(t.id, t.revised, briefMondayHtml(d.brief, issued.ev.name), { name: `${safeFileName(issued.ev.name, 'Event')}_Brief.docx`, type: DOCX_TYPE, data: doc });
           } catch (e: any) { attached.brief = `Not attached: ${e?.message ?? e}`; }
         }
       }
       if (body.attach?.pnl) {
-        const id = targets.pnl === null ? undefined : r.item_ids[targets.pnl];
+        const t = targetId(targets.pnl);
         if (!hasPnl(d)) attached.pnl = 'Not attached: the brief has no revenue lines for a P&L.';
-        else if (!id && targets.pnl !== null && existing) attached.pnl = 'Not attached again: "Financial Forecast" was already on the board from the first send.';
-        else if (!id) attached.pnl = 'Not attached: no "Financial Forecast" item was created on this board.';
+        else if (!t.id) attached.pnl = 'Not attached: there is no "Financial Forecast" item in this group.';
         else {
           try {
-            const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
             const p = await eventPnlFile({ ...d, name: issued.ev.name }, venue, [venue.name], today);
-            await postUpdateWithFile(id, pnlUpdateHtml(issued.ev.name, p.figures, p.rates as any), { name: p.file, type: XLSX_TYPE, data: p.buf });
-            attached.pnl = 'ok';
+            attached.pnl = await post(t.id, t.revised, pnlUpdateHtml(issued.ev.name, p.figures, p.rates as any), { name: p.file, type: XLSX_TYPE, data: p.buf });
           } catch (e: any) { attached.pnl = `Not attached: ${e?.message ?? e}`; }
         }
       }
 
-      console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
+      console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}, ${changed.updated} changed${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}${changed.error ? ` -- ${changed.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
       return {
         slug: v.slug, venue: venue.name, board: board.name, group_title: title,
         url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
-        created: r.created, skipped: r.skipped, finished_existing: !!existing, notes: r.notes,
-        total: items.length, error: r.error, attached,
+        created: r.created, skipped: r.skipped, finished_existing: !!existing, notes: [...r.notes, ...changed.notes],
+        updated: changed.updated, total: items.length, error: r.error ?? changed.error, attached,
       };
     }));
     return c.json({ results });

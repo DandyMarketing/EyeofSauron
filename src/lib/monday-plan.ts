@@ -22,6 +22,22 @@ export interface BoardColumns {
   status: string | null;
   /** The status label new items start on, if the board has it. */
   statusLabel: string | null;
+  /**
+   * The labels the BOARD marks as finished (Monday's own `is_done`). On the NP
+   * board that is Done, Waiting for Review and Share -- the team's definition,
+   * not a guess at the word "Done".
+   */
+  doneLabels?: string[];
+}
+
+/** An item already on the board, as a re-send compares it with the plan. */
+export interface BoardItem {
+  id: string;
+  name: string;
+  deadline: string | null;
+  owner_ids: number[];
+  assigned_ids: number[];
+  status: string | null;
 }
 
 export interface TemplateStep {
@@ -219,12 +235,19 @@ export function findColumns(
     ? (Array.isArray(statusCol.settings.labels) ? statusCol.settings.labels : Object.values(statusCol.settings.labels))
     : [];
   const label = labels.map(l => (typeof l === 'string' ? l : l?.label)).find(l => /^new assignment$/i.test(l ?? '')) ?? null;
+  // A board whose labels carry no is_done flag falls back to "Done" itself.
+  const flagged = labels.filter(l => l && typeof l === 'object' && 'is_done' in l);
+  const doneLabels = (flagged.length
+    ? flagged.filter(l => l.is_done === true).map(l => String(l.label ?? ''))
+    : labels.map(l => (typeof l === 'string' ? l : String(l?.label ?? ''))).filter(l => /^done$/i.test(l))
+  ).filter(Boolean);
   return {
     deadline: pick('date', /^deadline$/i),
     owner: pick('people', /^owner$/i),
     assigned: pick('people', /^assigned to$/i),
     status,
     statusLabel: label,
+    doneLabels,
   };
 }
 
@@ -426,6 +449,124 @@ export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'd
     assigned_ids: ids(r?.assigned_ids),
   }));
   return out.every(i => i.name) ? out : null;
+}
+
+/**
+ * What a re-send would CHANGE on items already in the group (Khai, 13 Oct
+ * 2026: the plan keeps being built after the first send, and the board should
+ * follow it). Matched by name, as the finish-a-group path already is.
+ *
+ * Three rules, all decided with Khai:
+ * - **A finished item is never touched** -- whatever label the board itself
+ *   marks done (`doneLabels`). It is listed, so the reader knows why.
+ * - **Every difference is a tick, and only ticked ones are written.** Ticked
+ *   by default only where the board cell is EMPTY. Where the board already
+ *   holds something else, the team may have fixed it on purpose ("there might
+ *   be changes to things that might be fixed already"), so it is shown and
+ *   left unticked: overwriting it takes a deliberate press.
+ * - **The plan never clears a cell.** A plan with no deadline or nobody named
+ *   says nothing about the board's value, so it is not a difference.
+ */
+export interface FieldChange {
+  field: 'deadline' | 'owner' | 'assigned';
+  board: string;
+  plan: string;
+  /** The value to write: a date, or people ids. */
+  value: string | number[];
+  /** Ticked by default: only when the board cell is empty. */
+  on: boolean;
+}
+
+export interface ItemChanges {
+  item_id: string;
+  name: string;
+  /** The board's finished label, when the item is left alone for it. */
+  done?: string;
+  changes: FieldChange[];
+}
+
+export function planChanges(
+  planned: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>>,
+  onBoard: BoardItem[],
+  cols: BoardColumns,
+  nameOf: (id: number) => string,
+): ItemChanges[] {
+  const byName = new Map(onBoard.map(b => [b.name.trim().toLowerCase(), b]));
+  const done = new Set((cols.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+  const sameSet = (a: number[], b: number[]) => a.length === b.length && a.every(x => b.includes(x));
+  const names = (ids: number[]) => ids.map(nameOf).join(', ');
+  const out: ItemChanges[] = [];
+  const seen = new Set<string>();
+  for (const p of planned) {
+    const b = byName.get(p.name.trim().toLowerCase());
+    if (!b || seen.has(b.id)) continue;
+    seen.add(b.id);
+    if (b.status && done.has(b.status.trim().toLowerCase())) {
+      out.push({ item_id: b.id, name: b.name, done: b.status, changes: [] });
+      continue;
+    }
+    const changes: FieldChange[] = [];
+    if (cols.deadline && p.deadline && p.deadline !== b.deadline) {
+      changes.push({ field: 'deadline', board: b.deadline ?? '', plan: p.deadline, value: p.deadline, on: !b.deadline });
+    }
+    const people = (field: 'owner' | 'assigned', col: string | null, plan: number[], board: number[]) => {
+      if (col && plan.length && !sameSet(plan, board)) {
+        changes.push({ field, board: names(board), plan: names(plan), value: plan, on: board.length === 0 });
+      }
+    };
+    people('owner', cols.owner, p.owner_ids, b.owner_ids);
+    people('assigned', cols.assigned, p.assigned_ids, b.assigned_ids);
+    if (changes.length) out.push({ item_id: b.id, name: b.name, changes });
+  }
+  return out;
+}
+
+/** The ticked changes, back from the browser, checked like `sanitiseItems`. */
+export interface ItemUpdate { item_id: string; deadline?: string; owner_ids?: number[]; assigned_ids?: number[] }
+
+export function sanitiseUpdates(raw: unknown): ItemUpdate[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = (x: unknown) => (Array.isArray(x) ? x : []).map(Number).filter(n => Number.isInteger(n) && n > 0).slice(0, 20);
+  const out: ItemUpdate[] = [];
+  for (const r of raw.slice(0, 80) as any[]) {
+    if (typeof r?.item_id !== 'string' || !/^\d{1,20}$/.test(r.item_id)) continue;
+    const u: ItemUpdate = { item_id: r.item_id };
+    if (typeof r.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.deadline)) u.deadline = r.deadline;
+    if (ids(r.owner_ids).length) u.owner_ids = ids(r.owner_ids);
+    if (ids(r.assigned_ids).length) u.assigned_ids = ids(r.assigned_ids);
+    if (u.deadline || u.owner_ids || u.assigned_ids) out.push(u);
+  }
+  return out;
+}
+
+/**
+ * The column_values for one update. Unlike `columnValues`, the status is
+ * never set: an item somebody is working on keeps the status they gave it.
+ */
+export function updateValues(u: Omit<ItemUpdate, 'item_id'>, cols: BoardColumns): Record<string, unknown> {
+  const v: Record<string, unknown> = {};
+  const people = (ids: number[]) => ({ personsAndTeams: ids.map(id => ({ id, kind: 'person' })) });
+  if (cols.deadline && u.deadline) v[cols.deadline] = { date: u.deadline };
+  if (cols.owner && u.owner_ids?.length) v[cols.owner] = people(u.owner_ids);
+  if (cols.assigned && u.assigned_ids?.length) v[cols.assigned] = people(u.assigned_ids);
+  return v;
+}
+
+/**
+ * Whether an update's text is already on the item, so a re-send does not post
+ * the same brief twice. Compared as plain words: Monday stores its own HTML,
+ * so markup will not match, and a near-miss only means posting again -- the
+ * safe direction.
+ */
+export function plainWords(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function alreadyPosted(html: string, existing: string[]): boolean {
+  const mine = plainWords(html);
+  return !!mine && existing.some(e => plainWords(e).includes(mine));
 }
 
 /**

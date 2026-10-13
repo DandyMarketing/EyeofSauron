@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
-  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople, type MondayUser,
+  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople,
+  planChanges, sanitiseUpdates, updateValues, alreadyPosted, type MondayUser, type BoardItem,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -77,7 +78,7 @@ test('columns are found by their titles, and the starting status label read from
     { id: 'date3', title: 'Original Deadline', type: 'date' },
     { id: 'status9', title: 'Status', type: 'status', settings: { labels: { 0: 'Working on it', 4: 'New Assignment' } } },
   ]);
-  assert.deepEqual(cols, { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: 'New Assignment' });
+  assert.deepEqual(cols, { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: 'New Assignment', doneLabels: [] });
 });
 
 test('a deadline is flagged, never moved', () => {
@@ -219,4 +220,69 @@ test('a person no longer active on Monday is left off a template step and said',
   assert.deepEqual(items[0].owner_ids, [99680353]);
   assert.equal(items[0].owner_label, 'salvin');
   assert.match(items[0].flags.join(), /A person on the board's template is no longer active on Monday -- left off/);
+});
+
+// --- A re-send updates what is already there (Khai, 13 Oct 2026) ---
+
+test('the finished labels are the board\'s own is_done flags, as on the NP board', () => {
+  const cols = findColumns([{ id: 'status9', title: 'Status', type: 'status', settings: { labels: [
+    { label: 'Working on it', is_done: false }, { label: 'Done', is_done: true }, { label: 'Stuck', is_done: false },
+    { label: 'Waiting for Review', is_done: true }, { label: 'New Assignment', is_done: false }, { label: 'Share', is_done: true },
+  ] } }]);
+  assert.deepEqual(cols.doneLabels, ['Done', 'Waiting for Review', 'Share']);
+  // A board with no flags falls back to "Done" itself.
+  assert.deepEqual(findColumns([{ id: 's', title: 'Status', type: 'status', settings: { labels: { 0: 'Working on it', 1: 'Done' } } }]).doneLabels, ['Done']);
+});
+
+test('a re-send shows what changed: empty cells ticked, filled ones not, finished items left alone', () => {
+  const cols = { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: 'New Assignment', doneLabels: ['Done', 'Waiting for Review'] };
+  const name = (id: number) => users.find(u => Number(u.id) === id)?.name ?? `#${id}`;
+  const board: BoardItem[] = [
+    { id: '11', name: '5. Photography', deadline: null, owner_ids: [69158983], assigned_ids: [], status: 'New Assignment' },
+    { id: '12', name: '7. Booking Rules', deadline: '2026-11-20', owner_ids: [69158983], assigned_ids: [37868628], status: 'Working on it' },
+    { id: '13', name: '2. Concept & Mechanics', deadline: '2026-10-20', owner_ids: [69158983], assigned_ids: [], status: 'Done' },
+    { id: '14', name: 'Post the teaser reel (Instagram)', deadline: '2026-12-01', owner_ids: [69158983], assigned_ids: [99680353], status: null },
+  ];
+  const plan = [
+    { name: '5. Photography', deadline: '2026-12-10', owner_ids: [69158983], assigned_ids: [106554939] },
+    { name: '7. booking rules', deadline: '2026-11-15', owner_ids: [69158983], assigned_ids: [56148909] },
+    { name: '2. Concept & Mechanics', deadline: '2026-10-25', owner_ids: [69158983], assigned_ids: [] },
+    // Nothing changed, and the plan naming nobody does not clear the board.
+    { name: 'Post the teaser reel (Instagram)', deadline: '2026-12-01', owner_ids: [69158983], assigned_ids: [] },
+    // Not on the board yet: added by the send, not a change.
+    { name: 'Book the DJ', deadline: '2026-11-01', owner_ids: [69158983], assigned_ids: [] },
+  ];
+  const out = planChanges(plan, board, cols, name);
+  assert.equal(out.length, 3);
+  const photo = out.find(c => c.item_id === '11')!;
+  assert.deepEqual(photo.changes.map(c => [c.field, c.on]), [['deadline', true], ['assigned', true]]);
+  const rules = out.find(c => c.item_id === '12')!;
+  // The team already set these on the board: shown, but not ticked.
+  assert.deepEqual(rules.changes.map(c => [c.field, c.board, c.plan, c.on]), [
+    ['deadline', '2026-11-20', '2026-11-15', false],
+    ['assigned', 'Corbin Tay Neon', 'Lukasz Kononowicz', false],
+  ]);
+  assert.deepEqual(out.find(c => c.item_id === '13'), { item_id: '13', name: '2. Concept & Mechanics', done: 'Done', changes: [] });
+});
+
+test('ticked changes come back checked, and an update never touches the status', () => {
+  assert.deepEqual(sanitiseUpdates([
+    { item_id: '11', deadline: '2026-12-10', assigned_ids: [106554939] },
+    { item_id: 'x; drop', deadline: '2026-12-10' },
+    { item_id: '12', deadline: 'next week' },
+    { item_id: '13', owner_ids: ['abc', -1] },
+  ]), [{ item_id: '11', deadline: '2026-12-10', assigned_ids: [106554939] }]);
+  assert.deepEqual(sanitiseUpdates('nonsense'), []);
+  const cols = { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: 'New Assignment' };
+  assert.deepEqual(updateValues({ deadline: '2026-12-10', assigned_ids: [7] }, cols), {
+    date: { date: '2026-12-10' }, people_1: { personsAndTeams: [{ id: 7, kind: 'person' }] },
+  });
+});
+
+test('a brief already on the item is not posted twice; a changed one is', () => {
+  const html = '<h2>NYE</h2><p>Three floors &amp; one countdown.</p>';
+  const onMonday = ['Revised 2026-10-13 -- this replaces the earlier version below. NYE Three floors & one countdown.'];
+  assert.equal(alreadyPosted(html, onMonday), true);
+  assert.equal(alreadyPosted('<p>Four floors now.</p>', onMonday), false);
+  assert.equal(alreadyPosted(html, []), false);
 });

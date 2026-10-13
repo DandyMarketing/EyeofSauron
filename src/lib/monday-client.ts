@@ -14,8 +14,8 @@
  */
 
 import {
-  findColumns, historicalOffsets, columnValues,
-  type BoardColumns, type MondayUser, type TemplateStep, type PreviewItem,
+  findColumns, historicalOffsets, columnValues, updateValues,
+  type BoardColumns, type BoardItem, type ItemUpdate, type MondayUser, type TemplateStep, type PreviewItem,
 } from './monday-plan.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
@@ -76,8 +76,8 @@ export interface BoardForPlan {
   history: Map<string, { days_before: number; n: number }>;
   subscribers: string[];
   permissions: string;
-  /** What is already in each group, in board order: names, and the last item. */
-  groupItems: Map<string, { names: string[]; lastId: string | null }>;
+  /** What is already in each group, in board order: names, the items, and the last one. */
+  groupItems: Map<string, { names: string[]; lastId: string | null; items: BoardItem[] }>;
 }
 
 const people = (value: string | null): number[] => {
@@ -117,7 +117,7 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
 
   // Every item, for the template and the history. A board is a few hundred
   // items; the page size is 500 and the cursor is followed regardless.
-  const colIds = [columns.owner, columns.assigned, columns.deadline].filter(Boolean) as string[];
+  const colIds = [columns.owner, columns.assigned, columns.deadline, columns.status].filter(Boolean) as string[];
   const items: Array<{ id: string; name: string; group: string; values: Record<string, string | null>; text: Record<string, string | null> }> = [];
   let cursor: string | null = null;
   for (let page = 0; page < 20; page++) {
@@ -151,10 +151,17 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
     deadline: columns.deadline ? ((i.text[columns.deadline] ?? '').slice(0, 10) || null) : null,
   })));
 
-  const groupItems = new Map<string, { names: string[]; lastId: string | null }>();
+  const groupItems = new Map<string, { names: string[]; lastId: string | null; items: BoardItem[] }>();
   for (const it of items) {
-    const g = groupItems.get(it.group) ?? { names: [], lastId: null };
+    const g = groupItems.get(it.group) ?? { names: [], lastId: null, items: [] };
     g.names.push(it.name); g.lastId = it.id;
+    g.items.push({
+      id: it.id, name: it.name,
+      deadline: columns.deadline ? ((it.text[columns.deadline] ?? '').slice(0, 10) || null) : null,
+      owner_ids: columns.owner ? people(it.values[columns.owner]) : [],
+      assigned_ids: columns.assigned ? people(it.values[columns.assigned]) : [],
+      status: columns.status ? (it.text[columns.status] || null) : null,
+    });
     groupItems.set(it.group, g);
   }
 
@@ -255,6 +262,49 @@ export async function createGroupWithItems(
     }
   }
   return { group_id: groupId, created, skipped, item_ids: itemIds, notes };
+}
+
+/**
+ * Change items already on the board: only the ticked fields, one item at a
+ * time. Same rule as creating: a person Monday refuses costs that item its
+ * people (the date still goes), any other failure stops and says how far it
+ * got. The status is never touched.
+ */
+export async function updateItems(
+  board: BoardForPlan, updates: Array<ItemUpdate & { name?: string }>,
+): Promise<{ updated: number; notes: string[]; error?: string }> {
+  const notes: string[] = [];
+  let updated = 0;
+  const write = (itemId: string, vals: Record<string, unknown>) => gql(
+    'mutation ($b: ID!, $i: ID!, $v: JSON!) { change_multiple_column_values(board_id: $b, item_id: $i, column_values: $v) { id } }',
+    { b: board.id, i: itemId, v: JSON.stringify(vals) },
+  );
+  for (const u of updates) {
+    const vals = updateValues(u, board.columns);
+    if (!Object.keys(vals).length) continue;
+    try {
+      try {
+        await write(u.item_id, vals);
+      } catch (e: any) {
+        if (!/assign person|person with id/i.test(String(e?.message ?? e)) || !u.deadline) throw e;
+        await write(u.item_id, updateValues({ deadline: u.deadline }, board.columns));
+        notes.push(`"${u.name ?? u.item_id}": the date was changed but not the people -- Monday refused one of them. Assign it on the board.`);
+      }
+      updated++;
+    } catch (e: any) {
+      return { updated, notes, error: `Stopped changing items at "${u.name ?? u.item_id}": ${e?.message ?? e}` };
+    }
+  }
+  return { updated, notes };
+}
+
+/** The text of an item's recent updates, newest first, to avoid posting one twice. */
+export async function itemUpdateTexts(itemId: string): Promise<string[]> {
+  const d = await gql<{ items: Array<{ updates: Array<{ body: string | null; text_body: string | null }> }> }>(
+    'query ($i: [ID!]) { items(ids: $i) { updates(limit: 25) { body text_body } } }',
+    { i: [itemId] },
+  );
+  return (d.items?.[0]?.updates ?? []).map(u => u.text_body || u.body || '');
 }
 
 /**

@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 58 migrations, 25 query tools, 11 ingest sources, 1,561 tests.
+started.** 58 migrations, 25 query tools, 11 ingest sources, 1,565 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1011,6 +1011,20 @@ and the rest added after them. People no longer active on Monday are dropped
 from template steps and flagged on the preview, and a person Monday still
 refuses costs that one item its people, not the whole send.
 
+**Sending again also UPDATES what is already there** (Khai, 13 Oct 2026: the
+plan keeps being built after the first send). `planChanges()` compares each
+item in the group with the plan by name and lists the differences -- deadline,
+Owner, Assigned To -- each as a tick; only ticked ones are written, and the
+status is never touched. Ticked by default only where the board cell is EMPTY:
+where it holds something else the team may have fixed it on purpose, so
+overwriting it takes a deliberate press. The plan never clears a cell. **An
+item the board marks finished is left alone** -- Monday's own `is_done` labels
+(on the NP board: Done, Waiting for Review, Share), re-checked at send. The
+brief and P&L go on again as a NEW update marked "Revised", the earlier one kept
+below it, and are not posted when the item already carries the same text. A
+task the plan RENAMES cannot be matched and arrives as a new item; the old one
+stays.
+
 **Plans and chats can be pinned** to the top of the left sidebar (migration
 058, `conversations.pinned_at`; 13 Oct 2026). Pins are listed under their own
 heading however old they are -- the recent list is a top-50 -- up to 20 per
@@ -1065,7 +1079,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,561 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,565 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

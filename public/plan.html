@@ -235,6 +235,14 @@
   #monday-sheet .md-attach label { display: block; padding: 4px 0; cursor: pointer; }
   #monday-sheet .md-attach small { display: block; color: var(--text-muted); font-size: 11px; margin-left: 22px; }
   #monday-sheet .md-attach input { margin-right: 6px; accent-color: var(--accent); }
+  #monday-sheet .md-changes { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+  #monday-sheet .md-changes .mc-item { padding: 6px 0; border-top: 1px solid var(--border); }
+  #monday-sheet .md-changes .mc-item:first-of-type { border-top: 0; }
+  #monday-sheet .md-changes .mc-name { font-weight: 600; font-size: 13px; }
+  #monday-sheet .md-changes label { display: block; padding: 3px 0 3px 22px; text-indent: -22px; cursor: pointer; font-size: 12px; }
+  #monday-sheet .md-changes input { margin-right: 6px; accent-color: var(--accent); }
+  #monday-sheet .md-changes .mc-was { color: var(--text-muted); text-decoration: line-through; }
+  #monday-sheet .md-changes .mc-done { color: var(--text-muted); font-size: 12px; }
   .draft .download-row { margin-bottom: 8px; }
 
   /**
@@ -921,6 +929,48 @@ async function openMonday(eventId, venues, d) {
     return dt.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   };
 
+
+  /**
+   * Changes to items ALREADY in the group, since the plan has moved on (Khai,
+   * 13 Oct 2026). Each difference is a tick; only ticked ones are written.
+   * Ticked by default only where the board cell is empty -- where the board
+   * holds something else, the team may have fixed it there on purpose.
+   * Finished items are listed and never touched.
+   */
+  const fieldName = { deadline: 'Deadline', owner: 'Owner', assigned: 'Assigned to' };
+  const showValue = (f, x) => f === 'deadline' ? fmt(x || null) : (x || '—');
+  const changesBlock = (v, i) => {
+    const list = v.changes || [];
+    if (!list.length) return '<div class="md-note">The items already there match the plan.</div>';
+    const open = list.filter(c => !c.done);
+    const done = list.filter(c => c.done);
+    return '<div class="md-changes"><div class="md-note"><strong>Changes since the last send.</strong> Only ticked ones are made. ' +
+      'A change to a cell that already holds something is unticked, in case the team set it on the board on purpose.</div>' +
+      open.map(c => {
+        const ci = list.indexOf(c);
+        return '<div class="mc-item"><div class="mc-name">' + escapeHtml(c.name) + '</div>' +
+          c.changes.map((f, k) => '<label><input type="checkbox" class="mc-tick" data-v="' + i + '" data-c="' + ci + '" data-f="' + k + '"' + (f.on ? ' checked' : '') + '>' +
+            escapeHtml(fieldName[f.field]) + ': ' +
+            (f.board ? '<span class="mc-was">' + escapeHtml(showValue(f.field, f.board)) + '</span> → ' : '<em>empty</em> → ') +
+            '<strong>' + escapeHtml(showValue(f.field, f.plan)) + '</strong></label>').join('') +
+          '</div>';
+      }).join('') +
+      (done.length ? '<div class="mc-done">Left alone because they are finished on the board: ' +
+        done.map(c => escapeHtml(c.name) + ' (' + escapeHtml(c.done) + ')').join(', ') + '.</div>' : '') +
+      '</div>';
+  };
+  const tickedUpdates = v => (v.changes || []).filter(c => !c.done).map(c => {
+    const u = { item_id: c.item_id };
+    for (const f of c.changes) {
+      if (!f.on) continue;
+      if (f.field === 'deadline') u.deadline = f.value;
+      if (f.field === 'owner') u.owner_ids = f.value;
+      if (f.field === 'assigned') u.assigned_ids = f.value;
+    }
+    return u;
+  }).filter(u => u.deadline || u.owner_ids || u.assigned_ids);
+  const sendLabel = () => preview && preview.venues.some(v => v.exists) ? 'Update in Monday' : 'Create in Monday';
+
   // A group that already exists is refused by the server unless renamed here,
   // so it stays sendable: renaming it in the preview is the fix.
   const sendable = v => !v.error && v.member !== false;
@@ -928,6 +978,8 @@ async function openMonday(eventId, venues, d) {
   const visibleFlags = it => it.flags.filter(f => !(it.unresolved || []).some(u => u.picked && f.includes('"' + u.name + '"')));
   const attachLine = (what, status) => !status ? ''
     : status === 'ok' ? '<div class="saved">' + escapeHtml(what) + ': attached.</div>'
+    : status === 'revised' ? '<div class="saved">' + escapeHtml(what) + ': posted as a revised update.</div>'
+    : status === 'unchanged' ? '<div class="md-note">' + escapeHtml(what) + ': unchanged since it was last posted, so not posted again.</div>'
     : '<div class="md-warn">' + escapeHtml(what) + ': ' + escapeHtml(status) + ' Download it from the brief and drop it in.</div>';
 
   const drawPreview = () => {
@@ -941,9 +993,9 @@ async function openMonday(eventId, venues, d) {
         // An unfinished group is completed, not duplicated: items already in it are skipped.
         (v.exists ? '<div class="md-note"><strong>This group is already on the board with ' + (v.already || 0) + ' of ' + v.items.length + ' items.</strong> ' +
           (v.items.length - (v.already || 0) > 0
-            ? 'Create in Monday adds the ' + (v.items.length - (v.already || 0)) + ' missing ones to it. Nothing already there is duplicated.'
+            ? 'The ' + (v.items.length - (v.already || 0)) + ' missing ones will be added. Nothing already there is duplicated.'
             : 'Every item is already there, so nothing will be added.') +
-          ' To start a separate group instead, rename it above.</div>' : '') +
+          ' To start a separate group instead, rename it above.</div>' + changesBlock(v, i) : '') +
         (v.member === false ? '<div class="md-warn">Sauron writes to Monday as ' + escapeHtml(preview.writes_as) + ', who is not a member of this board, so Monday will refuse. Add them to the board first.</div>' : '') +
         v.warnings.map(w => '<div class="md-note">' + escapeHtml(w) + '</div>').join('') +
         (brief && !v.attach?.brief ? '<div class="md-note">No "Concept &amp; Mechanics" step on this board\'s template, so the brief will not go on here.</div>' : '') +
@@ -977,12 +1029,16 @@ async function openMonday(eventId, venues, d) {
         '<label><input type="checkbox" data-a="pnl"' + (attach.pnl ? ' checked' : '') + (hasPnl ? '' : ' disabled') + '> P&amp;L → Financial Forecast <small>the headline figures as the update, with the Excel attached</small></label>' +
         (brief ? '' : '<div class="md-note">This draft has no brief text to attach.</div>') +
         (hasPnl ? '' : '<div class="md-note">This brief has no revenue lines, so there is no P&amp;L to attach.</div>') +
+        (preview.venues.some(v => v.exists) ? '<div class="md-note">Where the group is already on the board, these go on as a new update marked "Revised", with the earlier one kept below it. If the text has not changed, nothing is posted.</div>' : '') +
       '</div>' +
       blocks +
       '<div class="md-row"><button type="button" class="secondary md-back">Back</button>' +
-      '<button type="button" class="md-send"' + (any ? '' : ' disabled') + '>Create in Monday</button></div>' +
+      '<button type="button" class="md-send"' + (any ? '' : ' disabled') + '>' + sendLabel() + '</button></div>' +
       '<div class="md-msg"></div>';
     sheet.querySelectorAll('.md-attach input').forEach(cb => cb.addEventListener('change', () => { attach[cb.dataset.a] = cb.checked; }));
+    sheet.querySelectorAll('.mc-tick').forEach(cb => cb.addEventListener('change', () => {
+      preview.venues[+cb.dataset.v].changes[+cb.dataset.c].changes[+cb.dataset.f].on = cb.checked;
+    }));
     sheet.querySelectorAll('.md-pick').forEach(sel => sel.addEventListener('change', () => {
       // Keep any renamed group titles before drawing again.
       preview.venues.forEach((v, i) => { const t = sheet.querySelector('#md-title-' + i); if (t) v.group_title = t.value; });
@@ -1006,9 +1062,10 @@ async function openMonday(eventId, venues, d) {
       slug: v.slug, board_id: v.board.id,
       group_title: (sheet.querySelector('#md-title-' + i)?.value || v.group_title).trim(),
       items: v.items.map(it => ({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids })),
+      updates: tickedUpdates(v),
     } : null).filter(Boolean);
     sending = true;
-    btn.disabled = true; btn.textContent = 'Creating…';
+    btn.disabled = true; btn.textContent = 'Writing…';
     sheet.querySelector('.md-back').disabled = true;
     msg.textContent = 'Writing to Monday, one item at a time so the order holds…';
     try {
@@ -1028,7 +1085,8 @@ async function openMonday(eventId, venues, d) {
         (r.error && !r.created
           ? '<div class="md-warn">' + escapeHtml(r.error) + '</div>'
           : '<div class="saved">"' + escapeHtml(r.group_title) + '": ' + r.created + ' item' + (r.created === 1 ? '' : 's') + ' added' +
-            (r.skipped ? ', ' + r.skipped + ' already there' : '') + ' (' + r.total + ' in the plan).' +
+            (r.skipped ? ', ' + r.skipped + ' already there' : '') +
+            (r.updated ? ', ' + r.updated + ' changed' : '') + ' (' + r.total + ' in the plan).' +
             (r.url ? ' <a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">Open the board</a>' : '') + '</div>' +
             (r.notes || []).map(n => '<div class="md-note">' + escapeHtml(n) + '</div>').join('') +
             (r.error ? '<div class="md-warn">' + escapeHtml(r.error) + ' The items already made are left on the board. Fix the cause and send again: only the missing items are added.</div>' : '') +
@@ -1040,7 +1098,7 @@ async function openMonday(eventId, venues, d) {
       sheet.querySelector('.md-done').addEventListener('click', close);
     } catch (e) {
       sending = false;
-      btn.disabled = false; btn.textContent = 'Create in Monday';
+      btn.disabled = false; btn.textContent = sendLabel();
       sheet.querySelector('.md-back').disabled = false;
       msg.innerHTML = '<span class="err">' + escapeHtml(String(e.message || e)) + '</span>';
     }
