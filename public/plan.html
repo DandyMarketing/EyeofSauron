@@ -235,6 +235,12 @@
   #monday-sheet .md-attach label { display: block; padding: 4px 0; cursor: pointer; }
   #monday-sheet .md-attach small { display: block; color: var(--text-muted); font-size: 11px; margin-left: 22px; }
   #monday-sheet .md-attach input { margin-right: 6px; accent-color: var(--accent); }
+  #monday-sheet tr.md-sub td { background: color-mix(in srgb, var(--surface) 60%, transparent); }
+  #monday-sheet tr.md-sub .md-task { padding-left: 18px; }
+  @media (max-width: 640px) { #monday-sheet tr.md-sub { margin-left: 16px; width: calc(100% - 16px); box-sizing: border-box; border-left: 2px solid var(--accent); } }
+  #monday-sheet .md-arrow { color: var(--text-muted); margin-right: 4px; }
+  #monday-sheet tr.md-parent .md-task { font-weight: 600; }
+  #monday-sheet .md-parent-pick { max-width: 100%; }
   #monday-sheet .md-changes { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
   #monday-sheet .md-changes .mc-item { padding: 6px 0; border-top: 1px solid var(--border); }
   #monday-sheet .md-changes .mc-item:first-of-type { border-top: 0; }
@@ -960,7 +966,7 @@ async function openMonday(eventId, venues, d) {
       '</div>';
   };
   const tickedUpdates = v => (v.changes || []).filter(c => !c.done).map(c => {
-    const u = { item_id: c.item_id };
+    const u = { item_id: c.item_id, ...(c.sub ? { sub: true } : {}) };
     for (const f of c.changes) {
       if (!f.on) continue;
       if (f.field === 'deadline') u.deadline = f.value;
@@ -970,6 +976,42 @@ async function openMonday(eventId, venues, d) {
     return u;
   }).filter(u => u.deadline || u.owner_ids || u.assigned_ids);
   const sendLabel = () => preview && preview.venues.some(v => v.exists) ? 'Update in Monday' : 'Create in Monday';
+
+
+  /**
+   * The planner's tasks as SUB-ITEMS (Khai, 13 Oct 2026): each under the
+   * template step Sauron chose, or an extra parent ("Marketing plan"...) that
+   * is made only when something goes under it. Rows are drawn parent first,
+   * its tasks beneath; the "Under" dropdown moves a task.
+   */
+  const isExtra = (v, name) => !v.items.some(it => !it.parent && it.name === name);
+  const usedExtras = v => v.subitems
+    ? [...new Set(v.items.filter(it => it.parent && isExtra(v, it.parent)).map(it => it.parent))]
+        .sort((a, b) => v.parents.indexOf(a) - v.parents.indexOf(b))
+    : [];
+  const rowsOf = v => {
+    if (!v.subitems) return v.items.map((it, j) => ({ it, j }));
+    const rows = [];
+    const kids = name => v.items.map((it, j) => ({ it, j, sub: true })).filter(x => x.it.parent === name);
+    v.items.forEach((it, j) => { if (!it.parent) { rows.push({ it, j }); rows.push(...kids(it.name)); } });
+    for (const name of usedExtras(v)) {
+      const first = v.items.find(it => it.parent === name);
+      rows.push({ it: { name, owner_label: first ? first.owner_label : '' }, extra: true });
+      rows.push(...kids(name));
+    }
+    return rows;
+  };
+  const payloadItems = v => {
+    const out = v.items.filter(it => !it.parent).map(it => ({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids }));
+    for (const name of usedExtras(v)) {
+      const first = v.items.find(it => it.parent === name);
+      out.push({ name, deadline: null, owner_ids: first ? first.owner_ids : [], assigned_ids: [] });
+    }
+    for (const it of v.items.filter(it => it.parent)) {
+      out.push({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids, parent: it.parent });
+    }
+    return out;
+  };
 
   // A group that already exists is refused by the server unless renamed here,
   // so it stays sendable: renaming it in the preview is the fix.
@@ -1000,11 +1042,20 @@ async function openMonday(eventId, venues, d) {
         v.warnings.map(w => '<div class="md-note">' + escapeHtml(w) + '</div>').join('') +
         (brief && !v.attach?.brief ? '<div class="md-note">No "Concept &amp; Mechanics" step on this board\'s template, so the brief will not go on here.</div>' : '') +
         (hasPnl && !v.attach?.pnl ? '<div class="md-note">No "Financial Forecast" step on this board\'s template, so the P&amp;L will not go on here.</div>' : '') +
-        '<div class="md-note">' + v.items.length + ' items' + (flagged ? ', <span style="color:var(--error)">' + flagged + ' flagged</span> — check them in Monday after, or fix the plan and send again' : '') + '.</div>' +
+        (v.subitems && (v.flat || []).length ? '<div class="md-warn">' + v.flat.length + ' of the plan\'s tasks are already on the board as separate items from an earlier send. They now go in as sub-items; delete the separate ones on Monday when you are ready: ' + v.flat.map(escapeHtml).join('; ') + '.</div>' : '') +
+        '<div class="md-note">' + (v.subitems
+          ? v.items.filter(it => !it.parent).length + ' items' + (usedExtras(v).length ? ' plus ' + usedExtras(v).length + ' new parent' + (usedExtras(v).length === 1 ? '' : 's') : '') + ', with ' + v.items.filter(it => it.parent).length + ' of the plan\'s tasks as sub-items under them. Sauron chose where each task goes; move any with "Under"'
+          : v.items.length + ' items') + (flagged ? ', <span style="color:var(--error)">' + flagged + ' flagged</span> — check them in Monday after, or fix the plan and send again' : '') + '.</div>' +
         '<table><thead><tr><th>Deadline</th><th>Task</th><th>Owner</th><th>Assigned to</th><th>Why / flags</th></tr></thead><tbody>' +
-        v.items.map((it, j) =>
-          '<tr><td class="md-date" data-l="Due">' + escapeHtml(fmt(it.deadline)) + '</td>' +
-          '<td class="md-task">' + escapeHtml(it.name) + '<span class="md-src">' + (it.source === 'template' ? 'board template' : 'from the plan') + '</span></td>' +
+        rowsOf(v).map(({ it, j, sub, extra }) => extra
+          ? '<tr class="md-parent"><td class="md-date" data-l="Due">—</td><td class="md-task">' + escapeHtml(it.name) +
+            '<span class="md-src">new parent item</span></td><td data-l="Owner">' + escapeHtml(it.owner_label || '—') + '</td><td data-l="Assigned">—</td><td></td></tr>'
+          : '<tr' + (sub ? ' class="md-sub"' : '') + '><td class="md-date" data-l="Due">' + escapeHtml(fmt(it.deadline)) + '</td>' +
+          '<td class="md-task">' + (sub ? '<span class="md-arrow">↳</span>' : '') + escapeHtml(it.name) +
+            '<span class="md-src">' + (it.source === 'template' ? 'board template' : sub ? 'sub-item, from the plan' : 'from the plan') + '</span>' +
+            (sub ? '<label class="md-pick-l">Under: <select class="md-parent-pick" data-v="' + i + '" data-it="' + j + '">' +
+              v.parents.map(pn => '<option' + (pn === it.parent ? ' selected' : '') + '>' + escapeHtml(pn) + '</option>').join('') +
+              '</select></label>' : '') + '</td>' +
           '<td data-l="Owner">' + escapeHtml(it.owner_label || '—') + '</td>' +
           '<td data-l="Assigned">' + escapeHtml(it.assigned_label || '—') +
             // A name nobody could be matched to: you choose, never a guess.
@@ -1051,6 +1102,11 @@ async function openMonday(eventId, venues, d) {
       it.assigned_label = [it._base.label, ...picks.map(x => (x.options.find(o => o.id === x.picked) || {}).name)].filter(Boolean).join(', ');
       drawPreview();
     }));
+    sheet.querySelectorAll('.md-parent-pick').forEach(sel => sel.addEventListener('change', () => {
+      preview.venues.forEach((v, i) => { const t = sheet.querySelector('#md-title-' + i); if (t) v.group_title = t.value; });
+      preview.venues[+sel.dataset.v].items[+sel.dataset.it].parent = sel.value;
+      drawPreview();
+    }));
     sheet.querySelector('.md-back').addEventListener('click', pick);
     sheet.querySelector('.md-send').addEventListener('click', runSend);
   };
@@ -1061,7 +1117,7 @@ async function openMonday(eventId, venues, d) {
     const payload = preview.venues.map((v, i) => sendable(v) ? {
       slug: v.slug, board_id: v.board.id,
       group_title: (sheet.querySelector('#md-title-' + i)?.value || v.group_title).trim(),
-      items: v.items.map(it => ({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids })),
+      items: payloadItems(v),
       updates: tickedUpdates(v),
     } : null).filter(Boolean);
     sending = true;

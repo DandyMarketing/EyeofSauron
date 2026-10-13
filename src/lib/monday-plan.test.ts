@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
   deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople,
-  planChanges, sanitiseUpdates, updateValues, alreadyPosted, type MondayUser, type BoardItem,
+  planChanges, sanitiseUpdates, updateValues, alreadyPosted, assignParents, parentByKind, EXTRA_PARENTS, type MondayUser, type BoardItem, type PlannerTask,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -131,9 +131,9 @@ test('column values are what create_item expects, and nothing is sent for an emp
 test('what comes back from the browser is checked before it is written', () => {
   assert.equal(sanitiseItems([]), null);
   assert.equal(sanitiseItems([{ name: '' }]), null);
-  assert.equal(sanitiseItems(Array.from({ length: 81 }, () => ({ name: 'x' }))), null);
+  assert.equal(sanitiseItems(Array.from({ length: 121 }, () => ({ name: 'x' }))), null);
   assert.deepEqual(sanitiseItems([{ name: ' A ', deadline: 'soon', owner_ids: ['5', -1, 'x'], assigned_ids: [2.5, 7] }]),
-    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7] }]);
+    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7], parent: null }]);
 });
 
 test('the deadline pass is given the plan first and the board\'s history as a labelled reference', () => {
@@ -285,4 +285,59 @@ test('a brief already on the item is not posted twice; a changed one is', () => 
   assert.equal(alreadyPosted(html, onMonday), true);
   assert.equal(alreadyPosted('<p>Four floors now.</p>', onMonday), false);
   assert.equal(alreadyPosted(html, []), false);
+});
+
+// --- The planner's tasks as sub-items (Khai, 13 Oct 2026) ---
+
+const npSteps = [
+  { name: '4. Submit & Review Food Menu', owner_ids: [], assigned_ids: [] },
+  { name: '5. Determine if Photography is needed', owner_ids: [], assigned_ids: [] },
+  { name: '8. Source entertainment/partners/sponsors', owner_ids: [], assigned_ids: [] },
+];
+const task = (description: string, kind: string): PlannerTask =>
+  ({ description, kind, channel: null, due_date: '2026-12-01', owner_name: null });
+
+test('each task goes under the step the AI chose, or an extra parent -- never a step that does not exist', () => {
+  const tasks = [task('Book the DJ', 'ops'), task('Post 4: dinner menu being cooked', 'content'), task('Press invites', 'outreach'), task('Something odd', 'other')];
+  const out = assignParents(tasks, npSteps, { tasks: [
+    { task: 0, step: 2 },
+    { task: 1, step: -1, extra: 'Marketing plan' },
+    { task: 2, step: 9 },              // no such step: falls back to its kind
+    // task 3 not answered at all: by kind
+  ] });
+  assert.deepEqual(out.map(t => t.parent), ['8. Source entertainment/partners/sponsors', 'Marketing plan', 'PR & outreach', 'Other tasks']);
+  // Nothing usable from the pass: every task still has a parent.
+  assert.deepEqual(assignParents(tasks, npSteps, null).map(t => t.parent), ['Operations', 'Marketing plan', 'PR & outreach', 'Other tasks']);
+  assert.ok(EXTRA_PARENTS.includes(parentByKind('content') as any));
+});
+
+test('a sub-item must hang off a top-level item sent with it', () => {
+  const ok = sanitiseItems([
+    { name: '8. Source entertainment/partners/sponsors', deadline: null, owner_ids: [], assigned_ids: [] },
+    { name: 'Book the DJ', deadline: '2026-11-01', owner_ids: [1], assigned_ids: [], parent: '8. Source entertainment/partners/sponsors' },
+  ]);
+  assert.equal(ok?.[1].parent, '8. Source entertainment/partners/sponsors');
+  assert.equal(ok?.[0].parent, null);
+  assert.equal(sanitiseItems([{ name: 'Book the DJ', deadline: null, owner_ids: [], assigned_ids: [], parent: 'Nowhere' }]), null);
+});
+
+test('a re-send compares a task with the sub-items of its parent, on the sub-item board\'s labels', () => {
+  const cols = { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: 'New Assignment', doneLabels: ['Done'] };
+  const sub = { deadline: 'dup__of_start_date', owner: 'person', assigned: 'dup__of_owner', status: 'status', statusLabel: null, doneLabels: ['Done', 'Stuck', 'Waiting for Review'] };
+  const board: BoardItem[] = [{
+    id: '1', name: 'Marketing plan', deadline: null, owner_ids: [69158983], assigned_ids: [], status: null,
+    subitems: [
+      { id: '21', name: 'Post 4: dinner menu being cooked', deadline: null, owner_ids: [69158983], assigned_ids: [], status: null },
+      { id: '22', name: 'Post 5: boiler room teaser', deadline: '2026-12-15', owner_ids: [69158983], assigned_ids: [], status: 'Stuck' },
+    ],
+  }, { id: '9', name: 'Post 4: dinner menu being cooked', deadline: '2026-12-08', owner_ids: [], assigned_ids: [], status: null }];
+  const out = planChanges([
+    { name: 'Post 4: dinner menu being cooked', deadline: '2026-12-09', owner_ids: [69158983], assigned_ids: [], parent: 'Marketing plan' },
+    { name: 'Post 5: boiler room teaser', deadline: '2026-12-16', owner_ids: [69158983], assigned_ids: [], parent: 'Marketing plan' },
+  ], board, cols, String, sub);
+  // The sub-item, not the flat item of the same name from the earlier send.
+  assert.deepEqual(out[0], { item_id: '21', name: 'Post 4: dinner menu being cooked', sub: true, changes: [{ field: 'deadline', board: '', plan: '2026-12-09', value: '2026-12-09', on: true }] });
+  // "Stuck" is finished on the sub-item board's own definition.
+  assert.deepEqual(out[1], { item_id: '22', name: 'Post 5: boiler room teaser', sub: true, done: 'Stuck', changes: [] });
+  assert.deepEqual(sanitiseUpdates([{ item_id: '21', sub: true, deadline: '2026-12-09' }]), [{ item_id: '21', sub: true, deadline: '2026-12-09' }]);
 });

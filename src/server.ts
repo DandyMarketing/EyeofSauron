@@ -44,7 +44,7 @@ import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
-import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -1430,38 +1430,76 @@ app.post('/api/plan/monday/preview', async (c) => {
       try { board = await readBoardForPlan(String(boardId)); }
       catch (e: any) { return { slug: v.slug, venue: v.name, error: String(e?.message ?? e) }; }
 
-      let deadlines: StepDeadline[] = [];
-      if (board.template.length > 0) {
-        const res = await anthropic.messages.create({
-          model: modelFor('lookup', process.env).model,
-          max_tokens: 4096,
-          system: [{ type: 'text', text: DEADLINE_SYSTEM, cache_control: { type: 'ephemeral' } }],
-          tools: [deadlineTool(board.template.length) as any],
-          tool_choice: { type: 'tool', name: 'record_checklist_deadlines' },
-          messages: [{ role: 'user', content: deadlinePrompt({ event: ev, tasks, steps: board.template, history: board.history, today, brief: body.brief ?? null }) }],
-        });
-        const call = res.content.find((b: any) => b.type === 'tool_use') as any;
-        deadlines = (Array.isArray(call?.input?.steps) ? call.input.steps : [])
-          .filter((s: any) => Number.isInteger(s?.index))
-          .map((s: any) => ({ index: s.index, due: typeof s.due === 'string' ? s.due : null, phase: s.phase === 'after' ? 'after' : 'before', reason: String(s.reason ?? '').slice(0, 200) }));
-      }
+      // The deadline pass and the grouping pass are independent: run together.
+      const subitems = !!(board.subBoardId && board.subColumns);
+      const [deadlines, grouped] = await Promise.all([
+        (async (): Promise<StepDeadline[]> => {
+          if (board.template.length === 0) return [];
+          const res = await anthropic.messages.create({
+            model: modelFor('lookup', process.env).model,
+            max_tokens: 4096,
+            system: [{ type: 'text', text: DEADLINE_SYSTEM, cache_control: { type: 'ephemeral' } }],
+            tools: [deadlineTool(board.template.length) as any],
+            tool_choice: { type: 'tool', name: 'record_checklist_deadlines' },
+            messages: [{ role: 'user', content: deadlinePrompt({ event: ev, tasks, steps: board.template, history: board.history, today, brief: body.brief ?? null }) }],
+          });
+          const call = res.content.find((b: any) => b.type === 'tool_use') as any;
+          return (Array.isArray(call?.input?.steps) ? call.input.steps : [])
+            .filter((s: any) => Number.isInteger(s?.index))
+            .map((s: any) => ({ index: s.index, due: typeof s.due === 'string' ? s.due : null, phase: s.phase === 'after' ? 'after' : 'before', reason: String(s.reason ?? '').slice(0, 200) }));
+        })(),
+        /**
+         * Each planner task under the template step it belongs to, or an extra
+         * parent (Khai, 13 Oct 2026). A failed pass costs the AI's choice, not
+         * the preview: every task then goes under a parent by its kind.
+         */
+        (async (): Promise<PlannerTask[]> => {
+          if (!subitems || tasks.length === 0) return tasks;
+          try {
+            const res = await anthropic.messages.create({
+              model: modelFor('lookup', process.env).model,
+              max_tokens: 4096,
+              system: [{ type: 'text', text: PARENT_SYSTEM, cache_control: { type: 'ephemeral' } }],
+              tools: [parentTool(tasks.length) as any],
+              tool_choice: { type: 'tool', name: 'record_task_parents' },
+              messages: [{ role: 'user', content: parentPrompt(board.template, tasks) }],
+            });
+            const call = res.content.find((b: any) => b.type === 'tool_use') as any;
+            return assignParents(tasks, board.template, call?.input);
+          } catch (e: any) {
+            console.error(`[plan/monday/preview] grouping pass failed, grouping by kind: ${e?.message ?? e}`);
+            return assignParents(tasks, board.template, null);
+          }
+        })(),
+      ]);
 
       const boardUsers = users.filter(u => board.subscribers.includes(u.id));
-      const items = buildItems({ steps: board.template, deadlines, tasks, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date });
+      const items = buildItems({ steps: board.template, deadlines, tasks: grouped, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date });
       const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
       const exists = !!there;
-      const alreadyNames = new Set((there ? board.groupItems.get(there.id)?.names ?? [] : []).map(n => n.trim().toLowerCase()));
-      const already = items.filter(it => alreadyNames.has(it.name.trim().toLowerCase())).length;
+      const key = (n: string) => n.trim().toLowerCase();
+      const inGroup = there ? board.groupItems.get(there.id)?.items ?? [] : [];
+      const topByName = new Map(inGroup.map(i => [key(i.name), i]));
+      // A task is already there as a sub-item of its parent, or -- top-level
+      // item -- by its own name.
+      const isThere = (it: { name: string; parent?: string | null }) => it.parent
+        ? (topByName.get(key(it.parent))?.subitems ?? []).some(x => key(x.name) === key(it.name))
+        : topByName.has(key(it.name));
+      const already = items.filter(isThere).length;
+      // An earlier send put these in as separate items; they now go as sub-items,
+      // and the separate ones are left for the team to delete (Khai: "you tidy").
+      const flat = items.filter(it => it.parent && topByName.has(key(it.name))).map(it => it.name);
       // The plan moved on since the first send: what would change on the items
       // already there. Shown with ticks; nothing here is written by a preview.
       const nameOf = new Map(users.map(u => [Number(u.id), u.name]));
       const changes = there
-        ? planChanges(items, board.groupItems.get(there.id)?.items ?? [], board.columns, id => nameOf.get(id) ?? `#${id}`)
+        ? planChanges(items, inGroup, board.columns, id => nameOf.get(id) ?? `#${id}`, board.subColumns)
         : [];
       const warnings: string[] = [];
       if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');
       if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
       if (!board.columns.assigned) warnings.push('This board has no "Assigned To" column; nobody will be assigned.');
+      if (!subitems && tasks.length) warnings.push('This board has no sub-items, so the plan\'s tasks go in as separate items.');
       if (!sender && tasks.length) warnings.push(`No Monday user has your email (${user.email}), so the planner's tasks will have no Owner.`);
       const targets = attachTargets(items.map(i => i.name));
       return {
@@ -1472,6 +1510,8 @@ app.post('/api/plan/monday/preview', async (c) => {
         },
         board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
         group_title: title, exists, already, changes,
+        subitems, flat,
+        parents: subitems ? [...board.template.map(s => s.name.slice(0, 255)), ...EXTRA_PARENTS] : [],
         member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
         items, warnings,
       };
@@ -1528,7 +1568,7 @@ app.post('/api/plan/monday/send', async (c) => {
       // items already in it are skipped and the rest added after them.
       const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
       const existing = there
-        ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null }
+        ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null, items: board.groupItems.get(there.id)?.items ?? [] }
         : undefined;
       const r = await createGroupWithItems(board, title, items, existing);
 
@@ -1538,11 +1578,16 @@ app.post('/api/plan/monday/send', async (c) => {
        * group, and one marked finished since the preview is still left alone.
        */
       const onBoard = existing ? board.groupItems.get(existing.groupId)?.items ?? [] : [];
-      const finished = new Set((board.columns.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+      const finishedIn = (cols: typeof board.columns | null) => new Set((cols?.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+      const finished = finishedIn(board.columns);
+      const finishedSub = finishedIn(board.subColumns);
       const asked = sanitiseUpdates(v.updates);
       const allowed = asked.flatMap(u => {
-        const it = onBoard.find(i => i.id === u.item_id);
-        return it && !(it.status && finished.has(it.status.trim().toLowerCase())) ? [{ ...u, name: it.name }] : [];
+        const it = u.sub
+          ? onBoard.flatMap(i => i.subitems ?? []).find(i => i.id === u.item_id)
+          : onBoard.find(i => i.id === u.item_id);
+        const done = u.sub ? finishedSub : finished;
+        return it && !(it.status && done.has(it.status.trim().toLowerCase())) ? [{ ...u, name: it.name }] : [];
       });
       const changed = allowed.length && !r.error ? await updateItems(board, allowed) : { updated: 0, notes: [] as string[], error: undefined };
       if (asked.length > allowed.length) changed.notes.push(`${asked.length - allowed.length} change${asked.length - allowed.length === 1 ? ' was' : 's were'} not made: the item is no longer in this group, or was marked finished since the preview.`);

@@ -38,6 +38,8 @@ export interface BoardItem {
   owner_ids: number[];
   assigned_ids: number[];
   status: string | null;
+  /** Its sub-items, on a board that has them. */
+  subitems?: BoardItem[];
 }
 
 export interface TemplateStep {
@@ -52,6 +54,8 @@ export interface PlannerTask {
   kind: string;
   due_date: string | null;
   owner_name: string | null;
+  /** The item it goes under as a sub-item, chosen by the grouping pass. */
+  parent?: string | null;
 }
 
 export interface StepDeadline { index: number; due: string | null; phase: 'before' | 'after'; reason: string }
@@ -74,6 +78,11 @@ export interface PreviewItem {
   flags: string[];
   /** Names nobody could be matched to, each with the people to choose from. */
   unresolved?: Array<{ name: string; options: Array<{ id: number; name: string }> }>;
+  /**
+   * The item this goes under as a SUB-ITEM; null for a top-level item. Only
+   * planner tasks have one, and only on a board with sub-items.
+   */
+  parent?: string | null;
 }
 
 /**
@@ -338,6 +347,90 @@ export const DEADLINE_SYSTEM =
   'Every step gets a date.';
 
 /**
+ * THE PLANNER'S TASKS AS SUB-ITEMS (Khai, 13 Oct 2026: "too many line items
+ * ... there should be sub items like marketing plan, the AI needs to classify
+ * it"). Decided with him: each task goes under the Event Template step it
+ * belongs to -- menu tasks under the menu step, the DJ under entertainment --
+ * and a task that fits no step under one of these extra parents. The AI
+ * chooses; the preview shows its choice with a dropdown to move any task.
+ */
+export const EXTRA_PARENTS = ['Marketing plan', 'PR & outreach', 'Operations', 'Other tasks'] as const;
+
+/** Where a task goes when the grouping pass gives nothing usable: by its kind. */
+export function parentByKind(kind: string): string {
+  return kind === 'content' ? 'Marketing plan'
+    : kind === 'outreach' ? 'PR & outreach'
+    : kind === 'ops' ? 'Operations'
+    : 'Other tasks';
+}
+
+export function parentTool(taskCount: number) {
+  return {
+    name: 'record_task_parents',
+    description: 'Put every planner task under the checklist step it belongs to, or under an extra parent.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        tasks: {
+          type: 'array',
+          description: `One entry per task, ${taskCount} in all, by index.`,
+          items: {
+            type: 'object',
+            properties: {
+              task: { type: 'number', description: 'The task\'s index as listed.' },
+              step: { type: 'number', description: 'The checklist step\'s index it belongs under, or -1 when no step fits.' },
+              extra: { type: 'string', enum: [...EXTRA_PARENTS], description: 'Only when step is -1.' },
+            },
+            required: ['task', 'step'],
+          },
+        },
+      },
+      required: ['tasks'],
+    },
+  };
+}
+
+export const PARENT_SYSTEM =
+  'You file an event plan\'s tasks under the steps of the team\'s checklist, so the board reads as a short checklist with ' +
+  'the detail beneath each step. Put a task under a step only when it is genuinely part of that step: writing or costing a ' +
+  'menu under the menu step, booking a DJ or a partner under the entertainment/partners step, a photographer under the ' +
+  'photography step, booking rules under the booking-rules step. Do NOT stretch a step to hold a task -- social posts, ' +
+  'reels, stories, ads and influencer work go under "Marketing plan"; press, invitations, VIP and guest outreach under ' +
+  '"PR & outreach"; staffing, set-up, security and running the night under "Operations" unless a step covers them; ' +
+  'anything else under "Other tasks". Every task gets exactly one place.';
+
+export function parentPrompt(steps: TemplateStep[], tasks: PlannerTask[]): string {
+  return [
+    'THE CHECKLIST STEPS:',
+    steps.map((s, i) => `${i}. ${s.name}`).join('\n') || '(none)',
+    '',
+    `EXTRA PARENTS, for a task no step fits: ${EXTRA_PARENTS.join(', ')}`,
+    '',
+    'THE TASKS:',
+    tasks.map((t, i) => `${i}. [${t.kind}] ${t.description}${t.channel ? ` (${t.channel})` : ''}`).join('\n'),
+  ].join('\n');
+}
+
+/**
+ * The pass's answer, checked: a step index that exists, or a listed extra.
+ * Anything else -- a missing task, an index past the end -- falls back to the
+ * task's kind, so every task always has a parent and none is guessed into a
+ * step it was never put under.
+ */
+export function assignParents(
+  tasks: PlannerTask[], steps: TemplateStep[], answer: unknown,
+): PlannerTask[] {
+  const list = Array.isArray((answer as any)?.tasks) ? (answer as any).tasks : [];
+  const chosen = new Map<number, string>();
+  for (const a of list) {
+    if (!Number.isInteger(a?.task) || a.task < 0 || a.task >= tasks.length) continue;
+    if (Number.isInteger(a.step) && a.step >= 0 && a.step < steps.length) chosen.set(a.task, steps[a.step].name.slice(0, 255));
+    else if ((EXTRA_PARENTS as readonly string[]).includes(a.extra)) chosen.set(a.task, a.extra);
+  }
+  return tasks.map((t, i) => ({ ...t, parent: chosen.get(i) ?? parentByKind(t.kind) }));
+}
+
+/**
  * Template steps and planner tasks as the items the preview shows and the send
  * writes. Template items keep the board's own Owner and Assigned To: those are
  * the team's standing defaults and nobody asked Sauron to reassign them.
@@ -416,6 +509,7 @@ export function buildItems(input: {
         owner_label: input.sender?.name ?? '',
         assigned_label: assignedLabel,
         flags,
+        parent: t.parent ?? null,
         ...(m.unresolved.length ? { unresolved: m.unresolved.map(u => ({ name: u.name, options: options(u.candidates) })) } : {}),
       };
     });
@@ -439,15 +533,19 @@ export function columnValues(item: Pick<PreviewItem, 'deadline' | 'owner_ids' | 
  * and came back, and a browser can send anything: names are strings, people
  * are whole numbers, dates are dates, and there is a ceiling on how many.
  */
-export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>> | null {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 80) return null;
+export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }> | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 120) return null;
   const ids = (x: unknown) => (Array.isArray(x) ? x : []).map(Number).filter(n => Number.isInteger(n) && n > 0).slice(0, 20);
   const out = raw.map((r: any) => ({
     name: typeof r?.name === 'string' ? r.name.trim().slice(0, 255) : '',
     deadline: typeof r?.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.deadline) ? r.deadline : null,
     owner_ids: ids(r?.owner_ids),
     assigned_ids: ids(r?.assigned_ids),
+    parent: typeof r?.parent === 'string' && r.parent.trim() ? r.parent.trim().slice(0, 255) : null,
   }));
+  // A parent must be one of the top-level items sent with it.
+  const tops = new Set(out.filter(i => !i.parent).map(i => i.name.toLowerCase()));
+  for (const i of out) if (i.parent && !tops.has(i.parent.toLowerCase())) return null;
   return out.every(i => i.name) ? out : null;
 }
 
@@ -480,33 +578,43 @@ export interface FieldChange {
 export interface ItemChanges {
   item_id: string;
   name: string;
+  /** A sub-item: written on the sub-item board. */
+  sub?: boolean;
   /** The board's finished label, when the item is left alone for it. */
   done?: string;
   changes: FieldChange[];
 }
 
 export function planChanges(
-  planned: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>>,
+  planned: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }>,
   onBoard: BoardItem[],
   cols: BoardColumns,
   nameOf: (id: number) => string,
+  /** The sub-item board's columns; a planned item with a parent is compared with that parent's sub-items. */
+  subCols?: BoardColumns | null,
 ): ItemChanges[] {
-  const byName = new Map(onBoard.map(b => [b.name.trim().toLowerCase(), b]));
-  const done = new Set((cols.doneLabels ?? []).map(l => l.trim().toLowerCase()));
+  const key = (n: string) => n.trim().toLowerCase();
+  const byName = new Map(onBoard.map(b => [key(b.name), b]));
+  const doneOf = (c: BoardColumns) => new Set((c.doneLabels ?? []).map(l => l.trim().toLowerCase()));
   const sameSet = (a: number[], b: number[]) => a.length === b.length && a.every(x => b.includes(x));
   const names = (ids: number[]) => ids.map(nameOf).join(', ');
   const out: ItemChanges[] = [];
   const seen = new Set<string>();
   for (const p of planned) {
-    const b = byName.get(p.name.trim().toLowerCase());
+    const sub = !!(p.parent && subCols);
+    const b = sub
+      ? (byName.get(key(p.parent!))?.subitems ?? []).find(x => key(x.name) === key(p.name))
+      : byName.get(key(p.name));
     if (!b || seen.has(b.id)) continue;
     seen.add(b.id);
-    if (b.status && done.has(b.status.trim().toLowerCase())) {
-      out.push({ item_id: b.id, name: b.name, done: b.status, changes: [] });
+    const c = sub ? subCols! : cols;
+    const tag = sub ? { sub: true } : {};
+    if (b.status && doneOf(c).has(b.status.trim().toLowerCase())) {
+      out.push({ item_id: b.id, name: b.name, ...tag, done: b.status, changes: [] });
       continue;
     }
     const changes: FieldChange[] = [];
-    if (cols.deadline && p.deadline && p.deadline !== b.deadline) {
+    if (c.deadline && p.deadline && p.deadline !== b.deadline) {
       changes.push({ field: 'deadline', board: b.deadline ?? '', plan: p.deadline, value: p.deadline, on: !b.deadline });
     }
     const people = (field: 'owner' | 'assigned', col: string | null, plan: number[], board: number[]) => {
@@ -514,15 +622,15 @@ export function planChanges(
         changes.push({ field, board: names(board), plan: names(plan), value: plan, on: board.length === 0 });
       }
     };
-    people('owner', cols.owner, p.owner_ids, b.owner_ids);
-    people('assigned', cols.assigned, p.assigned_ids, b.assigned_ids);
-    if (changes.length) out.push({ item_id: b.id, name: b.name, changes });
+    people('owner', c.owner, p.owner_ids, b.owner_ids);
+    people('assigned', c.assigned, p.assigned_ids, b.assigned_ids);
+    if (changes.length) out.push({ item_id: b.id, name: b.name, ...tag, changes });
   }
   return out;
 }
 
 /** The ticked changes, back from the browser, checked like `sanitiseItems`. */
-export interface ItemUpdate { item_id: string; deadline?: string; owner_ids?: number[]; assigned_ids?: number[] }
+export interface ItemUpdate { item_id: string; sub?: boolean; deadline?: string; owner_ids?: number[]; assigned_ids?: number[] }
 
 export function sanitiseUpdates(raw: unknown): ItemUpdate[] {
   if (!Array.isArray(raw)) return [];
@@ -530,7 +638,7 @@ export function sanitiseUpdates(raw: unknown): ItemUpdate[] {
   const out: ItemUpdate[] = [];
   for (const r of raw.slice(0, 80) as any[]) {
     if (typeof r?.item_id !== 'string' || !/^\d{1,20}$/.test(r.item_id)) continue;
-    const u: ItemUpdate = { item_id: r.item_id };
+    const u: ItemUpdate = { item_id: r.item_id, ...(r.sub === true ? { sub: true } : {}) };
     if (typeof r.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.deadline)) u.deadline = r.deadline;
     if (ids(r.owner_ids).length) u.owner_ids = ids(r.owner_ids);
     if (ids(r.assigned_ids).length) u.assigned_ids = ids(r.assigned_ids);

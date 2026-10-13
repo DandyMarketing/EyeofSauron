@@ -78,6 +78,13 @@ export interface BoardForPlan {
   permissions: string;
   /** What is already in each group, in board order: names, the items, and the last one. */
   groupItems: Map<string, { names: string[]; lastId: string | null; items: BoardItem[] }>;
+  /**
+   * The board's sub-item board and its columns, found by title like the
+   * parent's. Null when the board has no sub-items: the planner's tasks then
+   * go in as items, as before.
+   */
+  subBoardId: string | null;
+  subColumns: BoardColumns | null;
 }
 
 const people = (value: string | null): number[] => {
@@ -113,23 +120,46 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
     return { id: c.id, title: c.title, type: c.type, settings };
   }));
   const groups = (b.groups ?? []).map((g: any) => ({ id: String(g.id), title: String(g.title) }));
+
+  // Sub-items live on a board of their own, with their own column ids.
+  let subBoardId: string | null = null;
+  let subColumns: BoardColumns | null = null;
+  const subCol = (b.columns ?? []).find((c: any) => c.type === 'subtasks');
+  try { subBoardId = subCol ? String(JSON.parse(subCol.settings_str ?? '{}')?.boardIds?.[0] ?? '') || null : null; } catch { subBoardId = null; }
+  if (subBoardId) {
+    const sb = await gql<{ boards: Array<{ columns: Array<{ id: string; title: string; type: string; settings_str: string | null }> }> }>(
+      'query ($id: [ID!]) { boards(ids: $id) { columns { id title type settings_str } } }', { id: [subBoardId] },
+    );
+    subColumns = findColumns((sb.boards?.[0]?.columns ?? []).map(c => {
+      let settings: any = null;
+      try { settings = JSON.parse(c.settings_str ?? 'null'); } catch { /* none */ }
+      return { id: c.id, title: c.title, type: c.type, settings };
+    }));
+  }
   const templateGroup = groups.find((g: { title: string }) => /^event template$/i.test(g.title.trim()))?.id ?? null;
 
   // Every item, for the template and the history. A board is a few hundred
   // items; the page size is 500 and the cursor is followed regardless.
   const colIds = [columns.owner, columns.assigned, columns.deadline, columns.status].filter(Boolean) as string[];
-  const items: Array<{ id: string; name: string; group: string; values: Record<string, string | null>; text: Record<string, string | null> }> = [];
+  const subIds = subColumns ? [subColumns.owner, subColumns.assigned, subColumns.deadline, subColumns.status].filter(Boolean) as string[] : [];
+  type Raw = { id: string; name: string; values: Record<string, string | null>; text: Record<string, string | null> };
+  const items: Array<Raw & { group: string; subitems: Raw[] }> = [];
+  const raw = (it: any): Raw => {
+    const values: Record<string, string | null> = {};
+    const text: Record<string, string | null> = {};
+    for (const cv of it.column_values ?? []) { values[cv.id] = cv.value; text[cv.id] = cv.text; }
+    return { id: String(it.id), name: it.name, values, text };
+  };
+  const fields = `id name group { id } column_values(ids: $cols) { id text value }${subColumns ? ' subitems { id name column_values(ids: $subs) { id text value } }' : ''}`;
   let cursor: string | null = null;
   for (let page = 0; page < 20; page++) {
+    const subVar = subColumns ? ', $subs: [String!]' : '';
     const q: { boards?: Array<{ items_page: any }>; next_items_page?: any } = cursor
-      ? await gql(`query ($c: String!, $cols: [String!]) { next_items_page(limit: 500, cursor: $c) { cursor items { id name group { id } column_values(ids: $cols) { id text value } } } }`, { c: cursor, cols: colIds })
-      : await gql(`query ($id: [ID!], $cols: [String!]) { boards(ids: $id) { items_page(limit: 500) { cursor items { id name group { id } column_values(ids: $cols) { id text value } } } } }`, { id: [boardId], cols: colIds });
+      ? await gql(`query ($c: String!, $cols: [String!]${subVar}) { next_items_page(limit: 500, cursor: $c) { cursor items { ${fields} } } }`, { c: cursor, cols: colIds, ...(subColumns ? { subs: subIds } : {}) })
+      : await gql(`query ($id: [ID!], $cols: [String!]${subVar}) { boards(ids: $id) { items_page(limit: 500) { cursor items { ${fields} } } } }`, { id: [boardId], cols: colIds, ...(subColumns ? { subs: subIds } : {}) });
     const pageData: any = cursor ? q.next_items_page : q.boards?.[0]?.items_page;
     for (const it of pageData?.items ?? []) {
-      const values: Record<string, string | null> = {};
-      const text: Record<string, string | null> = {};
-      for (const cv of it.column_values ?? []) { values[cv.id] = cv.value; text[cv.id] = cv.text; }
-      items.push({ id: String(it.id), name: it.name, group: String(it.group?.id ?? ''), values, text });
+      items.push({ ...raw(it), group: String(it.group?.id ?? ''), subitems: (it.subitems ?? []).map(raw) });
     }
     cursor = pageData?.cursor ?? null;
     if (!cursor) break;
@@ -151,22 +181,23 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
     deadline: columns.deadline ? ((i.text[columns.deadline] ?? '').slice(0, 10) || null) : null,
   })));
 
+  const asBoardItem = (it: Raw, cols: BoardColumns): BoardItem => ({
+    id: it.id, name: it.name,
+    deadline: cols.deadline ? ((it.text[cols.deadline] ?? '').slice(0, 10) || null) : null,
+    owner_ids: cols.owner ? people(it.values[cols.owner]) : [],
+    assigned_ids: cols.assigned ? people(it.values[cols.assigned]) : [],
+    status: cols.status ? (it.text[cols.status] || null) : null,
+  });
   const groupItems = new Map<string, { names: string[]; lastId: string | null; items: BoardItem[] }>();
   for (const it of items) {
     const g = groupItems.get(it.group) ?? { names: [], lastId: null, items: [] };
     g.names.push(it.name); g.lastId = it.id;
-    g.items.push({
-      id: it.id, name: it.name,
-      deadline: columns.deadline ? ((it.text[columns.deadline] ?? '').slice(0, 10) || null) : null,
-      owner_ids: columns.owner ? people(it.values[columns.owner]) : [],
-      assigned_ids: columns.assigned ? people(it.values[columns.assigned]) : [],
-      status: columns.status ? (it.text[columns.status] || null) : null,
-    });
+    g.items.push({ ...asBoardItem(it, columns), subitems: subColumns ? it.subitems.map(x => asBoardItem(x, subColumns!)) : [] });
     groupItems.set(it.group, g);
   }
 
   return {
-    groupItems,
+    groupItems, subBoardId, subColumns,
     id: String(b.id), name: b.name, workspace_id: String(b.workspace_id),
     columns, groups, template, templateGroup, history,
     subscribers: (b.subscribers ?? []).map((s: any) => String(s.id)),
@@ -209,8 +240,9 @@ export async function readPeople(): Promise<{ users: MondayUser[]; me: MondayUse
  * `item_ids` lines up with `items`: null for an item skipped or not reached.
  */
 export async function createGroupWithItems(
-  board: BoardForPlan, title: string, items: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>>,
-  existing?: { groupId: string; names: string[]; lastId: string | null },
+  board: BoardForPlan, title: string,
+  items: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }>,
+  existing?: { groupId: string; names: string[]; lastId: string | null; items?: BoardItem[] },
 ): Promise<{ group_id: string; created: number; skipped: number; item_ids: Array<string | null>; notes: string[]; error?: string }> {
   let groupId: string;
   let previous: string | null = null;
@@ -228,12 +260,22 @@ export async function createGroupWithItems(
     groupId = String(g.create_group.id);
   }
 
-  const already = new Set((existing?.names ?? []).map(n => n.trim().toLowerCase()));
+  const key = (n: string) => n.trim().toLowerCase();
+  const already = new Set((existing?.names ?? []).map(key));
   const itemIds: Array<string | null> = items.map(() => null);
   const notes: string[] = [];
   let created = 0;
   let skipped = 0;
 
+  // Parents by name: what is in the group already, then what this run makes.
+  const parentId = new Map<string, string>();
+  const subNames = new Map<string, Set<string>>();
+  for (const it of existing?.items ?? []) {
+    parentId.set(key(it.name), it.id);
+    subNames.set(it.id, new Set((it.subitems ?? []).map(x => key(x.name))));
+  }
+
+  const peopleRefused = (e: any) => /assign person|person with id/i.test(String(e?.message ?? e));
   const make = (item: typeof items[number], withPeople: boolean) => {
     const vals = columnValues(withPeople ? item : { ...item, owner_ids: [], assigned_ids: [] }, board.columns);
     const vars: Record<string, unknown> = { b: board.id, g: groupId, n: item.name, v: JSON.stringify(vals) };
@@ -241,21 +283,61 @@ export async function createGroupWithItems(
       ? gql<{ create_item: { id: string } }>('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON, $p: ID!) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v, position_relative_method: after_at, relative_to: $p) { id } }', { ...vars, p: previous })
       : gql<{ create_item: { id: string } }>('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v) { id } }', vars);
   };
+  const makeSub = (item: typeof items[number], parent: string, withPeople: boolean) => {
+    const vals = columnValues(withPeople ? item : { ...item, owner_ids: [], assigned_ids: [] }, board.subColumns!);
+    return gql<{ create_subitem: { id: string } }>(
+      'mutation ($p: ID!, $n: String!, $v: JSON) { create_subitem(parent_item_id: $p, item_name: $n, column_values: $v) { id } }',
+      { p: parent, n: item.name, v: JSON.stringify(vals) },
+    );
+  };
 
+  // Top-level items first, in order, so every parent exists before its sub-items.
+  const isSub = (it: typeof items[number]) => !!(it.parent && board.subBoardId && board.subColumns);
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (already.has(item.name.trim().toLowerCase())) { skipped++; continue; }
+    if (isSub(item)) continue;
+    if (already.has(key(item.name))) { skipped++; continue; }
     try {
       let r: { create_item: { id: string } };
       try {
         r = await make(item, true);
       } catch (e: any) {
-        if (!/assign person|person with id/i.test(String(e?.message ?? e))) throw e;
+        if (!peopleRefused(e)) throw e;
         r = await make(item, false);
         notes.push(`"${item.name}" was added without its people: Monday refused one of them (often an account no longer active). Assign it on the board.`);
       }
       previous = String(r.create_item.id);
       itemIds[i] = previous;
+      parentId.set(key(item.name), previous);
+      created++;
+    } catch (e: any) {
+      return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
+    }
+  }
+
+  // Then the planner's tasks, each under its parent.
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!isSub(item)) continue;
+    const pid = parentId.get(key(item.parent!));
+    if (!pid) {
+      notes.push(`"${item.name}" was not added: its parent "${item.parent}" is not in the group.`);
+      continue;
+    }
+    const under = subNames.get(pid) ?? new Set<string>();
+    if (under.has(key(item.name))) { skipped++; continue; }
+    try {
+      let r: { create_subitem: { id: string } };
+      try {
+        r = await makeSub(item, pid, true);
+      } catch (e: any) {
+        if (!peopleRefused(e)) throw e;
+        r = await makeSub(item, pid, false);
+        notes.push(`"${item.name}" was added without its people: Monday refused one of them. Assign it on the board.`);
+      }
+      itemIds[i] = String(r.create_subitem.id);
+      under.add(key(item.name));
+      subNames.set(pid, under);
       created++;
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
@@ -271,23 +353,26 @@ export async function createGroupWithItems(
  * got. The status is never touched.
  */
 export async function updateItems(
-  board: BoardForPlan, updates: Array<ItemUpdate & { name?: string }>,
+  board: BoardForPlan, updates: Array<ItemUpdate & { name?: string; sub?: boolean }>,
 ): Promise<{ updated: number; notes: string[]; error?: string }> {
   const notes: string[] = [];
   let updated = 0;
-  const write = (itemId: string, vals: Record<string, unknown>) => gql(
+  // A sub-item is written on the sub-item board, with that board's columns.
+  const write = (u: { sub?: boolean }, itemId: string, vals: Record<string, unknown>) => gql(
     'mutation ($b: ID!, $i: ID!, $v: JSON!) { change_multiple_column_values(board_id: $b, item_id: $i, column_values: $v) { id } }',
-    { b: board.id, i: itemId, v: JSON.stringify(vals) },
+    { b: u.sub ? board.subBoardId : board.id, i: itemId, v: JSON.stringify(vals) },
   );
   for (const u of updates) {
-    const vals = updateValues(u, board.columns);
+    const cols = u.sub ? board.subColumns : board.columns;
+    if (!cols || (u.sub && !board.subBoardId)) continue;
+    const vals = updateValues(u, cols);
     if (!Object.keys(vals).length) continue;
     try {
       try {
-        await write(u.item_id, vals);
+        await write(u, u.item_id, vals);
       } catch (e: any) {
         if (!/assign person|person with id/i.test(String(e?.message ?? e)) || !u.deadline) throw e;
-        await write(u.item_id, updateValues({ deadline: u.deadline }, board.columns));
+        await write(u, u.item_id, updateValues({ deadline: u.deadline }, cols));
         notes.push(`"${u.name ?? u.item_id}": the date was changed but not the people -- Monday refused one of them. Assign it on the board.`);
       }
       updated++;

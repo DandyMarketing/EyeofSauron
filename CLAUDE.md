@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 59 migrations, 25 query tools, 11 ingest sources, 1,571 tests.
+started.** 59 migrations, 25 query tools, 11 ingest sources, 1,574 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1025,6 +1025,20 @@ below it, and are not posted when the item already carries the same text. A
 task the plan RENAMES cannot be matched and arrives as a new item; the old one
 stays.
 
+**The planner's tasks go in as SUB-ITEMS** (Khai, 13 Oct 2026: "too many line
+items ... the AI needs to classify it"). A forced-tool pass at preview
+(`record_task_parents`, run beside the deadline pass) puts each task under the
+Event Template step it belongs to -- a menu task under the menu step, the DJ
+under entertainment -- or, when no step fits, under an extra parent: Marketing
+plan, PR & outreach, Operations, Other tasks (`EXTRA_PARENTS`), made only when
+something goes under it. The AI chooses and the preview shows each choice with
+an "Under" dropdown to move it. A failed pass groups by the task's kind rather
+than failing the preview. Sub-items are written on the board's sub-item board
+with ITS columns, found by title like the parent's; a board without sub-items
+gets items as before. Tasks an earlier send made as separate items are left
+there and listed on the preview for the team to delete -- Sauron does not
+delete from a board.
+
 **Plans and chats can be pinned** to the top of the left sidebar (migration
 058, `conversations.pinned_at`; 13 Oct 2026). Pins are listed under their own
 heading however old they are -- the recent list is a top-50 -- up to 20 per
@@ -1079,7 +1093,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,571 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,574 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
