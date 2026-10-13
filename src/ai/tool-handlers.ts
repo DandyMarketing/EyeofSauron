@@ -1,7 +1,7 @@
 import { serviceOrder } from '../parsers/revel/meal-periods.js';
 import { supabase } from '../lib/supabase.js';
 import { selectAll } from '../lib/paged.js';
-import { getCovers, coversVariance, normaliseShift } from '../lib/covers.js';
+import { getCovers, coversVariance, normaliseShift, parseMealPeriod } from '../lib/covers.js';
 import { buildChart, buildComposition, earliestBookedDate, isClosedDay } from './charts.js';
 import { renderChartSvg } from './chart-svg.js';
 import { enforceVenueScope, scopeVenues } from './venue-scope.js';
@@ -16,7 +16,7 @@ import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
-import { monthlyLeadTime, leadTimeCaveats, medianChange, leadTimeWindow, type LeadTimeRow } from '../lib/booking-lead-time.js';
+import { monthlyLeadTime, leadTimeCaveats, medianChange, leadTimeWindow, bookingsByCreatedDay, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
 import { holidayCoverage } from '../lib/school-calendar.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
@@ -1051,6 +1051,8 @@ async function createChart(input: Record<string, any>): Promise<string> {
  * Revel has none of that.
  */
 async function queryReservations(input: Record<string, any>): Promise<string> {
+  const meal = parseMealPeriod(input.meal_period);
+  if (meal && typeof meal === 'object') return JSON.stringify({ error: meal.error });
   const dateFilter = getDateFilter(input);
   const range = 'single' in dateFilter
     ? { from: dateFilter.single, to: dateFilter.single }
@@ -1078,6 +1080,26 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       if (!data || data.length === 0) break;
       rows.push(...data);
       if (data.length < 1000) break;
+    }
+
+    /**
+     * ONE MEAL, when asked, and then EVERY figure below is that meal's
+     * (13 Oct 2026). Before this only covers were split; bookings, channels,
+     * walk-ins, no-shows and the rest were the whole day under a brunch
+     * question. The 10 Oct Firangi brunch was 15 bookings and 3 walk-ins
+     * (SevenRooms' own list); the lead-time answer read 41 bookings, the day.
+     */
+    const wholeDay = rows.length;
+    if (meal) rows = rows.filter(r => normaliseShift(r.shift_category, r.arrival_time) === meal);
+    if (meal && wholeDay > 0 && rows.length === 0) {
+      results.push({
+        venue: venue.name,
+        slug: venue.slug,
+        meal_period: meal,
+        status: 'no_bookings_for_meal',
+        message: `${wholeDay} booking(s) that day, none of them ${meal}. The venue traded; it had no ${meal} on the book.`,
+      });
+      continue;
     }
 
     if (rows.length === 0) {
@@ -1206,6 +1228,10 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     results.push({
       venue: venue.name,
       slug: venue.slug,
+      meal_period: meal ?? 'all meals',
+      scope: meal
+        ? `Every figure here is ${meal.toUpperCase()} only.`
+        : 'WHOLE DAY. Only covers_by_meal_period is split by meal; bookings, channels, walk-ins, no-shows, cancellations, VIPs, party size and turn time are the whole day. Never present them as one meal\'s -- pass meal_period for that.',
       period: isToday ? 'today_in_progress' : isUpcoming ? 'upcoming' : spansFuture ? 'includes_future_dates' : 'historical',
       bookings: rows.length,
       // For upcoming dates report the book; for past dates report what actually
@@ -1248,7 +1274,8 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       by_booking_channel: Object.fromEntries(
         Object.entries(byChannel).sort((a, b) => b[1].covers - a[1].covers)
       ),
-      covers_check: isUpcoming ? undefined : coversVariance(completedCovers, revelGuests || null),
+      // Revel counts the whole day's guests, so one meal cannot be checked against it.
+      covers_check: isUpcoming || meal ? undefined : coversVariance(completedCovers, revelGuests || null),
     });
   }
 
@@ -3003,6 +3030,8 @@ async function queryPublicHolidays(input: Record<string, any>): Promise<string> 
 async function queryBookingLeadTime(input: Record<string, any>): Promise<string> {
   const win = leadTimeWindow(input, new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10));
   if ('error' in win) return JSON.stringify({ error: win.error });
+  const meal = parseMealPeriod(input.meal_period);
+  if (meal && typeof meal === 'object') return JSON.stringify({ error: meal.error });
 
   const { data: allVenues } = await supabase.from('venues').select('id, name, slug').order('name');  // row-cap: one row per venue
   if (!allVenues) return JSON.stringify({ error: 'No venues found' });
@@ -3012,17 +3041,38 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
     : scopeVenues(allVenues, input);
   if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
 
+  // p_meal only when asked, so the whole-day call still works on a database
+  // where migration 059 has not been applied yet.
   const { data, error } = await supabase.rpc('booking_lead_time', {
     p_start: win.start,
     p_end: win.end,
+    ...(meal ? { p_meal: meal } : {}),
   });
 
   if (error) {
     // Named rather than swallowed: an unapplied migration would otherwise look
     // exactly like a period in which nobody booked ahead.
     return JSON.stringify({
-      error: `Could not compute booking lead time: ${error.message}. If this says the function does not exist, migration 036_booking_lead_time.sql has not been applied.`,
+      error: `Could not compute booking lead time: ${error.message}. If this says the function does not exist, migration ${meal ? '059_booking_lead_time_by_meal.sql' : '036_booking_lead_time.sql'} has not been applied.`,
     });
+  }
+
+  /**
+   * ONE NIGHT: when each booking was made, day by day -- the view that lines
+   * bookings up against a post or an email. Read at reservation grain, which
+   * one venue on one date never comes near the row cap for.
+   */
+  const createdByDay = new Map<string, ReturnType<typeof bookingsByCreatedDay>>();
+  if (win.single_night) {
+    for (const v of venues) {
+      // row-cap: one venue's reservations for one date, a few hundred at most.
+      const { data: night } = await supabase.from('reservations')
+        .select('business_date, source_created_at, party_size, status_simple, is_walk_in, shift_category, arrival_time')
+        .eq('venue_id', v.id)
+        .eq('business_date', win.start);
+      const rows = (night ?? []).filter((r: any) => !meal || normaliseShift(r.shift_category, r.arrival_time) === meal);
+      createdByDay.set(v.id, bookingsByCreatedDay(rows as any));
+    }
   }
 
   const rows = (data ?? []) as LeadTimeRow[];
@@ -3030,7 +3080,10 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
 
   const byVenue = venues.map(v => {
     const months = forVenue(v.id);
-    return { venue: v.name, slug: v.slug, months, change: medianChange(months) };
+    return {
+      venue: v.name, slug: v.slug, months, change: medianChange(months),
+      ...(createdByDay.has(v.id) ? { booked_on: createdByDay.get(v.id) } : {}),
+    };
   });
 
   /**
@@ -3048,6 +3101,13 @@ async function queryBookingLeadTime(input: Record<string, any>): Promise<string>
       single_night: 'ONE NIGHT ONLY: each venue\'s single "month" row is this date and nothing else. Use it as the booking curve for this occasion; compare it with ordinary months only to show how different the occasion is.',
     } : {}),
     unit: 'days between the booking being created and the date it was for',
+    meal_period: meal ?? 'all meals',
+    scope: meal
+      ? `${meal.toUpperCase()} only: every booking here was for ${meal}.`
+      : 'WHOLE DAY: every meal together. Never present these as one meal\'s bookings -- pass meal_period for that.',
+    ...(win.single_night ? {
+      booked_on_meaning: 'booked_on lists, per venue, the days the bookings for this night were MADE (Singapore time). bookings counts every booking made that day, cancelled ones included; covers counts only those that held; walk-ins are apart because no booking was made. Use it to line bookings up against posts, emails or events by date -- a booking the day after a post is timing, not proof the post caused it.',
+    } : {}),
     venues: byVenue,
     group: groupMonths ? { months: groupMonths, change: medianChange(groupMonths) } : null,
     caveats: leadTimeCaveats(groupMonths ?? byVenue.flatMap(v => v.months)),

@@ -958,6 +958,28 @@ anything is saved. Create also cleans the number fields again on its own.
 schema as a request, and check the result as you would a form a stranger
 filled in.
 
+### 3.8 A brunch question answered with the whole day's bookings
+**Symptom.** 13 Oct 2026: asked whether Firangi Superstar's 10 Oct F1 Champagne
+Brunch bookings followed the marketing posts, the chat read 41 bookings, said
+39% were made 1-3 days before, and credited the posts of 8 and 9 Oct. Khai's
+SevenRooms list of that brunch -- 15 bookings and 3 walk-ins, 55 covers -- had
+no brunch booking made on either day; three came the day after the 28 Sep
+announcement and four around the 5 Oct reminder.
+**Root cause.** `booking_lead_time` had no meal filter, so the 41 were brunch
+and dinner together, and the answer said so in one clause and then reasoned as
+if they were brunch. The same gap sat unannounced in `query_reservations`: only
+covers were split by meal, while bookings, channels, walk-ins, no-shows,
+cancellations, party size and turn time were the whole day under any question.
+**Fix.** Both tools take `meal_period`, and then every figure is that meal's;
+without it each says WHOLE DAY in the response. `meal_period()` in SQL
+(migration 059) mirrors `normaliseShift()`, with a test that they agree. One
+night now returns `booked_on`, the days its bookings were made, which is the
+view the marketing question needed. Tested on the 10 Oct brunch itself. Lead
+time also counts its cancelled bookings, which SevenRooms' list hides.
+**Recurs?** **Any figure split along one axis and not the others.** A response
+that splits SOME of its numbers invites reading all of them that way; say the
+scope of each, or split them all.
+
 ---
 
 ## 4. Security

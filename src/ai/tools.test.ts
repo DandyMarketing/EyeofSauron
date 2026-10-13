@@ -128,3 +128,22 @@ describe('query_booking_lead_time can measure one night', () => {
     assert.ok(!(visits.input_schema as any).properties.business_date, 'business_date belongs to lead time, not visit distribution');
   });
 });
+
+/**
+ * 13 Oct 2026: a brunch question was answered with the whole day's bookings,
+ * because only covers were split by meal. Both booking tools must offer one
+ * meal, and the handler must use it everywhere it reads reservations.
+ */
+test('the booking tools can be asked about one meal, and say when they are the whole day', () => {
+  for (const name of ['query_reservations', 'query_booking_lead_time']) {
+    const t = queryTools.find(x => x.name === name)!;
+    const meal = (t.input_schema.properties as any).meal_period;
+    assert.deepEqual(meal?.enum, ['brunch', 'lunch', 'dinner'], `${name} has no meal_period`);
+  }
+  const src = readFileSync(new URL('./tool-handlers.ts', import.meta.url), 'utf8');
+  for (const fn of ['queryReservations', 'queryBookingLeadTime']) {
+    const body = src.slice(src.indexOf(`async function ${fn}(`), src.indexOf('\nasync function ', src.indexOf(`async function ${fn}(`) + 10));
+    assert.match(body, /parseMealPeriod\(input\.meal_period\)/, `${fn} ignores meal_period`);
+    assert.match(body, /WHOLE DAY/, `${fn} does not say when its figures are the whole day`);
+  }
+});

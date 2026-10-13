@@ -30,6 +30,8 @@ export interface LeadTimeRow {
   days_31_plus: number;
   walk_ins: number;
   retrospective: number;
+  /** Of `bookings`, later cancelled or no-show. Absent before migration 059. */
+  cancelled?: number | null;
 }
 
 export interface LeadTimeMonth {
@@ -53,6 +55,14 @@ export interface LeadTimeMonth {
   walk_ins: number;
   /** Created after the date they were for. Records entered late, not bookings. */
   retrospective: number;
+  /**
+   * Of `bookings`, later cancelled or no-show. They stay in the lead time --
+   * a cancelled booking was still somebody booking -- but SevenRooms' list
+   * hides them, so this is what reconciles the two. Null when not measured.
+   */
+  cancelled: number | null;
+  /** Bookings that were not cancelled: what SevenRooms' list shows. */
+  active_bookings: number | null;
   /** Too few bookings for the median to be read as a movement. */
   low_sample: boolean;
 }
@@ -99,6 +109,8 @@ export function monthlyLeadTime(rows: LeadTimeRow[]): LeadTimeMonth[] {
       days_31_plus: r.days_31_plus,
       walk_ins: r.walk_ins,
       retrospective: r.retrospective,
+      cancelled: r.cancelled ?? null,
+      active_bookings: r.cancelled == null ? null : r.bookings - r.cancelled,
       low_sample: r.bookings < MIN_BOOKINGS_FOR_MEDIAN,
     }));
 }
@@ -167,6 +179,13 @@ export function leadTimeCaveats(months: LeadTimeMonth[]): string[] {
     );
   }
 
+  const cancelled = months.reduce((n, m) => n + (m.cancelled ?? 0), 0);
+  if (cancelled > 0) {
+    out.push(
+      `${cancelled} of the bookings counted were later cancelled or did not show. They stay in -- they were still bookings made -- but SevenRooms' reservation list hides them by default, so subtract them (active_bookings) before comparing with it.`,
+    );
+  }
+
   const retro = months.reduce((n, m) => n + m.retrospective, 0);
   if (retro > 0) {
     out.push(
@@ -212,4 +231,72 @@ export function leadTimeWindow(
     return { error: 'Give business_date for one night, or start_date and end_date (YYYY-MM-DD) for whole months.' };
   }
   return { start: input.start_date, end: input.end_date, single_night: false };
+}
+
+/**
+ * When the bookings for ONE night were made, day by day (13 Oct 2026).
+ *
+ * The bands answer "how far ahead"; this answers "did bookings come in after
+ * the post on the 28th", which is the question a marketing check actually
+ * asks. Khai built it by hand from SevenRooms' list of the 10 Oct brunch, and
+ * it overturned the chat's answer: no brunch booking was made on the days the
+ * chat credited, three were made the day after the announcement.
+ *
+ * Walk-ins are counted apart (no booking was made), and so are records created
+ * after the night. A cancelled or no-show booking still counts as a booking
+ * made that day, and is counted as such, but its covers are not added: covers
+ * here are the ones that held, so the total meets SevenRooms' own list.
+ */
+export interface NightReservation {
+  business_date: string;
+  source_created_at: string | null;
+  party_size: number | null;
+  status_simple: string | null;
+  is_walk_in: boolean | null;
+}
+
+export interface CreatedDay {
+  created: string;
+  days_before: number;
+  /** Every booking made that day for the night, cancelled ones included. */
+  bookings: number;
+  /** Covers of the bookings that held -- not cancelled, not a no-show. */
+  covers: number;
+  /** Of `bookings`, later cancelled or no-show. */
+  cancelled: number;
+}
+
+export function bookingsByCreatedDay(rows: NightReservation[]): {
+  created_by_day: CreatedDay[];
+  bookings: number;
+  covers: number;
+  cancelled: number;
+  walk_ins: { bookings: number; covers: number };
+  retrospective: number;
+  no_created_date: number;
+} {
+  const sgtDay = (ts: string) => new Date(new Date(ts).getTime() + 8 * 3600_000).toISOString().slice(0, 10);
+  const daysBetween = (a: string, b: string) =>
+    Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+  const fellAway = (s: string | null) => s === 'Canceled' || s === 'No Show';
+  const byDay = new Map<string, CreatedDay>();
+  const out = { bookings: 0, covers: 0, cancelled: 0, walk_ins: { bookings: 0, covers: 0 }, retrospective: 0, no_created_date: 0 };
+  for (const r of rows) {
+    const size = Number(r.party_size ?? 0);
+    if (r.is_walk_in) {
+      if (!fellAway(r.status_simple)) { out.walk_ins.bookings++; out.walk_ins.covers += size; }
+      continue;
+    }
+    if (!r.source_created_at) { out.no_created_date++; continue; }
+    const created = sgtDay(r.source_created_at);
+    const before = daysBetween(created, r.business_date);
+    if (before < 0) { out.retrospective++; continue; }
+    const d = byDay.get(created) ?? { created, days_before: before, bookings: 0, covers: 0, cancelled: 0 };
+    d.bookings++;
+    out.bookings++;
+    if (fellAway(r.status_simple)) { d.cancelled++; out.cancelled++; }
+    else { d.covers += size; out.covers += size; }
+    byDay.set(created, d);
+  }
+  return { created_by_day: [...byDay.values()].sort((a, b) => a.created.localeCompare(b.created)), ...out };
 }

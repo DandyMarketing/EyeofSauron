@@ -64,13 +64,26 @@ const NO_SHOW = 'No Show';
  * SevenRooms degrades to a sensible bucket instead of appearing as a
  * phantom meal period.
  */
-const SHIFT_MAP: Record<string, string> = {
+export const SHIFT_MAP: Record<string, string> = {
   BRUNCH: 'brunch',
   LUNCH: 'lunch',
   DINNER: 'dinner',
   DAY: 'lunch',      // Fat Prince's lunch service
   LEGACY: 'dinner',  // Fat Prince's dinner service
 };
+
+/** The meals a question can be asked about, one at a time. */
+export const MEAL_PERIODS = ['brunch', 'lunch', 'dinner'] as const;
+export type MealPeriod = typeof MEAL_PERIODS[number];
+
+/** A meal asked for, checked; null for "all meals"; an error for nonsense. */
+export function parseMealPeriod(raw: unknown): MealPeriod | null | { error: string } {
+  if (raw === undefined || raw === null || raw === '' || raw === 'all') return null;
+  const m = String(raw).trim().toLowerCase();
+  return (MEAL_PERIODS as readonly string[]).includes(m)
+    ? m as MealPeriod
+    : { error: `meal_period must be one of ${MEAL_PERIODS.join(', ')}, or left out for the whole day.` };
+}
 
 export function normaliseShift(
   shiftCategory: string | null | undefined,

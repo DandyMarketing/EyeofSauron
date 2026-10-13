@@ -1,3 +1,4 @@
+import '../tests/env.js';
 import { test } from 'node:test';
 import assert from 'node:assert';
 import {
@@ -6,8 +7,12 @@ import {
   medianChange,
   MIN_BOOKINGS_FOR_MEDIAN,
   TAIL_RATIO,
+  bookingsByCreatedDay,
   type LeadTimeRow,
+  type NightReservation,
 } from './booking-lead-time.js';
+import { readFileSync } from 'node:fs';
+import { SHIFT_MAP, parseMealPeriod } from './covers.js';
 
 /**
  * These pin the things that decide whether a lead-time figure is honest: that
@@ -144,4 +149,87 @@ test('a night still ahead is refused, and pointed at last year', () => {
   assert.ok('error' in r && /LAST year/.test(r.error));
   assert.ok('error' in leadTimeWindow({}, '2026-10-12'));
   assert.ok('error' in leadTimeWindow({ business_date: '31/12/2025' }, '2026-10-12'));
+});
+
+// --- One meal, and when its bookings were made (13 Oct 2026) ---
+
+/**
+ * Firangi Superstar, F1 Champagne Brunch, 10 Oct 2026, as SevenRooms lists it
+ * (Khai's screenshot): created date and party size only -- no guest details.
+ * 15 bookings for 49 covers, plus 3 walk-ins for 6: the 55 the team counted.
+ * Created at noon Singapore time (04:00 UTC) unless the test says otherwise.
+ */
+const BRUNCH_10_OCT: Array<[string | null, number]> = [
+  [null, 2], ['2026-09-16', 2], ['2026-09-10', 8], ['2026-10-06', 2], ['2026-10-01', 4],
+  ['2026-09-29', 3], ['2026-09-29', 4], ['2026-09-29', 3], ['2026-08-20', 4], ['2026-10-06', 2],
+  ['2026-10-06', 3], ['2026-10-07', 4], ['2026-10-10', 2], ['2026-10-07', 4], [null, 2],
+  [null, 2], ['2026-10-05', 2], ['2026-10-03', 2],
+];
+const night = (rows: Array<[string | null, number]>): NightReservation[] => rows.map(([created, size]) => ({
+  business_date: '2026-10-10',
+  source_created_at: created ? `${created}T04:00:00Z` : '2026-10-10T04:00:00Z',
+  party_size: size,
+  status_simple: 'Complete',
+  is_walk_in: created === null,
+}));
+
+test('the 10 Oct brunch reproduces SevenRooms: 15 bookings, 3 walk-ins, 55 covers', () => {
+  const r = bookingsByCreatedDay(night(BRUNCH_10_OCT));
+  assert.strictEqual(r.bookings, 15);
+  assert.strictEqual(r.covers, 49);
+  assert.deepStrictEqual(r.walk_ins, { bookings: 3, covers: 6 });
+  assert.strictEqual(r.covers + r.walk_ins.covers, 55);
+  assert.deepStrictEqual(
+    r.created_by_day.map(d => [d.created, d.days_before, d.bookings, d.covers]),
+    [
+      ['2026-08-20', 51, 1, 4], ['2026-09-10', 30, 1, 8], ['2026-09-16', 24, 1, 2],
+      ['2026-09-29', 11, 3, 10], ['2026-10-01', 9, 1, 4], ['2026-10-03', 7, 1, 2],
+      ['2026-10-05', 5, 1, 2], ['2026-10-06', 4, 3, 7], ['2026-10-07', 3, 2, 8],
+      ['2026-10-10', 0, 1, 2],
+    ],
+  );
+  // The days the chat credited: no brunch booking was made on either.
+  assert.ok(!r.created_by_day.some(d => d.created === '2026-10-08' || d.created === '2026-10-09'));
+});
+
+test('the created day is Singapore\'s, and a cancelled booking is a booking made but not covers held', () => {
+  const r = bookingsByCreatedDay([
+    // 01:30 on 10 Oct in Singapore is still 9 Oct in UTC.
+    { business_date: '2026-10-10', source_created_at: '2026-10-09T17:30:00Z', party_size: 2, status_simple: 'Complete', is_walk_in: false },
+    { business_date: '2026-10-10', source_created_at: '2026-10-08T04:00:00Z', party_size: 6, status_simple: 'Canceled', is_walk_in: false },
+    { business_date: '2026-10-10', source_created_at: '2026-10-11T04:00:00Z', party_size: 2, status_simple: 'Complete', is_walk_in: false },
+    { business_date: '2026-10-10', source_created_at: null, party_size: 2, status_simple: 'Complete', is_walk_in: false },
+  ]);
+  assert.deepStrictEqual(r.created_by_day, [
+    { created: '2026-10-08', days_before: 2, bookings: 1, covers: 0, cancelled: 1 },
+    { created: '2026-10-10', days_before: 0, bookings: 1, covers: 2, cancelled: 0 },
+  ]);
+  assert.strictEqual(r.retrospective, 1);
+  assert.strictEqual(r.no_created_date, 1);
+});
+
+test('cancellations are counted beside the lead time, so it reconciles with SevenRooms\' list', () => {
+  const [m] = monthlyLeadTime([row({ bookings: 40, cancelled: 5 })]);
+  assert.strictEqual(m.cancelled, 5);
+  assert.strictEqual(m.active_bookings, 35);
+  assert.ok(leadTimeCaveats([m]).some(c => c.includes('5 of the bookings counted were later cancelled')));
+  // Before migration 059 the column is absent: not measured, never zero.
+  const [old] = monthlyLeadTime([row({ bookings: 40 })]);
+  assert.strictEqual(old.cancelled, null);
+  assert.strictEqual(old.active_bookings, null);
+});
+
+test('a meal means the same in SQL as in TypeScript', () => {
+  const sql = readFileSync(new URL('../../supabase/migrations/059_booking_lead_time_by_meal.sql', import.meta.url), 'utf8');
+  for (const [shift, meal] of Object.entries(SHIFT_MAP)) {
+    assert.match(sql, new RegExp(`when '${shift}'\\s+then '${meal}'`), `${shift} -> ${meal} missing from meal_period()`);
+  }
+  assert.match(sql, /< 15 then 'lunch'/);
+});
+
+test('a meal asked for is checked', () => {
+  assert.strictEqual(parseMealPeriod('Brunch'), 'brunch');
+  assert.strictEqual(parseMealPeriod(undefined), null);
+  assert.strictEqual(parseMealPeriod('all'), null);
+  assert.ok(typeof parseMealPeriod('supper') === 'object');
 });
