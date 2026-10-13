@@ -44,7 +44,7 @@ import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
-import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, readInactiveNames, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -1369,10 +1369,53 @@ async function issuedEvent(user: SessionUser, eventId: string) {
   const scoped = await venuesInScope(user);
   const venues = scoped.filter(v => (links ?? []).some((l: any) => l.venue_id === v.id));
   if (venues.length === 0) return null;
-  const tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
-    .select('description, channel, kind, due_date, owner_name').eq('event_id', eventId));
+  // `title` (migration 060) is the short Monday name; read without it until
+  // the migration is applied, so the send keeps working in between.
+  let tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
+    .select('id, description, channel, kind, due_date, owner_name, title').eq('event_id', eventId).order('id'));
+  if (tasks.error && /title/.test(tasks.error.message)) {
+    tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
+      .select('id, description, channel, kind, due_date, owner_name').eq('event_id', eventId).order('id'));
+  }
   if (tasks.error) throw new Error(tasks.error.message);
   return { ev: ev as any, venues, tasks: (tasks.data ?? []) as PlannerTask[] };
+}
+
+/**
+ * Short Monday names for the tasks that have none yet, written ONCE per event
+ * and saved before use (migration 060). Sauron finds a sub-item already on the
+ * board by its name, so the name must be the same on every preview and send.
+ * Read back after saving: if two previews ran at once, the stored name wins.
+ * Anything that fails leaves a task without a short name -- it then goes to
+ * Monday under its full text, as before -- never with an unsaved one.
+ */
+async function withTaskTitles(tasks: PlannerTask[]): Promise<PlannerTask[]> {
+  const missing = tasks.filter(t => !t.title && t.id);
+  if (missing.length === 0) return tasks;
+  try {
+    const res = await anthropic.messages.create({
+      model: modelFor('lookup', process.env).model,
+      max_tokens: 4096,
+      system: [{ type: 'text', text: TITLE_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      tools: [titleTool(missing.length) as any],
+      tool_choice: { type: 'tool', name: 'record_task_titles' },
+      messages: [{ role: 'user', content: titlePrompt(missing) }],
+    });
+    const call = res.content.find((b: any) => b.type === 'tool_use') as any;
+    const names = readTitles(missing.length, call?.input);
+    // Only where still empty: a name already saved is never replaced.
+    await Promise.all(missing.map((t, k) => names.get(k)
+      ? supabaseAdmin.from('event_tasks').update({ title: names.get(k) }).eq('id', t.id!).is('title', null)
+      : null));
+    // row-cap: the tasks of one event.
+    const { data, error } = await supabaseAdmin.from('event_tasks').select('id, title').in('id', missing.map(t => t.id!));
+    if (error) throw new Error(error.message);
+    const stored = new Map((data ?? []).map((r: any) => [r.id, r.title as string | null]));
+    return tasks.map(t => (!t.title && t.id && stored.get(t.id) ? { ...t, title: stored.get(t.id)! } : t));
+  } catch (e: any) {
+    console.error(`[plan/monday] short task names not written, full names used: ${e?.message ?? e}`);
+    return tasks;
+  }
 }
 
 /** The boards a planner may send to: the TDC Marketing & PR workspace only. */
@@ -1416,7 +1459,8 @@ app.post('/api/plan/monday/preview', async (c) => {
   try {
     const issued = await issuedEvent(user, body.event_id);
     if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
-    const { ev, venues, tasks } = issued;
+    const { ev, venues } = issued;
+    const tasks = await withTaskTitles(issued.tasks);
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const { users, me, account } = await readPeople();
     const sender = users.find(u => u.email && user.email && u.email.toLowerCase() === user.email.toLowerCase()) ?? null;
@@ -1484,13 +1528,15 @@ app.post('/api/plan/monday/preview', async (c) => {
       const topByName = new Map(inGroup.map(i => [key(i.name), i]));
       // A task is already there as a sub-item of its parent, or -- top-level
       // item -- by its own name.
-      const isThere = (it: { name: string; parent?: string | null }) => it.parent
-        ? (topByName.get(key(it.parent))?.subitems ?? []).some(x => key(x.name) === key(it.name))
+      // Under its own name or the long one an earlier send used.
+      const namesOf = (it: { name: string; aliases?: string[] }) => [it.name, ...(it.aliases ?? [])].map(key);
+      const isThere = (it: { name: string; parent?: string | null; aliases?: string[] }) => it.parent
+        ? (topByName.get(key(it.parent))?.subitems ?? []).some(x => namesOf(it).includes(key(x.name)))
         : topByName.has(key(it.name));
       const already = items.filter(isThere).length;
       // An earlier send put these in as separate items; they now go as sub-items,
       // and the separate ones are left for the team to delete (Khai: "you tidy").
-      const flat = items.filter(it => it.parent && topByName.has(key(it.name))).map(it => it.name);
+      const flat = items.filter(it => it.parent && namesOf(it).some(n => topByName.has(n))).map(it => it.aliases?.[0] ?? it.name);
       // The plan moved on since the first send: what would change on the items
       // already there. Shown with ticks; nothing here is written by a preview.
       const nameOf = new Map(users.map(u => [Number(u.id), u.name]));
@@ -1555,7 +1601,8 @@ app.post('/api/plan/monday/send', async (c) => {
     const issued = await issuedEvent(user, body.event_id);
     if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
     const expected = groupTitle(issued.ev.name, issued.ev.start_date, issued.ev.end_date);
-    const { account } = await readPeople();
+    const { account, users: people } = await readPeople();
+    const personName = new Map(people.map(u => [Number(u.id), u.name]));
 
     const results = await Promise.all(body.venues.map(async v => {
       const venue = issued.venues.find(x => x.slug === v.slug);
@@ -1572,7 +1619,7 @@ app.post('/api/plan/monday/send', async (c) => {
       const existing = there
         ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null, items: board.groupItems.get(there.id)?.items ?? [] }
         : undefined;
-      const r = await createGroupWithItems(board, title, items, existing);
+      const r = await createGroupWithItems(board, title, items, existing, id => personName.get(id) ?? `#${id}`);
 
       /**
        * The ticked changes to items already there. Checked against the board

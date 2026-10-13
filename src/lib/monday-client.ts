@@ -14,8 +14,8 @@
  */
 
 import {
-  findColumns, historicalOffsets, columnValues, updateValues,
-  type BoardColumns, type BoardItem, type ItemUpdate, type MondayUser, type TemplateStep, type PreviewItem,
+  findColumns, historicalOffsets, columnValues, updateValues, detailUpdateHtml,
+  type BoardColumns, type SendItem, type BoardItem, type ItemUpdate, type MondayUser, type TemplateStep, type PreviewItem,
 } from './monday-plan.js';
 
 const MONDAY_API = 'https://api.monday.com/v2';
@@ -258,8 +258,10 @@ export async function readInactiveNames(ids: number[]): Promise<Map<number, stri
  */
 export async function createGroupWithItems(
   board: BoardForPlan, title: string,
-  items: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }>,
+  items: SendItem[],
   existing?: { groupId: string; names: string[]; lastId: string | null; items?: BoardItem[] },
+  /** Names for the people tagged in a sub-item's detail update. */
+  nameOf: (id: number) => string = id => `#${id}`,
 ): Promise<{ group_id: string; created: number; skipped: number; item_ids: Array<string | null>; notes: string[]; error?: string }> {
   let groupId: string;
   let previous: string | null = null;
@@ -342,7 +344,8 @@ export async function createGroupWithItems(
       continue;
     }
     const under = subNames.get(pid) ?? new Set<string>();
-    if (under.has(key(item.name))) { skipped++; continue; }
+    // Its own name, or the long name an earlier send used before names were shortened.
+    if ([item.name, ...(item.aliases ?? [])].some(n => under.has(key(n)))) { skipped++; continue; }
     try {
       let r: { create_subitem: { id: string } };
       try {
@@ -357,6 +360,21 @@ export async function createGroupWithItems(
       // writes them) are both made rather than the second skipped.
       itemIds[i] = String(r.create_subitem.id);
       created++;
+      /**
+       * The full task as an update, tagging everyone on the sub-item (Khai,
+       * 13 Oct 2026). A failure here costs the note, never the sub-item.
+       */
+      if (item.detail) {
+        const people = [...new Set([...item.owner_ids, ...item.assigned_ids])];
+        try {
+          await gql(
+            'mutation ($i: ID!, $b: String!, $m: [UpdateMention]) { create_update(item_id: $i, body: $b, mentions_list: $m) { id } }',
+            { i: itemIds[i], b: detailUpdateHtml(item.detail, item.deadline, people.map(nameOf)), m: people.map(id => ({ id: String(id), type: 'User' })) },
+          );
+        } catch (e: any) {
+          notes.push(`"${item.name}" was made, but its detail note was not posted: ${e?.message ?? e}`);
+        }
+      }
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }

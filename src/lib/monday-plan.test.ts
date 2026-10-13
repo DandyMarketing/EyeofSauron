@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
   deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople,
-  planChanges, sanitiseUpdates, updateValues, alreadyPosted, assignParents, parentByKind, EXTRA_PARENTS, type MondayUser, type BoardItem, type PlannerTask,
+  planChanges, sanitiseUpdates, updateValues, alreadyPosted, assignParents, parentByKind, EXTRA_PARENTS, readTitles, cleanTitle, detailUpdateHtml, type MondayUser, type BoardItem, type PlannerTask,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -133,7 +133,7 @@ test('what comes back from the browser is checked before it is written', () => {
   assert.equal(sanitiseItems([{ name: '' }]), null);
   assert.equal(sanitiseItems(Array.from({ length: 121 }, () => ({ name: 'x' }))), null);
   assert.deepEqual(sanitiseItems([{ name: ' A ', deadline: 'soon', owner_ids: ['5', -1, 'x'], assigned_ids: [2.5, 7] }]),
-    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7], parent: null }]);
+    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7], parent: null, detail: null, aliases: [] }]);
 });
 
 test('the deadline pass is given the plan first and the board\'s history as a labelled reference', () => {
@@ -349,4 +349,49 @@ test('a re-send compares a task with the sub-items of its parent, on the sub-ite
   // "Stuck" is finished on the sub-item board's own definition.
   assert.deepEqual(out[1], { item_id: '22', name: 'Post 5: boiler room teaser', sub: true, done: 'Stuck', changes: [] });
   assert.deepEqual(sanitiseUpdates([{ item_id: '21', sub: true, deadline: '2026-12-09' }]), [{ item_id: '21', sub: true, deadline: '2026-12-09' }]);
+});
+
+// --- Short names, the full text as a note (Khai, 13 Oct 2026) ---
+
+test('a short name is checked, and a task with none keeps its full name', () => {
+  assert.equal(cleanTitle('  Cost the dinner menu. '), 'Cost the dinner menu');
+  assert.equal(cleanTitle(''), null);
+  assert.equal(cleanTitle('x'.repeat(81)), null);
+  assert.deepEqual([...readTitles(3, { tasks: [{ task: 0, title: 'Book the DJ' }, { task: 7, title: 'Nope' }, { task: 2, title: 42 }] })], [[0, 'Book the DJ']]);
+});
+
+test('a task with a short name goes on under it, with the full text as its note and its old name kept to recognise', () => {
+  const long = 'Food menu written and costed to 25.59% COGS ($128 set menu, rooftop access included)';
+  const [plain, titled] = buildItems({ // sorted by due date: the DJ (1 Nov) first
+    steps: [], deadlines: [], users, sender: users[5],
+    tasks: [
+      { description: long, kind: 'ops', channel: null, due_date: '2026-11-17', owner_name: 'Lukasz', title: 'Cost the dinner menu', parent: 'Operations' },
+      { description: 'Book the DJ', kind: 'ops', channel: null, due_date: '2026-11-01', owner_name: null, parent: 'Operations' },
+    ],
+    today: '2026-10-13', start: '2026-12-31', end: '2026-12-31',
+  });
+  assert.equal(titled.name, 'Cost the dinner menu');
+  assert.equal(titled.detail, long);
+  assert.deepEqual(titled.aliases, [long]);
+  assert.equal(plain.name, 'Book the DJ');
+  assert.equal(plain.detail, undefined);
+});
+
+test('a sub-item an earlier send made under its long name is matched, not made again', () => {
+  const cols = { deadline: 'date', owner: 'people', assigned: 'people_1', status: 'status9', statusLabel: null, doneLabels: [] };
+  const long = 'Food menu written and costed to 25.59% COGS';
+  const out = planChanges(
+    [{ name: 'Cost the dinner menu', aliases: [long], deadline: '2026-11-17', owner_ids: [1], assigned_ids: [], parent: 'Operations' }],
+    [{ id: '1', name: 'Operations', deadline: null, owner_ids: [], assigned_ids: [], status: null,
+       subitems: [{ id: '5', name: long, deadline: null, owner_ids: [1], assigned_ids: [], status: null }] }],
+    cols, String, cols,
+  );
+  assert.equal(out[0].item_id, '5');
+});
+
+test('the note carries the full task, the date and who it is for -- escaped', () => {
+  const html = detailUpdateHtml('Cost <menu> & sign off', '2026-11-17', ['Lukasz Kononowicz', 'salvin']);
+  assert.match(html, /Cost &lt;menu&gt; &amp; sign off/);
+  assert.match(html, /Due 2026-11-17/);
+  assert.match(html, /For: Lukasz Kononowicz, salvin/);
 });

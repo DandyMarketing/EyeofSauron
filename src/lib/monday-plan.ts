@@ -56,6 +56,10 @@ export interface PlannerTask {
   owner_name: string | null;
   /** The item it goes under as a sub-item, chosen by the grouping pass. */
   parent?: string | null;
+  /** Its row in event_tasks, to save the short name against. */
+  id?: string;
+  /** The short Monday name (migration 060): written once, then kept. */
+  title?: string | null;
 }
 
 export interface StepDeadline { index: number; due: string | null; phase: 'before' | 'after'; reason: string }
@@ -83,6 +87,14 @@ export interface PreviewItem {
    * planner tasks have one, and only on a board with sub-items.
    */
   parent?: string | null;
+  /** The full task, for the update on the sub-item when the name is a summary. */
+  detail?: string | null;
+  /**
+   * Other names this item may already be on the board under -- the long name
+   * an earlier send used before names were shortened -- so it is recognised
+   * and not made twice.
+   */
+  aliases?: string[];
 }
 
 /**
@@ -431,6 +443,67 @@ export function assignParents(
 }
 
 /**
+ * SHORT NAMES (Khai, 13 Oct 2026: "shorten the sub item names to a summary;
+ * the update in each will contain the information"). One pass per EVENT, run
+ * before any board is read, and saved (migration 060) before it is used:
+ * Sauron finds a sub-item already on the board by its name, so a name written
+ * afresh on each preview -- or differently for each venue's board -- would
+ * make every re-send add the same tasks again.
+ */
+export function titleTool(taskCount: number) {
+  return {
+    name: 'record_task_titles',
+    description: 'Give every task a short name for a checklist.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        tasks: {
+          type: 'array',
+          description: `One entry per task, ${taskCount} in all, by index.`,
+          items: {
+            type: 'object',
+            properties: {
+              task: { type: 'number', description: 'The task\'s index as listed.' },
+              title: { type: 'string', description: 'At most six words: "Cost the dinner menu", "Book the DJ", "Post 4: kitchen reel".' },
+            },
+            required: ['task', 'title'],
+          },
+        },
+      },
+      required: ['tasks'],
+    },
+  };
+}
+
+export const TITLE_SYSTEM =
+  'You name the tasks of an event plan for a team checklist on Monday. Each name is what a person scanning the list ' +
+  'needs to recognise the task: at most six words, plain, starting with the action or the thing. Keep a post\'s number ' +
+  'if it has one ("Post 4: kitchen reel"). Leave out figures, prices, dates and reasons -- the full task is kept in a ' +
+  'note under the name.';
+
+export function titlePrompt(tasks: PlannerTask[]): string {
+  return 'THE TASKS:\n' + tasks.map((t, i) => `${i}. ${t.description}${t.channel ? ` (${t.channel})` : ''}`).join('\n');
+}
+
+/** The pass's names, checked; a task with no usable name keeps none (and its long name). */
+export function readTitles(taskCount: number, answer: unknown): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const a of Array.isArray((answer as any)?.tasks) ? (answer as any).tasks : []) {
+    if (!Number.isInteger(a?.task) || a.task < 0 || a.task >= taskCount) continue;
+    const t = cleanTitle(a.title);
+    if (t) out.set(a.task, t);
+  }
+  return out;
+}
+
+/** A short name, checked: one line, a sensible length, nothing empty. */
+export function cleanTitle(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const t = raw.replace(/\s+/g, ' ').trim().replace(/[.]+$/, '');
+  return t.length >= 2 && t.length <= 80 ? t : null;
+}
+
+/**
  * Template steps and planner tasks as the items the preview shows and the send
  * writes. Template items keep the board's own Owner and Assigned To: those are
  * the team's standing defaults and nobody asked Sauron to reassign them.
@@ -506,9 +579,13 @@ export function buildItems(input: {
       };
       const assigned = m.ids;
       const assignedLabel = m.labels.join(', ');
-      const name = `${t.description}${t.channel ? ` (${t.channel})` : ''}`.slice(0, 255);
+      // The full task is the long name; with a short title it becomes the
+      // detail posted in an update, and an alias the board may still hold.
+      const long = `${t.description}${t.channel ? ` (${t.channel})` : ''}`.slice(0, 255);
+      const name = (t.title ? t.title : long).slice(0, 255);
       return {
         name,
+        ...(t.title ? { detail: long, aliases: [long] } : {}),
         source: 'planner',
         deadline: t.due_date,
         reason: 'From the plan',
@@ -541,7 +618,9 @@ export function columnValues(item: Pick<PreviewItem, 'deadline' | 'owner_ids' | 
  * and came back, and a browser can send anything: names are strings, people
  * are whole numbers, dates are dates, and there is a ceiling on how many.
  */
-export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }> | null {
+export type SendItem = Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null; detail?: string | null; aliases?: string[] };
+
+export function sanitiseItems(raw: unknown): SendItem[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 120) return null;
   const ids = (x: unknown) => (Array.isArray(x) ? x : []).map(Number).filter(n => Number.isInteger(n) && n > 0).slice(0, 20);
   const out = raw.map((r: any) => ({
@@ -550,6 +629,8 @@ export function sanitiseItems(raw: unknown): Array<Pick<PreviewItem, 'name' | 'd
     owner_ids: ids(r?.owner_ids),
     assigned_ids: ids(r?.assigned_ids),
     parent: typeof r?.parent === 'string' && r.parent.trim() ? r.parent.trim().slice(0, 255) : null,
+    detail: typeof r?.detail === 'string' && r.detail.trim() ? r.detail.trim().slice(0, 2000) : null,
+    aliases: (Array.isArray(r?.aliases) ? r.aliases : []).filter((x: unknown) => typeof x === 'string' && x.trim()).map((x: string) => x.trim().slice(0, 255)).slice(0, 3),
   }));
   // A parent must be one of the top-level items sent with it.
   const tops = new Set(out.filter(i => !i.parent).map(i => i.name.toLowerCase()));
@@ -594,7 +675,7 @@ export interface ItemChanges {
 }
 
 export function planChanges(
-  planned: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null }>,
+  planned: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null; aliases?: string[] }>,
   onBoard: BoardItem[],
   cols: BoardColumns,
   nameOf: (id: number) => string,
@@ -610,8 +691,9 @@ export function planChanges(
   const seen = new Set<string>();
   for (const p of planned) {
     const sub = !!(p.parent && subCols);
+    const known = new Set([p.name, ...(p.aliases ?? [])].map(key));
     const b = sub
-      ? (byName.get(key(p.parent!))?.subitems ?? []).find(x => key(x.name) === key(p.name))
+      ? (byName.get(key(p.parent!))?.subitems ?? []).find(x => known.has(key(x.name)))
       : byName.get(key(p.name));
     if (!b || seen.has(b.id)) continue;
     seen.add(b.id);
@@ -719,5 +801,21 @@ export function pnlUpdateHtml(
     `<p><em>Product cost and group fees are computed from the venue's measured rates, never typed in: ${Object.values(rates).filter(r => r.value !== null).map(r => esc(r.label)).join('; ')}.</em></p>`,
     toFill.length ? `<p><em>Still to fill: ${toFill.join('; ')}. Lines marked "to fill" in the workbook need a number before this is a forecast.</em></p>` : '',
     '<p>The workbook is attached. Shaded cells are inputs; every line carries its basis.</p>',
+  ].join('');
+}
+
+/**
+ * The update on a sub-item whose name is a summary: the full task, and who it
+ * is with. The people are TAGGED through `mentions_list` (Khai, 13 Oct 2026:
+ * "the tag is everyone in the sub item"), which notifies them; their names
+ * are in the text so the update reads on its own.
+ */
+export function detailUpdateHtml(detail: string, deadline: string | null, people: string[]): string {
+  const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return [
+    `<p>${esc(detail)}</p>`,
+    deadline ? `<p>Due ${esc(deadline)}.</p>` : '',
+    people.length ? `<p>For: ${people.map(esc).join(', ')}</p>` : '',
+    '<p><em>From the event plan in Sauron.</em></p>',
   ].join('');
 }
