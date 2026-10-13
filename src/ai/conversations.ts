@@ -92,6 +92,8 @@ export async function appendTurn(
   answer: string,
   toolCalls: ToolCallRecord[],
   charts: unknown,
+  /** What each tool returned (migration 061), kept so an issue report can show it. */
+  trace: unknown[] = [],
 ): Promise<void> {
   const scope = scopeOfTurn(toolCalls ?? []);
 
@@ -106,7 +108,7 @@ export async function appendTurn(
    * right on read by inTurnOrder().
    */
   const asked = Date.now();
-  const { error } = await supabaseAdmin.from('conversation_messages').insert([
+  const rows = [
     {
       conversation_id: conversationId,
       role: 'user',
@@ -124,8 +126,14 @@ export async function appendTurn(
       charts: charts ?? null,
       venue_slugs: scope.venue_slugs,
       domains: scope.domains,
+      tool_trace: trace.length ? trace : null,
     },
-  ]);
+  ] as Array<Record<string, unknown>>;
+  let { error } = await supabaseAdmin.from('conversation_messages').insert(rows);
+  // Before migration 061 there is no tool_trace column: save the turn without it.
+  if (error && /tool_trace/.test(error.message)) {
+    ({ error } = await supabaseAdmin.from('conversation_messages').insert(rows.map(({ tool_trace: _t, ...r }) => r)));
+  }
 
   if (error) {
     console.error(`[conversations] could not append to ${conversationId}: ${error.message}`);

@@ -24,6 +24,7 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/board-suggest.js">
+<link rel="modulepreload" href="/report-issue.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -101,6 +102,10 @@
   .msg.agent .bubble th, .msg.agent .bubble td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
   .msg.agent .bubble th { background: var(--surface); font-weight: 600; }
   .msg .queries { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+  .msg .report-link { display: block; margin: 6px 0 0 auto; background: none; border: 0; padding: 2px 0;
+    color: var(--text-muted); font-size: 11px; text-decoration: underline; cursor: pointer; font-family: inherit; }
+  .msg .report-link:hover { color: var(--text); }
+  @media print { .msg .report-link { display: none; } }
 
   .intro {
     border: 1px dashed var(--border); border-radius: 10px;
@@ -527,6 +532,24 @@ function addMessage(who, cls, bodyHtml, queries) {
   return el;
 }
 
+/**
+ * "Report an issue" (Khai, 13 Oct 2026), under every planner answer and every
+ * error: sends this plan's conversation to the admins. Shared window in
+ * /report-issue.js, loaded on the first press.
+ */
+function addReportLink(el, ctx) {
+  if (!el || el.querySelector(':scope > .report-link')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'report-link';
+  btn.textContent = 'Report an issue';
+  btn.addEventListener('click', async () => {
+    const { openReport } = await import('/report-issue.js');
+    openReport({ token, page: 'plan', conversationId, ...ctx });
+  });
+  el.appendChild(btn);
+}
+
 function setBusy(on) {
   busy = on;
   sendBtn.disabled = on;
@@ -563,6 +586,7 @@ async function send() {
 
     if (!res.ok || data.error) {
       pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(data.error || 'Request failed') + '</div>';
+      addReportLink(pending, { question: message, error: data.error || 'Request failed' });
       setBusy(false);
       return;
     }
@@ -580,6 +604,7 @@ async function send() {
 
     history.push({ role: 'user', content: message });
     history.push({ role: 'assistant', content: data.answer || '' });
+    addReportLink(pending, { question: message, answer: data.answer || '' });
     refreshProgress();
     if (data.conversation_id && data.conversation_id !== conversationId) {
       conversationId = data.conversation_id;
@@ -590,6 +615,7 @@ async function send() {
     }
   } catch (e) {
     pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
+    addReportLink(pending, { question: message, error: String(e.message || e) });
   }
 
   setBusy(false);
@@ -1376,7 +1402,8 @@ async function prepareDraft(force) {
     const res = { ok: !data.error };
 
     if (!res.ok || data.error) {
-      addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(data.error || 'Could not build a draft.') + '</div>');
+      const errEl = addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(data.error || 'Could not build a draft.') + '</div>');
+      addReportLink(errEl, { question: 'Prepare the brief', error: data.error || 'Could not build a draft.' });
       setBusy(false);
       return;
     }
@@ -1388,7 +1415,8 @@ async function prepareDraft(force) {
   } catch (e) {
     clearInterval(tick);
     pending.remove();
-    addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>');
+    const errEl = addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>');
+    addReportLink(errEl, { question: 'Prepare the brief', error: String(e.message || e) });
   }
 
   setBusy(false);
@@ -1599,7 +1627,9 @@ async function openPlan(id) {
       addMessage('Planner', 'agent', '<div class="withheld">' + escapeHtml(m.content) + '</div>');
     } else {
       const el = addMessage('Planner', 'agent', renderMarkdown(m.content || ''));
+      const asked = [...history].reverse().find(h => h.role === 'user')?.content || '';
       history.push({ role: 'assistant', content: m.content || '' });
+      addReportLink(el, { question: asked, answer: m.content || '' });
       // Every earlier question was answered by the message after it; only a
       // plan that ENDS on the planner's question still has one open.
       const last = m === data.messages[data.messages.length - 1];

@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 60 migrations, 25 query tools, 11 ingest sources, 1,580 tests.
+started.** 61 migrations, 25 query tools, 11 ingest sources, 1,582 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1071,6 +1071,26 @@ list, saved on the server so they match across devices.
 
 **Not built:** reading Done / Stuck back into the brief.
 
+### Report an issue: built 13 Oct 2026
+
+With Sauron live with the team, Khai: "a button, report this issue, that sends
+it to the admins -- an error, something it cannot answer, or it answers
+incorrectly -- with the entire chat, so I can review it with you." A link under
+every answer and every error, in the chat and the planner (also on answers in
+reopened conversations), opens `/report-issue.js`: what kind of problem, and
+what they expected. The server SNAPSHOTS the conversation into `issue_reports`
+(migration 061) so a later rename or delete cannot change what was reported.
+Decided with Khai: admins hear through the **Reports** tab's badge on the admin
+console; the reporter gets a thank-you and nothing more.
+
+**Every answer now saves its tool trace** (`conversation_messages.tool_trace`):
+each data tool's input, an excerpt of what it RETURNED, and how long it took --
+where a wrong answer usually comes from, and what a saved chat never had. Kept
+out of `toolCalls`, which the weekly recommendations store as evidence and
+which deliberately holds the queries, not the rows; never sent to the browser
+(`forClient()`). **"Copy for Claude"** on a report gives the whole thing as one
+block of text (`reportMarkdown()`), to paste into a session for review.
+
 ## Later: parked features (recorded 11 Oct 2026)
 
 Agreed as worth doing and deliberately not started. Each needs the decision or
@@ -1118,7 +1138,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,580 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,582 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

@@ -23,6 +23,7 @@
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
+<link rel="modulepreload" href="/report-issue.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -184,6 +185,7 @@
   .export-btn.working { color: var(--accent); border-color: var(--accent); }
 
   .teach-bar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
+  .teach-bar .report-btn { margin-left: auto; }
   .teach-btn, .teach-save, .teach-cancel {
     background: none; border: 1px solid rgba(255,255,255,0.18); color: var(--text-muted);
     font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
@@ -1230,6 +1232,32 @@ async function shareMessageImage(message, bubble, question, btn) {
   }
 }
 
+/**
+ * "Report an issue" (Khai, 13 Oct 2026): under every answer and every error,
+ * it sends the conversation to the admins. The window lives in
+ * /report-issue.js, shared with the planner, and loads on the first press.
+ */
+function addReportButton(bar, ctx) {
+  const btn = document.createElement('button');
+  btn.className = 'teach-btn report-btn';
+  btn.textContent = 'Report an issue';
+  btn.title = 'Wrong, could not answer, or an error: send this conversation to the admins';
+  btn.addEventListener('click', async () => {
+    const { openReport } = await import('/report-issue.js');
+    openReport({ token: authToken, page: 'chat', conversationId, model: modelSelect.value, ...ctx });
+  });
+  bar.appendChild(btn);
+}
+
+/** An error message, with the way to report it right under it. */
+function addErrorMessage(text, question) {
+  const bubble = addMessage('assistant', '<div class="error-msg">' + escapeHtml(text) + '</div>', true);
+  const bar = document.createElement('div');
+  bar.className = 'teach-bar';
+  addReportButton(bar, { question, error: text });
+  bubble.appendChild(bar);
+}
+
 function addTeachButton(bubble, question, answerText) {
   const bar = document.createElement('div');
   bar.className = 'teach-bar';
@@ -1247,6 +1275,7 @@ function addTeachButton(bubble, question, answerText) {
    * of controls under every message turns a conversation into a toolbar.
    */
   addExportButtons(bar, bubble, question);
+  addReportButton(bar, { question, answer: answerText });
 
   bubble.appendChild(bar);
 
@@ -1607,7 +1636,13 @@ async function openConversation(id) {
       chat.appendChild(wrap);
     }
 
-    addMessage('assistant', m.content);
+    const bubble = addMessage('assistant', m.content);
+    // Reportable from a reopened chat too: a wrong answer is often noticed later.
+    const lastQuestion = [...history].reverse().find(h => h.role === 'user')?.content || '';
+    const bar = document.createElement('div');
+    bar.className = 'teach-bar';
+    addReportButton(bar, { question: lastQuestion, answer: m.content });
+    bubble.appendChild(bar);
     history.push({ role: 'assistant', content: m.content });
   }
 
@@ -1657,7 +1692,7 @@ async function send() {
     progress.remove();
 
     if (outcome.fatal) {
-      addMessage('assistant', '<div class="error-msg">Error: ' + escapeHtml(outcome.fatal) + '</div>', true);
+      addErrorMessage('Error: ' + outcome.fatal, question);
       busy = false;
       sendBtn.disabled = false;
       return;
@@ -1749,7 +1784,7 @@ async function send() {
 
   } catch (e) {
     progress.remove();
-    addMessage('assistant', '<div class="error-msg">Network error. Check your connection and try again.</div>', true);
+    addErrorMessage('Network error. Check your connection and try again.', question);
   }
 
   busy = false;

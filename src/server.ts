@@ -34,8 +34,9 @@ import { queryTools } from './ai/tools.js';
 import {
   createConversation, appendTurn, listConversations, readConversation,
   renameConversation, deleteConversation, titleConversation,
-  isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress, setPinned,
+  isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress, setPinned, inTurnOrder,
 } from './ai/conversations.js';
+import { cleanReportInput, reportMarkdown, REPORT_STATUSES, type StoredReport, type TranscriptEntry } from './lib/issue-reports.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool, eventPnlTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
@@ -547,18 +548,24 @@ app.delete('/api/conversations/:id', async (c) => {
  * migration 050 is run these tables do not exist at all, so this must be
  * survivable by construction.
  */
+/** An answer as the browser gets it: the tool trace stays on the server. */
+function forClient<T extends { trace?: unknown }>(result: T): Omit<T, 'trace'> {
+  const { trace: _trace, ...rest } = result;
+  return rest;
+}
+
 async function saveTurn(
   user: SessionUser,
   conversationId: string | null | undefined,
   question: string,
-  result: { answer?: string; toolCalls?: any[]; charts?: any },
+  result: { answer?: string; toolCalls?: any[]; charts?: any; trace?: any[] },
   kind: ConversationKind = 'chat',
 ): Promise<string | null> {
   try {
     const isNew = !conversationId;
     const id = conversationId || await createConversation(user.id, question, kind);
     if (!id) return null;
-    await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null);
+    await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null, result.trace ?? []);
 
     /**
      * NOT AWAITED. The row already has a usable title — the first sixty
@@ -673,7 +680,7 @@ app.post('/ask/stream', async (c) => {
         push, venueNames,
       );
       const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
-      push({ kind: 'done', result: { ...result, conversation_id: conversationId } });
+      push({ kind: 'done', result: { ...forClient(result), conversation_id: conversationId } });
     } catch (e: any) {
       // Logged for the same reason /ask logs: this used to be invisible in
       // Railway, and a log export covering a real failure held one line.
@@ -724,7 +731,7 @@ app.post('/ask', async (c) => {
     );
     // After the answer exists, never before. See saveTurn.
     const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
-    return c.json({ ...result, conversation_id: conversationId });
+    return c.json({ ...forClient(result), conversation_id: conversationId });
   } catch (e: any) {
     /**
      * LOGGED, not just returned. This handed the message to the browser and
@@ -784,7 +791,7 @@ app.post('/api/plan', async (c) => {
     );
     // Saved like a chat, listed apart from them. Saving never fails the answer.
     const conversationId = await saveTurn(user, body.conversation_id, body.message, result, 'plan');
-    return c.json({ ...result, conversation_id: conversationId });
+    return c.json({ ...forClient(result), conversation_id: conversationId });
   } catch (e: any) {
     console.error(`[plan] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
@@ -1809,6 +1816,108 @@ app.post('/api/plan/monday/send-stream', async (c) => {
       await chain;
     }
   });
+});
+
+// --- Report this issue (Khai, 13 Oct 2026) ---
+
+/**
+ * Anyone signed in may report. No terms gate: a report is most needed exactly
+ * when something has gone wrong, and it carries nothing back to the reporter.
+ *
+ * The conversation is SNAPSHOT here -- its messages and each answer's tool
+ * trace, as they stand now -- so the report still shows what was seen after
+ * the chat is renamed, continued or deleted. Only the reporter's OWN
+ * conversation can be attached: an id that is not theirs is ignored, never
+ * an error that would confirm it exists.
+ */
+app.post('/api/report', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const input = cleanReportInput(await c.req.json().catch(() => null));
+  if (!input) return c.json({ error: 'That report did not come through intact. Please try again.' }, 400);
+
+  let transcript: TranscriptEntry[] = [];
+  let conversationId: string | null = null;
+  if (input.conversation_id) {
+    // row-cap: one conversation by id, checked against its owner.
+    const { data: convo } = await supabaseAdmin.from('conversations')
+      .select('id').eq('id', input.conversation_id).eq('user_id', user.id).maybeSingle();
+    if (convo) {
+      conversationId = convo.id;
+      let rows = await selectAll(() => supabaseAdmin.from('conversation_messages')
+        .select('role, content, created_at, tool_trace').eq('conversation_id', convo.id).order('created_at', { ascending: true }));
+      if (rows.error && /tool_trace/.test(rows.error.message)) {
+        rows = await selectAll(() => supabaseAdmin.from('conversation_messages')
+          .select('role, content, created_at').eq('conversation_id', convo.id).order('created_at', { ascending: true }));
+      }
+      transcript = inTurnOrder((rows.data ?? []) as any[]).map((m: any) => ({
+        role: m.role, content: m.content, at: m.created_at, tool_trace: m.tool_trace ?? null,
+      }));
+    }
+  }
+  // An exchange that failed was never saved: carry it from the page.
+  if (input.error && input.question && !transcript.some(m => m.role === 'user' && m.content === input.question)) {
+    transcript.push({ role: 'user', content: input.question, at: null });
+  }
+
+  const { data, error } = await supabaseAdmin.from('issue_reports').insert({
+    user_id: user.id,
+    reporter_email: user.email ?? null,
+    reporter_name: user.fullName || null,
+    kind: input.kind,
+    comment: input.comment,
+    page: input.page,
+    conversation_id: conversationId,
+    question: input.question,
+    answer: input.answer,
+    error: input.error,
+    transcript,
+    context: input.context,
+  }).select('id').single();
+  if (error) {
+    console.error(`[report] could not save a report from ${user.email ?? user.id}: ${error.message}`);
+    return c.json({ error: /issue_reports/.test(error.message)
+      ? 'Reports are not switched on yet (migration 061 has not been run). Please tell an admin.'
+      : 'Could not send the report. Please try again.' }, 500);
+  }
+  console.log(`[report] ${user.email ?? user.id} reported ${input.kind} on ${input.page}${conversationId ? ` (conversation ${conversationId})` : ''}: ${data.id}`);
+  return c.json({ ok: true, id: data.id });
+});
+
+app.get('/admin/api/reports', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const { data, error } = await selectAll(() => supabaseAdmin.from('issue_reports')
+    .select('id, created_at, reporter_name, reporter_email, kind, page, comment, question, error, status')
+    .order('created_at', { ascending: false }));
+  if (error) return c.json({ error: /issue_reports/.test(error.message) ? 'Run migration 061 to switch reports on.' : error.message }, 500);
+  return c.json({ reports: data ?? [] });
+});
+
+app.get('/admin/api/reports/:id', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  // row-cap: one report by id.
+  const { data, error } = await supabaseAdmin.from('issue_reports').select('*').eq('id', c.req.param('id')).maybeSingle();
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data) return c.json({ error: 'Report not found.' }, 404);
+  return c.json({ report: data, markdown: reportMarkdown(data as StoredReport) });
+});
+
+app.patch('/admin/api/reports/:id', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  const patch: Record<string, unknown> = {};
+  if ((REPORT_STATUSES as readonly string[]).includes(body?.status)) {
+    patch.status = body.status;
+    patch.resolved_at = body.status === 'fixed' || body.status === 'wont_fix' ? new Date().toISOString() : null;
+  }
+  if (typeof body?.admin_notes === 'string') patch.admin_notes = body.admin_notes.slice(0, 8000);
+  if (Object.keys(patch).length === 0) return c.json({ error: 'Nothing to change.' }, 400);
+  const { error } = await supabaseAdmin.from('issue_reports').update(patch).eq('id', c.req.param('id'));
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
 });
 
 // --- Admin API (owner only) ---
@@ -3241,7 +3350,7 @@ app.get('/admin/api/summary', async (c) => {
     }
   };
 
-  const [alerts, pendingNotes, ingestionErrors] = await Promise.all([
+  const [alerts, pendingNotes, ingestionErrors, newReports] = await Promise.all([
     // `.eq('resolved', false)` is what /admin/api/alerts uses. Matched exactly,
     // because a badge that counts differently from the panel it points at is
     // worse than no badge.
@@ -3271,9 +3380,15 @@ app.get('/admin/api/summary', async (c) => {
      * spelled 'error'.
      */
     unresolvedIngestionErrors(since),
+    // Reports nobody has looked at yet: the badge on the Reports tab.
+    count('new reports', () =>
+      supabaseAdmin
+        .from('issue_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'new')),
   ]);
 
-  return c.json({ alerts, pending_notes: pendingNotes, ingestion_errors: ingestionErrors });
+  return c.json({ alerts, pending_notes: pendingNotes, ingestion_errors: ingestionErrors, new_reports: newReports });
 });
 
 app.get('/admin/api/alerts', async (c) => {

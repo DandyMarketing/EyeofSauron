@@ -641,6 +641,31 @@
   .u-manage .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
   .u-manage .m-name input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 6px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px; }
+  /* --- Reports (13 Oct 2026) --- */
+  .rrow { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .rrow:first-child { border-top: 0; }
+  .r-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .r-kind { font-weight: 600; }
+  .r-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .r-new { color: var(--accent); border-color: var(--accent); }
+  .r-looking { color: #6495ed; border-color: #6495ed; }
+  .r-fixed { color: var(--success); border-color: var(--success); }
+  .r-wont_fix { color: var(--text-muted); }
+  .r-snip { color: var(--text-muted); font-size: 12px; margin-top: 4px; cursor: pointer; overflow-wrap: anywhere; }
+  .r-detail { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+  .r-block { margin-bottom: 14px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .r-block pre, .r-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font-size: 11px; margin: 4px 0; max-height: 240px; overflow-y: auto; }
+  .r-msg { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 8px 0; }
+  .r-msg.r-a { border-left-color: var(--accent); }
+  .r-who { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .r-text { white-space: pre-wrap; }
+  .r-trace summary { cursor: pointer; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .r-tool { margin: 8px 0; font-size: 12px; }
+  .r-detail .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .r-review .m-account { display: flex; gap: 8px; margin-top: 8px; }
+  .r-review textarea { width: 100%; min-height: 80px; margin-top: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; font-size: 13px; box-sizing: border-box; }
   .u-manage .m-account { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
   @media (max-width: 720px) {
     .urow { grid-template-columns: 1fr auto; }
@@ -1155,6 +1180,7 @@ const TABS = [
   { id: 'connections', label: 'Connections', load: loadConnections },
   { id: 'accounting',  label: 'Accounting',  load: loadAccounting },
   { id: 'knowledge',   label: 'Knowledge',   load: loadKnowledge },
+  { id: 'reports',     label: 'Reports',     load: loadReports },
 ];
 
 const DEFAULT_TAB = 'attention';
@@ -1336,6 +1362,87 @@ async function loadAccounting(panel) {
   renderFees(panel);
 }
 
+/**
+ * Reports from the "Report an issue" button (Khai, 13 Oct 2026). Newest first;
+ * a row opens to the whole conversation with each answer's data-tool trace,
+ * a status, notes, and "Copy for Claude" -- the report as one block of text to
+ * paste into a session, so the cause can be found without database access.
+ */
+const REPORT_KIND = { wrong: 'Answered incorrectly', cannot_answer: 'Could not answer', error: 'Showed an error', other: 'Something else' };
+const REPORT_STATUS = { new: 'New', looking: 'Looking into it', fixed: 'Fixed', wont_fix: 'Will not fix' };
+
+async function loadReports(panel) {
+  const data = await api('GET', '/admin/api/reports');
+  panel.innerHTML = '';
+  const section = el('div', 'section');
+  if (data.error) {
+    section.innerHTML = '<h2>Reports</h2><div class="u-warn">' + esc(data.error) + '</div>';
+    panel.appendChild(section);
+    return;
+  }
+  const reports = data.reports || [];
+  const when = iso => new Date(iso).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  section.innerHTML = '<h2>Reports (' + reports.length + ')</h2>' +
+    (reports.length === 0 ? '<div class="muted">No reports yet. They arrive from the "Report an issue" link under every answer.</div>' :
+    '<div class="ulist">' + reports.map(r =>
+      '<div class="rrow" data-id="' + r.id + '">' +
+        '<div class="r-head">' +
+          '<span class="r-status r-' + esc(r.status) + '">' + esc(REPORT_STATUS[r.status] || r.status) + '</span>' +
+          '<span class="r-kind">' + esc(REPORT_KIND[r.kind] || r.kind) + '</span>' +
+          '<span class="muted">' + esc(r.page === 'plan' ? 'Planner' : 'Chat') + ' · ' + esc(r.reporter_name || r.reporter_email || '—') + ' · ' + esc(when(r.created_at)) + '</span>' +
+        '</div>' +
+        '<div class="r-snip">' + esc((r.comment || r.question || r.error || '').slice(0, 220)) + '</div>' +
+        '<div class="r-detail" hidden></div>' +
+      '</div>').join('') + '</div>');
+  panel.appendChild(section);
+
+  section.querySelectorAll('.rrow .r-head, .rrow .r-snip').forEach(h => h.addEventListener('click', () => toggleReport(h.closest('.rrow'))));
+}
+
+async function toggleReport(row) {
+  const box = row.querySelector('.r-detail');
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = '<div class="muted">Loading…</div>';
+  const data = await api('GET', '/admin/api/reports/' + row.dataset.id);
+  if (data.error) { box.innerHTML = '<div class="u-warn">' + esc(data.error) + '</div>'; return; }
+  const r = data.report;
+  const transcript = (r.transcript || []).map(m =>
+    '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + '</div>' +
+      '<div class="r-text">' + esc(m.content || '') + '</div>' +
+      ((m.tool_trace || []).length ? '<details class="r-trace"><summary>Data it looked up (' + m.tool_trace.length + ')</summary>' +
+        m.tool_trace.map(t => '<div class="r-tool"><strong>' + esc(t.name) + '</strong>' + (typeof t.ms === 'number' ? ' <span class="muted">' + t.ms + ' ms</span>' : '') +
+          '<pre>' + esc(JSON.stringify(t.input || {}, null, 1)) + '</pre>' +
+          (t.result ? '<div class="muted">Returned:</div><pre>' + esc(t.result) + '</pre>' : '') + '</div>').join('') +
+      '</details>' : '') +
+    '</div>').join('');
+  box.innerHTML =
+    (r.comment ? '<div class="r-block"><div class="m-label">What they said</div>' + esc(r.comment) + '</div>' : '') +
+    (r.error ? '<div class="r-block"><div class="m-label">Error shown</div><pre>' + esc(r.error) + '</pre></div>' : '') +
+    '<div class="r-block"><div class="m-label">Conversation</div>' + (transcript || '<div class="muted">No saved conversation. The question and answer reported:</div>' +
+      '<div class="r-msg r-q"><div class="r-text">' + esc(r.question || '—') + '</div></div><div class="r-msg r-a"><div class="r-text">' + esc(r.answer || '—') + '</div></div>') + '</div>' +
+    '<div class="r-block r-review">' +
+      '<div class="m-label">Review</div>' +
+      '<div class="role-actions"><select class="r-status-pick">' + Object.entries(REPORT_STATUS).map(([v, l]) => '<option value="' + v + '"' + (v === r.status ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +
+      '<textarea class="r-notes" placeholder="Notes: the cause, the fix, what was decided">' + esc(r.admin_notes || '') + '</textarea>' +
+      '<div class="m-account"><button class="btn btn-small r-save">Save</button><button class="btn btn-small btn-outline r-copy">Copy for Claude</button></div>' +
+    '</div>';
+  box.querySelector('.r-save').addEventListener('click', async () => {
+    const res = await api('PATCH', '/admin/api/reports/' + r.id, { status: box.querySelector('.r-status-pick').value, admin_notes: box.querySelector('.r-notes').value });
+    if (res.error) { toast('error', res.error); return; }
+    toast('success', 'Saved');
+    const pill = row.querySelector('.r-status');
+    const st = box.querySelector('.r-status-pick').value;
+    pill.className = 'r-status r-' + st; pill.textContent = REPORT_STATUS[st];
+    loadBadges();
+  });
+  // The whole report as text, to paste into a session with Claude.
+  box.querySelector('.r-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(data.markdown); toast('success', 'Copied. Paste it into your chat with Claude.'); }
+    catch { toast('error', 'Could not copy. Your browser blocked the clipboard.'); }
+  });
+}
+
 async function loadKnowledge(panel) {
   const [notesData] = await Promise.all([api('GET', '/admin/api/notes'), loadVenues()]);
   panel.innerHTML = '';
@@ -1363,6 +1470,7 @@ async function loadBadges() {
   const counts = {
     attention: (summary.alerts || 0) + (summary.pending_notes || 0) + (summary.ingestion_errors || 0),
     knowledge: summary.pending_notes || 0,
+    reports: summary.new_reports || 0,
   };
 
   for (const [id, n] of Object.entries(counts)) {
@@ -2335,8 +2443,12 @@ function renderIntegrations(root) {
     '<div id="staffany-result" style="margin-top:16px"></div>' +
     // The mapping, on the same panel as the probe, because the probe is what
     // tells you a new section exists and this is where you act on it.
-    '<h4 style="margin-top:24px">Section mapping</h4>' +
-    '<button id="staffany-refresh-btn" class="btn" style="margin-bottom:10px">Refresh sections from StaffAny</button>' +
+    // Heading and its button on one line, with room between them (13 Oct 2026:
+    // the button sat against the heading and read as overlapping it).
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:24px 0 10px">' +
+      '<h4 style="margin:0">Section mapping</h4>' +
+      '<button id="staffany-refresh-btn" class="btn btn-small">Refresh sections from StaffAny</button>' +
+    '</div>' +
     '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Which venue each StaffAny section belongs to, and whether it is kitchen or floor. Nothing is guessed from the name &mdash; two of the three legal entities here are called Potus and 20 Craig Road. <strong>An unmapped section is not ingested</strong>, so its labour is missing until somebody confirms it here. Timesheets can be re-fetched, so mapping it later loses nothing.</p>' +
     '<div id="staffany-sections">Loading&hellip;</div>';
   root.appendChild(staffSection);

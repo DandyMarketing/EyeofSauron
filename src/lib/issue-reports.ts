@@ -1,0 +1,126 @@
+/**
+ * "Report this issue" (Khai, 13 Oct 2026, with Sauron in daily use by the
+ * team): a button under every answer that sends the whole conversation to the
+ * admins, so a wrong answer, a question it could not answer, or an error can be
+ * reviewed -- by Khai, and with Claude -- and fixed at the cause.
+ *
+ * Pure: what a report may contain, checked, and the text a report becomes when
+ * it is copied out for review. The reading and writing is in server.ts.
+ */
+
+export const REPORT_KINDS = ['wrong', 'cannot_answer', 'error', 'other'] as const;
+export type ReportKind = typeof REPORT_KINDS[number];
+
+export const KIND_LABELS: Record<ReportKind, string> = {
+  wrong: 'Answered incorrectly',
+  cannot_answer: 'Could not answer',
+  error: 'Showed an error',
+  other: 'Something else',
+};
+
+export const REPORT_STATUSES = ['new', 'looking', 'fixed', 'wont_fix'] as const;
+export type ReportStatus = typeof REPORT_STATUSES[number];
+
+export interface ReportInput {
+  kind: ReportKind;
+  page: 'chat' | 'plan';
+  comment: string | null;
+  conversation_id: string | null;
+  question: string | null;
+  answer: string | null;
+  error: string | null;
+  context: { model?: string; user_agent?: string; url?: string; app_version?: string };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const text = (x: unknown, max: number): string | null =>
+  typeof x === 'string' && x.trim() ? x.trim().slice(0, max) : null;
+
+/**
+ * What came back from a browser, checked. A browser can send anything, so the
+ * kind and page are from fixed lists, ids are ids, and every text has a ceiling.
+ * Null for something that is not a report at all.
+ */
+export function cleanReportInput(raw: any): ReportInput | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!(REPORT_KINDS as readonly string[]).includes(raw.kind)) return null;
+  if (raw.page !== 'chat' && raw.page !== 'plan') return null;
+  const ctx = raw.context && typeof raw.context === 'object' ? raw.context : {};
+  return {
+    kind: raw.kind,
+    page: raw.page,
+    comment: text(raw.comment, 4000),
+    conversation_id: typeof raw.conversation_id === 'string' && UUID.test(raw.conversation_id) ? raw.conversation_id : null,
+    question: text(raw.question, 20000),
+    answer: text(raw.answer, 40000),
+    error: text(raw.error, 4000),
+    context: {
+      ...(text(ctx.model, 80) ? { model: text(ctx.model, 80)! } : {}),
+      ...(text(ctx.user_agent, 300) ? { user_agent: text(ctx.user_agent, 300)! } : {}),
+      ...(text(ctx.url, 300) ? { url: text(ctx.url, 300)! } : {}),
+      ...(text(ctx.app_version, 80) ? { app_version: text(ctx.app_version, 80)! } : {}),
+    },
+  };
+}
+
+export interface TranscriptEntry {
+  role: 'user' | 'assistant';
+  content: string;
+  at?: string | null;
+  tool_trace?: Array<{ name: string; input?: unknown; result?: string; ms?: number }> | null;
+}
+
+export interface StoredReport {
+  id: string;
+  created_at: string;
+  reporter_name: string | null;
+  reporter_email: string | null;
+  kind: ReportKind;
+  page: 'chat' | 'plan';
+  comment: string | null;
+  question: string | null;
+  answer: string | null;
+  error: string | null;
+  transcript: TranscriptEntry[];
+  context: Record<string, unknown> | null;
+  status: ReportStatus;
+  admin_notes: string | null;
+}
+
+/**
+ * The report as one block of text, for "Copy for Claude": everything needed to
+ * find the cause without access to the database -- what was asked, what came
+ * back, and for every answer which data tools ran, with what input, what they
+ * returned and how long they took. That last part is usually where a wrong
+ * answer comes from (the 10 Oct brunch read the whole day's bookings, visible
+ * only in the tool's input).
+ */
+export function reportMarkdown(r: StoredReport): string {
+  const lines: string[] = [];
+  lines.push(`# Sauron issue report ${r.id}`);
+  lines.push('');
+  lines.push(`- **When:** ${r.created_at}`);
+  lines.push(`- **Reported by:** ${r.reporter_name || '—'}${r.reporter_email ? ` <${r.reporter_email}>` : ''}`);
+  lines.push(`- **Problem:** ${KIND_LABELS[r.kind] ?? r.kind}`);
+  lines.push(`- **Where:** ${r.page === 'plan' ? 'Event planner' : 'Chat'}`);
+  lines.push(`- **Status:** ${r.status}`);
+  const ctx = r.context ?? {};
+  for (const [k, v] of Object.entries(ctx)) lines.push(`- **${k}:** ${String(v)}`);
+  if (r.comment) { lines.push('', '## What they said', '', r.comment); }
+  if (r.error) { lines.push('', '## Error shown', '', '```', r.error, '```'); }
+  if (r.question) { lines.push('', '## The question reported', '', r.question); }
+  if (r.answer) { lines.push('', '## The answer reported', '', r.answer); }
+  if (r.transcript?.length) {
+    lines.push('', `## Whole conversation (${r.transcript.length} messages)`);
+    r.transcript.forEach((m, i) => {
+      lines.push('', `### ${i + 1}. ${m.role === 'user' ? 'Question' : 'Sauron'}${m.at ? ` — ${m.at}` : ''}`, '', m.content || '(empty)');
+      for (const t of m.tool_trace ?? []) {
+        lines.push('', `- Tool \`${t.name}\`${typeof t.ms === 'number' ? ` (${t.ms} ms)` : ''}`);
+        lines.push(`  - input: \`${JSON.stringify(t.input ?? {})}\``);
+        if (t.result) lines.push('  - returned:', '', '```json', t.result, '```');
+      }
+    });
+  }
+  if (r.admin_notes) { lines.push('', '## Admin notes', '', r.admin_notes); }
+  return lines.join('\n');
+}

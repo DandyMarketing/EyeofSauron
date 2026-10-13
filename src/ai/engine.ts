@@ -55,6 +55,31 @@ export interface QueryResult {
    * no entry here and needs none -- it came from our own data.
    */
   sources: WebSource[];
+  /**
+   * What each tool was asked and what it RETURNED, for the issue report
+   * (Khai, 13 Oct 2026: "report this issue ... allow me to review it with you
+   * to find the problem"). Results are cut to an excerpt. Saved with the
+   * answer, never sent to the browser, and kept apart from `toolCalls`, which
+   * the weekly recommendations store as evidence and which deliberately holds
+   * the QUERIES, not the rows.
+   */
+  trace?: ToolTrace[];
+}
+
+export interface ToolTrace { name: string; input: Record<string, any>; result: string; ms: number }
+
+/** A tool's result as kept for a report: no chart markup, at most this long. */
+const TRACE_RESULT_CHARS = 4000;
+export function traceExcerpt(raw: string): string {
+  let text = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && '__chart_svg' in parsed) {
+      delete parsed.__chart_svg;
+      text = JSON.stringify(parsed);
+    }
+  } catch { /* not JSON: kept as it is */ }
+  return text.length > TRACE_RESULT_CHARS ? text.slice(0, TRACE_RESULT_CHARS) + ` ...[${text.length - TRACE_RESULT_CHARS} more characters]` : text;
 }
 
 // The output ceiling now comes from the model policy, because it depends on the
@@ -229,6 +254,7 @@ export async function askSauron(
    */
   const choice = modelFor(purpose, process.env, chosenModel);
   const toolCalls: QueryResult['toolCalls'] = [];
+  const trace: ToolTrace[] = [];
   const charts: QueryResult['charts'] = [];
 
   const today = getSingaporeDate();
@@ -670,7 +696,12 @@ export async function askSauron(
     report({ kind: 'working', round: rounds, labels: labelsForRound(uses, venueNames === undefined ? {} : venueNames) });
 
     const results = await Promise.all(
-      uses.map(block => handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role)),
+      uses.map(async block => {
+        const t0 = Date.now();
+        const out = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role);
+        trace.push({ name: block.name, input: block.input as Record<string, any>, result: traceExcerpt(out), ms: Date.now() - t0 });
+        return out;
+      }),
     );
 
     const toolResults: Anthropic.ToolResultBlockParam[] = uses.map((block, i) => {
@@ -849,5 +880,5 @@ export async function askSauron(
 
   // Folded across the whole turn: `extractSources` groups within one response,
   // and the same page is commonly cited in several of them.
-  return { answer, toolCalls, charts, sources: mergeSources(sources) };
+  return { answer, toolCalls, charts, sources: mergeSources(sources), trace };
 }
