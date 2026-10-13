@@ -43,6 +43,7 @@
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<script src="/eye-busy.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -228,6 +229,13 @@
 
 
   .empty { color: var(--text-muted); font-size: 14px; padding: 14px; }
+  .empty.calc { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+  .calc-refresh {
+    background: var(--surface); color: var(--accent); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .calc-refresh:hover { background: var(--surface-hover); }
+  .calc-refresh:disabled { color: var(--text-muted); cursor: default; }
 
   /* --- the advice, as one line that opens in place ---------------------- */
   /* WEEKLY content in a DAILY surface. As a full panel it meant scrolling past
@@ -734,6 +742,20 @@ function draw(recData) {
   lastRecData = recData;
   document.getElementById('export-open')?.addEventListener('click', openExport);
 
+  /**
+   * A panel still calculating FILLS IN BY ITSELF (Khai, 13 Oct 2026: "can you
+   * do it automatically"): the page asks again every 6 seconds for up to a
+   * minute, and the Refresh button does the same at once. The server's slow
+   * parts finish within seconds of the first request, so the first retry
+   * almost always lands them.
+   */
+  document.querySelectorAll('.calc-refresh').forEach(b => b.addEventListener('click', () => refreshPending()));
+  if ((payload.pending || []).length) {
+    if (autoRefreshes < 10) { autoRefreshes++; setTimeout(refreshPending, 6000); }
+  } else {
+    autoRefreshes = 0;
+  }
+
   const ask = document.getElementById('ask-input');
   const go = () => askNow(v, w);
   document.getElementById('ask-go').addEventListener('click', go);
@@ -1176,8 +1198,29 @@ function servicePanel(v, w) {
  */
 function calculating(payload, key, title) {
   if (!(payload.pending || []).includes(key)) return null;
+  // Khai, 13 Oct 2026: "put a refresh link". The page also checks again by
+  // itself (refreshPending), so the button is for whoever will not wait.
   return '<div class="panel"><h2>' + esc(title) + '</h2>' +
-    '<div class="empty">Still calculating \u2014 this appears when you refresh in a moment.</div></div>';
+    '<div class="empty calc">' + (window.eyeBusy ? window.eyeBusy(20) : '') + 'Still calculating \u2014 this fills in by itself in a moment. ' +
+    '<button type="button" class="calc-refresh">Refresh</button></div></div>';
+}
+
+/**
+ * Fetch the dashboard again for the period on screen and redraw, keeping the
+ * venue that is selected. Only the figures, never a page reload: a reload
+ * would replay sign-in, the terms check and the brief, and drop the venue.
+ */
+let refreshing = null;
+let autoRefreshes = 0;
+function refreshPending() {
+  if (refreshing) return refreshing;
+  document.querySelectorAll('.calc-refresh').forEach(b => { b.disabled = true; b.textContent = 'Refreshing\u2026'; });
+  refreshing = fetchDashboard(period).then(res => {
+    refreshing = null;
+    if (res.ok) { payload = res.body; draw(lastRecData); return; }
+    document.querySelectorAll('.calc-refresh').forEach(b => { b.disabled = false; b.textContent = 'Refresh'; });
+  });
+  return refreshing;
 }
 
 /**
