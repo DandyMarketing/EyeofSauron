@@ -958,6 +958,22 @@ anything is saved. Create also cleans the number fields again on its own.
 schema as a request, and check the result as you would a form a stranger
 filled in.
 
+### 3.9 Every account "Never signed in", the owner's included
+**Symptom.** 13 Oct 2026: the admin console showed "Never signed in" for every
+user, including Khai, who uses Sauron daily and had accepted the terms -- which
+needs a sign-in.
+**Root cause.** `lastSignIns()` returned an EMPTY map when Supabase Auth's user
+list could not be read, and an empty map reads, row by row, as "no sign-in
+recorded". A failed read was drawn as a confident answer on every row. The
+underlying read failure itself is not yet known; the page now shows its
+message.
+**Fix.** The failure is carried to the page: each row says "Unknown" and a
+banner gives the reason. A profile with no matching login account says so
+("No login account") rather than "Never signed in", so an id mismatch is
+distinguishable from a real never.
+**Recurs?** **Any column filled from a second source.** Make "could not read"
+a value of its own; an empty result must never stand in for an error.
+
 ### 3.8 A brunch question answered with the whole day's bookings
 **Symptom.** 13 Oct 2026: asked whether Firangi Superstar's 10 Oct F1 Champagne
 Brunch bookings followed the marketing posts, the chat read 41 bookings, said

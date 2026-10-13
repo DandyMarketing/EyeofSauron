@@ -208,18 +208,23 @@ async function loadSession(accessToken: string): Promise<SessionUser | null> {
  * the user list; losing it must not lose the list, which is also how terms
  * acceptances are handled a few lines down.
  */
-async function lastSignIns(): Promise<Map<string, string | null>> {
+async function lastSignIns(): Promise<{ seen: Map<string, string | null>; error: string | null }> {
   const seen = new Map<string, string | null>();
   const PER_PAGE = 200;
 
   for (let page = 1; ; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
-    if (error) {
-      console.error(`[users] could not read sign-in times: ${error.message}`);
-      return seen;
+    try {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
+      if (error) {
+        console.error(`[users] could not read sign-in times: ${error.message}`);
+        return { seen, error: error.message };
+      }
+      for (const u of data.users) seen.set(u.id, u.last_sign_in_at ?? null);
+      if (data.users.length < PER_PAGE) return { seen, error: null };
+    } catch (e: any) {
+      console.error(`[users] could not read sign-in times: ${e?.message ?? e}`);
+      return { seen, error: String(e?.message ?? e) };
     }
-    for (const u of data.users) seen.set(u.id, u.last_sign_in_at ?? null);
-    if (data.users.length < PER_PAGE) return seen;
   }
 }
 
@@ -228,7 +233,7 @@ export async function listUsers() {
     .from('profiles')
     .select('id, email, full_name, created_at'));
 
-  const signedIn = await lastSignIns();
+  const { seen: signedIn, error: signInError } = await lastSignIns();
 
   const { data: allRoles } = await selectAll(() => supabaseAdmin
     .from('user_venue_roles')
@@ -265,7 +270,17 @@ export async function listUsers() {
      * error explanations are built server-side.
      */
     last_sign_in_at: signedIn.get(p.id) ?? null,
-    last_seen: describeLastSeen(signedIn.get(p.id) ?? null),
+    /**
+     * A FAILED READ IS NOT "NEVER SIGNED IN" (13 Oct 2026: every account,
+     * including the owner who uses Sauron daily, showed "Never signed in").
+     * The read failing used to leave the map empty, which drew a confident
+     * wrong answer on every row. Now the row says it does not know, and why.
+     */
+    last_seen: signInError
+      ? { text: 'Unknown', tone: 'unknown', error: signInError }
+      : signedIn.has(p.id)
+        ? describeLastSeen(signedIn.get(p.id) ?? null)
+        : { text: 'No login account', tone: 'never' },
     terms: termsAcceptanceSummary((acceptances ?? []).filter((a: any) => a.user_id === p.id), !!termsError),
     roles: (allRoles ?? [])
       .filter((r: any) => r.user_id === p.id)

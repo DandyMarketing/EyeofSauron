@@ -607,6 +607,46 @@
   .pager-size select { font-size: 12px; padding: 4px 6px; }
 
   .last-seen { font-size: 12px; white-space: nowrap; }
+  .last-seen-unknown { color: var(--text-muted); font-style: italic; }
+
+  /* --- Users: one tidy row each (13 Oct 2026) --- */
+  .u-warn { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  .ulist { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .urow {
+    display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(0, 2fr) 150px 84px;
+    gap: 6px 16px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border);
+  }
+  .urow:first-child { border-top: 0; }
+  .u-name { font-weight: 600; font-size: 14px; }
+  .u-email { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+  .u-access { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .acc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .acc-line .role-badge { min-width: 64px; text-align: center; }
+  .vpill {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; white-space: nowrap;
+  }
+  .vx {
+    background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1;
+    width: 20px; height: 20px; border-radius: 50%; padding: 0;
+  }
+  .vx:hover { background: rgba(232, 64, 64, 0.15); color: var(--error); }
+  .u-status { font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+  .u-terms .ok { color: var(--success); }
+  .u-terms .warn { color: var(--accent); }
+  .muted { color: var(--text-muted); }
+  .u-act { justify-self: end; }
+  .u-manage { grid-column: 1 / -1; border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px; }
+  .u-manage[hidden] { display: none; }
+  .u-manage .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .u-manage .m-account { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  @media (max-width: 720px) {
+    .urow { grid-template-columns: 1fr auto; }
+    .u-who { grid-column: 1; }
+    .u-act { grid-column: 2; grid-row: 1; }
+    .u-access, .u-status { grid-column: 1 / -1; }
+    .u-status { flex-direction: row; gap: 12px; }
+  }
   .last-seen-active  { color: var(--success); }
   .last-seen-quiet   { color: var(--text-muted); }
   .last-seen-dormant { color: #e8c840; }
@@ -1463,77 +1503,66 @@ async function refreshUsers() {
   loadBadges();
 }
 
+/**
+ * One tidy row per person (Khai, 13 Oct 2026: "so messy and not orderly").
+ * It was a red x button under every role and a full grant form on every row,
+ * so three users filled a screen. Now: who, their access grouped by role with
+ * a small x inside each venue, when they were last here, and ONE "Manage"
+ * button that opens the grant form, password reset and delete for that row.
+ */
+const ROLE_ORDER = ['owner', 'finance', 'manager', 'staff'];
+const openManage = new Set();
+
 function fillUsers(usersSection, users) {
-  // Users table
-  let tableHtml = `<h2>Users (${users.length})</h2>
-    <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Last seen</th><th>Terms</th><th>Venue Roles</th><th>Add Role</th><th></th></tr></thead>
-      <tbody>`;
+  const fmtDay = iso => {
+    if (!iso) return '';
+    const d = new Date(iso.slice(0, 10) + 'T00:00:00Z');
+    return isNaN(d) ? iso.slice(0, 10) : d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  };
+  const unknown = users.find(u => u.last_seen && u.last_seen.tone === 'unknown');
+  let html = `<h2>Users (${users.length})</h2>` +
+    // A read that failed is said, never drawn as "Never signed in" on every row.
+    (unknown ? `<div class="u-warn">Sign-in times could not be read, so "last seen" is unknown for everyone: ${esc(unknown.last_seen.error || 'no reason given')}</div>` : '') +
+    '<div class="ulist">';
 
   for (const user of users) {
-    const roles = (user.roles || []).map(r =>
-      `<span class="role-badge role-${r.role}">${r.venue_name} - ${r.role}</span>
-       <button class="btn btn-small btn-danger" onclick="removeRole('${r.id}')">x</button>`
-    ).join(' ');
+    const isSelf = user.id === currentUserId;
+    const seen = user.last_seen || { text: '—', tone: 'never' };
+    const t = user.terms || { status: 'unknown' };
+    const terms =
+      t.status === 'accepted' ? `<span class="ok" title="Expires ${esc(fmtDay(t.expires_at))}">Terms ${esc(fmtDay(t.accepted_at))}</span>`
+      : t.status === 'expired' ? `<span class="warn" title="Last accepted ${esc(fmtDay(t.accepted_at))}">Terms expired</span>`
+      : t.status === 'never' ? '<span class="muted">Terms not yet</span>'
+      : '<span class="muted" title="Run migration 042">Terms —</span>';
+
+    // Access grouped by role: "Owner · Neon Pigeon · Fat Prince", x inside each venue.
+    const byRole = {};
+    for (const r of user.roles || []) (byRole[r.role] = byRole[r.role] || []).push(r);
+    const access = ROLE_ORDER.filter(role => byRole[role]).map(role =>
+      `<div class="acc-line"><span class="role-badge role-${role}">${esc(role[0].toUpperCase() + role.slice(1))}</span>` +
+      byRole[role].map(r => `<span class="vpill">${esc(r.venue_name)}<button class="vx" title="Remove ${esc(role)} at ${esc(r.venue_name)}" data-role="${r.id}" data-label="${esc(role)} at ${esc(r.venue_name)} for ${esc(user.full_name || user.email)}" onclick="confirmRemoveRole(this)">×</button></span>`).join('') +
+      '</div>').join('') || '<span class="muted">No access yet</span>';
 
     /**
-     * CHECKBOXES, NOT A DROPDOWN.
-     *
-     * Granting the same role at three venues meant three passes of: open a
-     * native picker, choose, close, press Add, wait for the page to rebuild.
-     * On a phone the picker is a full-screen modal, so it was fifteen taps and
-     * three reloads to do one obvious thing. These are toggles, and Add applies
-     * the role to everything ticked in one go.
-     *
-     * Nothing is pre-ticked or disabled by what the person already holds: the
-     * role is chosen AFTER the venues, so a chip cannot know yet whether it
-     * would be a change or a no-op. The grant upserts on (user, venue), so
-     * ticking a venue they already hold CHANGES the role there, which is a
-     * thing somebody legitimately wants to do. What they hold now is in the
-     * column immediately to the left.
+     * CHECKBOXES, NOT A DROPDOWN, for the venues: the role applies to every
+     * venue ticked in one go. Nothing is pre-ticked by what the person holds:
+     * the grant upserts on (user, venue), so ticking one they hold CHANGES the
+     * role there, which is a thing somebody legitimately wants to do.
      */
     const venueChips = venues.map(v =>
-      `<label class="venue-chip">
-         <input type="checkbox" class="venue-pick" data-user="${user.id}" value="${v.id}" data-name="${esc(v.name)}">
-         <span>${esc(v.name)}</span>
-       </label>`
+      `<label class="venue-chip"><input type="checkbox" class="venue-pick" data-user="${user.id}" value="${v.id}" data-name="${esc(v.name)}"><span>${esc(v.name)}</span></label>`
     ).join('');
-    const isSelf = user.id === currentUserId;
 
-    /**
-     * Has this person agreed, and is it still current?
-     *
-     * A record only Supabase's SQL editor can show is most of the way to not
-     * having one — the point of keeping it is being able to produce it. Expired
-     * is called out separately from never, because the two need different
-     * conversations.
-     */
-    /**
-     * When they were last HERE, which is not the same as how much they use it.
-     *
-     * This is the last time they authenticated. A session lasts, so somebody
-     * who opens Sauron daily on a phone that stays signed in can show a
-     * sign-in from weeks ago. It answers "has this account ever been used"
-     * exactly and "how often" only roughly, and the column says "Never signed
-     * in" rather than a long interval, because an invitation nobody opened and
-     * a person who stopped need different conversations.
-     */
-    const seen = user.last_seen || { text: '—', tone: 'never' };
-
-    const t = user.terms || { status: 'unknown' };
-    const termsCell =
-      t.status === 'accepted' ? `<span style="color:var(--success)" title="Expires ${esc((t.expires_at||'').slice(0,10))}">${esc((t.accepted_at||'').slice(0,10))}</span>`
-      : t.status === 'expired' ? `<span style="color:var(--accent)" title="Last accepted ${esc((t.accepted_at||'').slice(0,10))}">expired</span>`
-      : t.status === 'never' ? '<span style="color:var(--text-muted)">not yet</span>'
-      : '<span style="color:var(--text-muted)" title="Run migration 042">—</span>';
-
-    tableHtml += `<tr>
-      <td data-label="Name">${esc(user.full_name || '-')}</td>
-      <td data-label="Email">${esc(user.email)}</td>
-      <td data-label="Last seen" class="last-seen last-seen-${esc(seen.tone)}" title="${esc(user.last_sign_in_at || 'No sign-in recorded')}">${esc(seen.text)}</td>
-      <td data-label="Terms" style="white-space:nowrap;font-size:12px">${termsCell}</td>
-      <td data-label="Has access to"><div class="role-actions">${roles || '<span style="color:var(--text-muted)">No roles</span>'}</div></td>
-      <td data-label="Grant access">
+    html += `<div class="urow">
+      <div class="u-who"><div class="u-name">${esc(user.full_name || '—')}${isSelf ? ' <span class="muted">(you)</span>' : ''}</div><div class="u-email">${esc(user.email)}</div></div>
+      <div class="u-access">${access}</div>
+      <div class="u-status">
+        <div class="last-seen last-seen-${esc(seen.tone)}" title="${esc(seen.error || user.last_sign_in_at || 'No sign-in recorded')}">${esc(seen.tone === 'unknown' || seen.tone === 'never' ? seen.text : 'Seen ' + seen.text.toLowerCase())}</div>
+        <div class="u-terms">${terms}</div>
+      </div>
+      <div class="u-act"><button class="btn btn-small btn-outline" onclick="toggleManage('${user.id}')">${openManage.has(user.id) ? 'Close' : 'Manage'}</button></div>
+      <div class="u-manage" id="manage-${user.id}"${openManage.has(user.id) ? '' : ' hidden'}>
+        <div class="m-label">Give access</div>
         <div class="venue-picker">${venueChips}</div>
         <div class="role-actions">
           <select id="role-${user.id}" onchange="showRoleAccess('${user.id}')">
@@ -1544,31 +1573,35 @@ function fillUsers(usersSection, users) {
           </select>
           <button class="btn btn-small" id="add-role-${user.id}" onclick="assignRole('${user.id}')">Add</button>
         </div>
-        <!--
-          What the selected role grants, shown before it is granted.
-          Rendered from /admin/api/roles, which COMPUTES it from ROLE_DOMAINS
-          and mayRead() -- the same functions the tool layer enforces with.
-          Nothing here is hand-written, so it cannot drift away from what the
-          server actually does and tell somebody the opposite with confidence.
-        -->
+        <!-- What the selected role grants, computed by the server from the same
+             functions the tool layer enforces with; nothing here is hand-written. -->
         <div class="role-access" id="role-access-${user.id}"></div>
-      </td>
-      <td>
-        <div class="user-actions">
-          <button class="btn btn-small btn-outline" onclick="showResetPassword('${user.id}', '${esc(user.email)}')">Reset pw</button>
-          ${isSelf ? '' : `<button class="btn btn-small btn-danger" onclick="confirmDeleteUser('${user.id}', '${esc(user.email)}')">Delete</button>`}
+        <div class="m-account">
+          <button class="btn btn-small btn-outline" onclick="showResetPassword('${user.id}', '${esc(user.email)}')">Reset password</button>
+          ${isSelf ? '' : `<button class="btn btn-small btn-danger" onclick="confirmDeleteUser('${user.id}', '${esc(user.email)}')">Delete user</button>`}
         </div>
-      </td>
-    </tr>`;
+      </div>
+    </div>`;
   }
 
-  tableHtml += '</tbody></table>';
-  usersSection.innerHTML = tableHtml;
+  html += '</div>';
+  usersSection.innerHTML = html;
+}
 
-  // Deliberately NOT pre-filled for every row any more. The grid above covers
-  // what the roles mean; a line appears under a row only once somebody touches
-  // its dropdown, so a page of a hundred users stays a page of a hundred users.
+function toggleManage(userId) {
+  const panel = document.getElementById('manage-' + userId);
+  if (!panel) return;
+  const opening = panel.hidden;
+  panel.hidden = !opening;
+  if (opening) openManage.add(userId); else openManage.delete(userId);
+  const btn = panel.parentElement.querySelector('.u-act button');
+  if (btn) btn.textContent = opening ? 'Close' : 'Manage';
+}
 
+// The x is small, so a slip of the thumb asks before it takes access away.
+function confirmRemoveRole(btn) {
+  if (!confirm('Remove ' + btn.dataset.label + '?')) return;
+  removeRole(btn.dataset.role);
 }
 
 function renderSystem(root, system) {
