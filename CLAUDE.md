@@ -1217,7 +1217,10 @@ once, on phones and tablets only, never inside the installed app. Android gets
 an Install button that opens the system's own box (shown only after Chrome
 hands over `beforeinstallprompt`); an iPhone gets the two taps, Share then Add
 to Home Screen, because Safari lets a page do nothing more. "Not now" rests it
-for two weeks; the choice is per phone, in `sauron.install`.
+for two weeks; the choice is per phone, in `sauron.install`. It shows only after the
+page has confirmed who is signed in (`setNavOwner(owner, true)` fires
+`sauron:signed-in`), because a page that sends a signed-out person to the
+sign-in page took the offer with it -- on Khai's phone it "just flashes".
 
 **The invite email** is a Supabase template, not code: `docs/email/invite.html`
 is the versioned copy, pasted into Authentication -> Email Templates -> Invite

@@ -1481,6 +1481,12 @@ test('signed-in pages offer the home-screen install, once', () => {
     assert.match(html, /<script src="\/install-prompt\.js" defer><\/script>/, `${page} never offers the install`);
   }
   const js = readFileSync('public/install-prompt.js', 'utf8');
+  // Never before the page has confirmed who this is: a page about to send the
+  // person to sign in would take the offer with it ("it just flashes").
+  assert.match(js, /addEventListener\('sauron:signed-in'/);
+  for (const page of ['index.html', 'briefing.html', 'chat.html', 'plan.html', 'daily.html', 'admin.html']) {
+    assert.match(readFileSync(`public/${page}`, 'utf8'), /window\.setNavOwner\([^)]*, true\);/, `${page} never confirms sign-in, so it never offers the install`);
+  }
   assert.match(js, /display-mode: standalone/, 'it would nag people already inside the app');
   assert.match(js, /pointer: coarse/, 'it would show on computers');
   assert.match(js, /beforeinstallprompt/);

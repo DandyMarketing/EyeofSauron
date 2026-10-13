@@ -29,15 +29,34 @@
   if (standalone) { if (!state.installed) set({ installed: true }); return; }
   if (!touch || state.installed || (state.restUntil && Date.now() < state.restUntil)) return;
 
+  /**
+   * ONLY ONCE THE PAGE KNOWS WHO THIS IS (13 Oct 2026: Khai's phone showed the
+   * offer for a moment and then lost it -- "not a pop up but just flashes").
+   * A page that finds nobody signed in sends them to sign in, taking the offer
+   * with it. So nothing shows until the page confirms the person
+   * (setNavOwner(..., true) fires 'sauron:signed-in'), then two seconds more.
+   */
+  var signedIn = !!window.sauronSignedIn;
+  var waiting = null;
+  function when(kind) {
+    waiting = kind;
+    if (signedIn) setTimeout(function () { show(kind); }, 2000);
+  }
+  window.addEventListener('sauron:signed-in', function () {
+    if (signedIn) return;
+    signedIn = true;
+    if (waiting) setTimeout(function () { show(waiting); }, 2000);
+  });
+
   var deferred = null;
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();          // hold the browser's own mini-bar; ours explains why
     deferred = e;
-    show('android');
+    when('android');
   });
   window.addEventListener('appinstalled', function () { set({ installed: true }); hide(); });
 
-  if (ios) setTimeout(function () { show('ios'); }, 2000);
+  if (ios) when('ios');
 
   var box = null;
   function hide() { if (box) { box.remove(); box = null; } }

@@ -793,12 +793,19 @@
       var state = {};
       try { state = JSON.parse(localStorage.getItem('sauron.nav') || '{}'); } catch (e) {}
       function save() { try { localStorage.setItem('sauron.nav', JSON.stringify(state)); } catch (e) {} }
-      window.setNavOwner = function (owner) {
+      window.setNavOwner = function (owner, confirmed) {
         ['daily-link', 'admin-link'].forEach(function (id) {
           var a = document.getElementById(id);
           if (a && !a.classList.contains('active')) a.hidden = !owner;
         });
         state.owner = !!owner; save();
+        // Called with `confirmed` once the server has said who this is: the
+        // signal the home-screen offer waits for, so it never shows on a page
+        // that is about to send the person to sign in (/install-prompt.js).
+        if (confirmed && !window.sauronSignedIn) {
+          window.sauronSignedIn = true;
+          window.dispatchEvent(new Event('sauron:signed-in'));
+        }
       };
       window.setNavBrief = function (count) {
         var a = document.querySelector('a[data-brief-link]');
@@ -1029,7 +1036,7 @@ let myVenues = [];
       if (!res.ok) return;
       const body = await res.json();
       myVenues = body.venues || [];
-      window.setNavOwner(!!body.isOwner);
+      window.setNavOwner(!!body.isOwner, true);
     })
     .catch(() => { /* the header degrades; the chat does not depend on it */ });
 
