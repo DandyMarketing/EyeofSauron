@@ -636,6 +636,7 @@
   .vpill[style] .vx:hover { opacity: 1; background: rgba(0,0,0,.2); color: inherit; }
   .vdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .u-status { font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+  .u-signin { opacity: .8; }
   .u-terms .ok { color: var(--success); }
   .u-terms .warn { color: var(--accent); }
   .muted { color: var(--text-muted); }
@@ -1707,7 +1708,8 @@ function fillUsers(usersSection, users) {
       <div class="u-who"><div class="u-name">${esc(user.full_name || '—')}${isSelf ? ' <span class="muted">(you)</span>' : ''}</div><div class="u-email">${esc(user.email)}</div></div>
       <div class="u-access">${access}</div>
       <div class="u-status">
-        <div class="last-seen last-seen-${esc(seen.tone)}" title="${esc(seen.error || ('Last used: ' + (user.last_active_at ? new Date(user.last_active_at).toLocaleString('en-SG') : 'not recorded yet') + ' · Last signed in: ' + (user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString('en-SG') : 'never')))}">${esc(seen.tone === 'unknown' || seen.tone === 'never' ? seen.text : 'Seen ' + seen.text.toLowerCase())}</div>
+        <div class="last-seen last-seen-${esc((user.active_seen || seen).tone)}">Active: ${esc((user.active_seen || seen).text.toLowerCase())}</div>
+        <div class="last-seen last-seen-${esc((user.signin_seen || seen).tone)} u-signin">Signed in: ${esc((user.signin_seen || seen).text.replace(/^never signed in$/i, 'never').toLowerCase())}</div>
         <div class="u-terms">${terms}</div>
       </div>
       <div class="u-act"><button class="btn btn-small btn-outline" onclick="toggleManage('${user.id}')">${openManage.has(user.id) ? 'Close' : 'Manage'}</button></div>

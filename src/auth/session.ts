@@ -310,6 +310,14 @@ export async function listUsers() {
      */
     last_active_at: p.last_active_at ?? null,
     /**
+     * Each shown on its own line on the admin page (Khai, 13 Oct 2026: "why not
+     * just apply it like the last seen" -- it was only in the hover text).
+     * Activity starts from the 13 Oct deploy, so "not recorded yet" means not
+     * seen since then, not never.
+     */
+    active_seen: p.last_active_at ? describeLastSeen(p.last_active_at) : { text: 'Not recorded yet', tone: 'never' },
+    signin_seen: signInError ? { text: 'Unknown', tone: 'unknown' } : describeLastSeen(signedIn.get(p.id) ?? null),
+    /**
      * The LATER of when they last used Sauron and when they last signed in.
      * Use is what "last seen" means; the sign-in still counts for anyone not
      * seen since use began to be recorded.
