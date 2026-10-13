@@ -803,6 +803,15 @@ app.post('/api/plan/draft', async (c) => {
   if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
 
   const transcript = planTranscript(history);
+  /**
+   * Who "you" is and which venues exist, said outright. Without it the draft
+   * wrote the person planning down as an owner called "Planner", and listed
+   * Barter -- a rooftop being RENTED -- as one of our venues, which Create then
+   * refused (Khai, 13 Oct 2026).
+   */
+  const scoped = await venuesInScope(user);
+  const facts = `THE PERSON PLANNING is ${user.fullName || user.email}. Where the conversation makes "you" or "me" the owner of a task, write that name -- never "Planner" or "You".\n` +
+    `OUR VENUES -- the only values allowed in venue_slugs: ${scoped.map(v => `${v.slug} (${v.name})`).join(', ') || 'none'}. A space being rented or a partner's venue is NOT one of ours: describe it in the concept and the brief, never in venue_slugs.\n\n`;
 
   try {
     const structured = await anthropic.messages.create({
@@ -815,7 +824,7 @@ app.post('/api/plan/draft', async (c) => {
       }],
       tools: [eventDraftTool() as any],
       tool_choice: { type: 'tool', name: 'record_event_draft' },
-      messages: [{ role: 'user', content: `The planning conversation:\n\n${transcript}` }],
+      messages: [{ role: 'user', content: `${facts}The planning conversation:\n\n${transcript}` }],
     });
 
     const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
@@ -1053,6 +1062,10 @@ app.post('/api/events', async (c) => {
 
   const slugs: string[] = Array.isArray(d.venue_slugs) ? d.venue_slugs : [];
   const chosen = mayUse.filter(v => slugs.includes(v.slug));
+  // A name that is not one of OUR venues at all -- "barter", a rented rooftop
+  // -- is not an access question. It is dropped and said, not refused: the
+  // space is in the brief, it just is not a venue of ours.
+  const notOurs = slugs.filter(sl => !(allVenues ?? []).some(v => v.slug === sl));
 
   // An empty list is NOT "all venues" — it is a half-written event, and the
   // migration makes those owner-only by construction. Refuse it here so
@@ -1060,8 +1073,8 @@ app.post('/api/events', async (c) => {
   if (chosen.length === 0) {
     return c.json({ error: 'Name at least one venue you have access to.' }, 400);
   }
-  if (chosen.length !== slugs.length) {
-    const refused = slugs.filter(sl => !chosen.some(v => v.slug === sl));
+  const refused = slugs.filter(sl => !notOurs.includes(sl) && !chosen.some(v => v.slug === sl));
+  if (refused.length > 0) {
     return c.json({ error: `You do not have access to: ${refused.join(', ')}` }, 403);
   }
 
@@ -1217,6 +1230,7 @@ app.post('/api/events', async (c) => {
     id: created.id,
     venues: chosen.map(v => v.name),
     venue_list: chosen.map(v => ({ slug: v.slug, name: v.name })),
+    warning: notOurs.length ? `${notOurs.join(', ')} is not one of our venues, so it stays in the brief but is not linked as a venue.` : undefined,
     tasks: tasks.length,
     city_events_added: calendarAdded || undefined,
   });

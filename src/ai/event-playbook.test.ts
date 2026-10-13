@@ -388,3 +388,11 @@ test('owners and deadlines is about who and when, not the name of what the task 
   assert.match(row.decision, /A person who owns every task, and a date/);
   assert.match(row.decision, /which DJ/);
 });
+
+test('the draft lists only our venues, and owners are people, not "Planner"', () => {
+  // Khai, 13 Oct 2026: Create refused "barter" -- a rented rooftop -- and a
+  // task owner came out as "Planner".
+  const props = eventDraftTool().input_schema.properties as any;
+  assert.match(props.venue_slugs.description, /never a space being rented or a partner's venue/);
+  assert.match(props.tasks.items.properties.owner_name.description, /neither is "Planner" or "You"/);
+});

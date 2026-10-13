@@ -602,7 +602,7 @@ function renderDraft(d) {
       (d.brief ? '<button class="secondary" data-act="docx">Brief (Word)</button><button class="secondary" data-act="pdf">Brief (PDF)</button>' : '') +
       (d.pnl && (d.pnl.programming || []).length ? '<button class="secondary" data-act="excel">P&amp;L (Excel)</button>' : '') +
     '</div>' +
-    '<div class="confirm-row">' +
+    '<div class="confirm-row action-row">' +
       '<button class="secondary" data-act="discard">Not yet</button>' +
       '<button data-act="confirm">Create this event</button>' +
     '</div>' +
@@ -661,10 +661,13 @@ function renderDraft(d) {
       });
       const out = await res.json();
       if (!res.ok || out.error) {
-        el.querySelector('.confirm-row').innerHTML = '<div class="err">' + escapeHtml(out.error || 'Could not create it.') + '</div>';
+        // Said beside the buttons, and the button comes back: a refusal is
+        // something to fix and try again, not a dead end.
+        el.querySelector('.excel-msg').innerHTML = '<span class="err">' + escapeHtml(out.error || 'Could not create it.') + '</span>';
+        btn.disabled = false; btn.textContent = 'Create this event';
         return;
       }
-      el.querySelector('.confirm-row').innerHTML =
+      el.querySelector('.action-row').innerHTML =
         '<div class="saved">Created at ' + escapeHtml((out.venues || []).join(', ')) +
         (out.tasks ? ' with ' + out.tasks + ' task' + (out.tasks === 1 ? '' : 's') : '') + '.' +
         (out.warning ? ' ' + escapeHtml(out.warning) : '') + '</div>' +
@@ -674,7 +677,8 @@ function renderDraft(d) {
       el.querySelector('[data-act="monday"]')?.addEventListener('click', () =>
         openMonday(out.id, out.venue_list || [], d));
     } catch (e) {
-      el.querySelector('.confirm-row').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
+      el.querySelector('.excel-msg').innerHTML = '<span class="err">' + escapeHtml(String(e.message || e)) + '</span>';
+      btn.disabled = false; btn.textContent = 'Create this event';
     }
   });
 }

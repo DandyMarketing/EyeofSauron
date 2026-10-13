@@ -464,7 +464,7 @@ export function eventDraftTool() {
         venue_slugs: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Venues this runs at. MORE THAN ONE ONLY IF THE MECHANIC BREAKS WITHOUT THEM — a shared occasion across three venues is three events, not one.',
+          description: 'OUR venues this runs at, as slugs from the list you are given -- never a space being rented or a partner\'s venue (that goes in the concept). MORE THAN ONE ONLY IF THE MECHANIC BREAKS WITHOUT THEM — a shared occasion across three venues is three events, not one.',
         },
         occasion: { type: 'string', description: 'The calendar day, if any: "Valentine\'s Day", "Deepavali", "CNY". Spell it the way previous events spelled it — query_events shows what is already in use — or the year-on-year comparison will never match.' },
         concept_type: { type: 'string', description: '"guest-chef collab", "tasting", "brunch", "party", "launch".' },
@@ -515,7 +515,7 @@ export function eventDraftTool() {
               description: { type: 'string', description: '"Reel: the dish being plated", "Call VIPs who booked the last collab".' },
               channel: { type: 'string', description: 'Format for content, channel for outreach: reel, carousel, story, phone, whatsapp, email.' },
               t_minus_days: { type: 'number', description: 'Days before the event. 14 means a fortnight out, 0 is the day itself.' },
-              owner_name: { type: 'string', description: 'A person. "The team" is not an owner.' },
+              owner_name: { type: 'string', description: 'A person\'s name. "The team" is not an owner, and neither is "Planner" or "You" -- write the person planning\'s actual name.' },
             },
             required: ['kind', 'description', 't_minus_days', 'owner_name'],
           },
