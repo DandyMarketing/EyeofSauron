@@ -30,6 +30,7 @@ import { countUnresolved } from './ingest/resolved.js';
 import { askSauron } from './ai/engine.js';
 import { relightCharts } from './ai/chart-svg.js';
 import { unseenCount } from './lib/brief-unseen.js';
+import { canonicalRedirect } from './lib/canonical-host.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
 import { queryTools } from './ai/tools.js';
@@ -107,6 +108,16 @@ const app = new Hono();
  * future `contentTypeFilter` option cannot quietly take the protection away.
  */
 app.use('*', compress());
+
+/**
+ * The old Railway address moves to sauron.staydandy.com once that is switched
+ * on (src/lib/canonical-host.ts). 301, so browsers and phones remember it.
+ */
+app.use('*', async (c, next) => {
+  const to = canonicalRedirect(c.req.url, process.env);
+  if (to) return c.redirect(to, 301);
+  await next();
+});
 
 /**
  * How long a slow request actually took, and which one it was.

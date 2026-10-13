@@ -318,3 +318,20 @@ header.site-header #cs-menu { width: 32px; height: 32px; min-height: 0; }
 :root[data-theme="dark"] .theme-toggle .moon { display: none; }
 /* The tower is painted on cream; at night it sits a little quieter. */
 :root[data-theme="dark"] .sauron-watch { filter: brightness(0.88); }
+
+/* "Add Sauron to your home screen" (/install-prompt.js): a card along the
+   bottom of a phone screen, offered once. */
+.install-offer {
+  position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 80;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); font-size: 14px; line-height: 1.4;
+}
+.install-offer img { border-radius: 10px; flex-shrink: 0; }
+.install-offer .io-text { flex: 1 1 180px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.install-offer .io-text strong { font-size: 15px; }
+.install-offer .io-text span { color: var(--text-muted); }
+.install-offer .io-text svg { vertical-align: -3px; color: var(--accent); }
+.install-offer .io-actions { display: flex; gap: 8px; margin-left: auto; }
+.install-offer button { border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text); }
+.install-offer .io-install { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }

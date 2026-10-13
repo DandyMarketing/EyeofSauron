@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,596 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,599 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1177,6 +1177,34 @@ already makes every page revalidate. **On an iPhone the home-screen app keeps
 its own sign-in**, separate from Safari's, so each person signs in once more
 after adding it.
 
+### sauron.staydandy.com, 13 Oct 2026
+
+Khai moved Sauron to **sauron.staydandy.com** (DNS on Cloudflare, CNAME to the
+Railway service, proxy OFF so Railway issues the certificate). Nothing in code
+held the old address: invites and resets read `PUBLIC_APP_URL`, Xero
+`XERO_REDIRECT_URI`, and Supabase's Site URL and redirect list must name the
+new one. The old Railway address forwards every path to the new one with a
+301 (`src/lib/canonical-host.ts`), but only once `REDIRECT_TO_PUBLIC_URL=true`
+-- off until the new address answers, or it would send everyone to a page
+that does not load. `/version` answers on both.
+
+**In this order, because each step depends on the one before** (Khai's
+instruction): the domain, then the home-screen offer (an icon saved before the
+move points at the old address), then the invite email that links to the
+new one.
+
+**The home-screen offer** (`/install-prompt.js`, every page with the menu):
+once, on phones and tablets only, never inside the installed app. Android gets
+an Install button that opens the system's own box (shown only after Chrome
+hands over `beforeinstallprompt`); an iPhone gets the two taps, Share then Add
+to Home Screen, because Safari lets a page do nothing more. "Not now" rests it
+for two weeks; the choice is per phone, in `sauron.install`.
+
+**The invite email** is a Supabase template, not code: `docs/email/invite.html`
+is the versioned copy, pasted into Authentication -> Email Templates -> Invite
+user. It carries the set-up button and the homepage link with the home-screen
+steps.
+
 ### Report an issue: built 13 Oct 2026
 
 With Sauron live with the team, Khai: "a button, report this issue, that sends
@@ -1295,7 +1323,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,596 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,599 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

@@ -1447,3 +1447,21 @@ test('Sauron installs as a home-screen app on Android and iPhone', () => {
     assert.match(html, /<link rel="apple-touch-icon"/, `${page} has no iPhone home-screen icon`);
   }
 });
+
+test('signed-in pages offer the home-screen install, once', () => {
+  /**
+   * Khai, 13 Oct 2026: offer "add to home screen" the first time Sauron is
+   * opened. Every page with the menu loads /install-prompt.js; the script
+   * itself stays silent on computers, inside the installed app, and after a
+   * "Not now" for two weeks.
+   */
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    if (!html.includes('<nav class="site-nav">')) continue;
+    assert.match(html, /<script src="\/install-prompt\.js" defer><\/script>/, `${page} never offers the install`);
+  }
+  const js = readFileSync('public/install-prompt.js', 'utf8');
+  assert.match(js, /display-mode: standalone/, 'it would nag people already inside the app');
+  assert.match(js, /pointer: coarse/, 'it would show on computers');
+  assert.match(js, /beforeinstallprompt/);
+});
