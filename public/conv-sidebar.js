@@ -173,7 +173,15 @@
 
     const overlay = document.createElement('div');
     overlay.id = 'cs-overlay';
-    document.body.appendChild(overlay);
+    /**
+     * BESIDE THE SIDEBAR, not at the end of <body> (13 Oct 2026, Khai's phone:
+     * the Query page's list opened dimmed and nothing in it could be tapped).
+     * The chat sits inside #app-shell, which is position: fixed and so its own
+     * stacking context: the sidebar's z-index 60 only counts inside it, while
+     * an overlay on <body> at 55 sat above the whole shell, sidebar included.
+     * Placed next to the aside, both are in the same context on every page.
+     */
+    opts.aside.parentNode.insertBefore(overlay, opts.aside);
 
     const menu = document.createElement('button');
     menu.id = 'cs-menu';

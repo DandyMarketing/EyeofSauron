@@ -1519,3 +1519,15 @@ test('the page\'s own styles and scripts are re-checked on every load, like the 
   assert.match(server, /const isPageAsset = \/\\\.\(css\|js\|webmanifest\)\$\/\.test\(last\);/);
   assert.match(server, /if \(!isShell && !isPageAsset\) return;/);
 });
+
+test('the phone sidebar\'s dimming sits beside the sidebar, never above it', () => {
+  /**
+   * 13 Oct 2026, Khai on a phone: the Query page's saved chats opened dimmed
+   * and could not be tapped. The chat lives in a position: fixed #app-shell --
+   * its own stacking context -- so an overlay appended to <body> covered the
+   * whole shell, the sidebar with it. Plan has no shell and was fine.
+   */
+  const js = readFileSync('public/conv-sidebar.js', 'utf8');
+  assert.match(js, /opts\.aside\.parentNode\.insertBefore\(overlay, opts\.aside\)/);
+  assert.ok(!/document\.body\.appendChild\(overlay\)/.test(js), 'the overlay is back on <body>, above a fixed shell');
+});
