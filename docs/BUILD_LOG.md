@@ -900,6 +900,36 @@ weeks. Nothing in between is safe.**
 
 ---
 
+### 3.6 The planner said "confirmed" while the board beside it said two decisions were open
+**Symptom.** 13 Oct 2026, the Neon Pigeon New Year's Eve plan. The planner told
+Khai "every blocking decision is closed except the act fee", then "CONFIRMED --
+the brief is prepared and locked". The progress board on the same screen showed
+Channels and Other channels still open. Khai: "Kol plan and channel marketing is
+not settled. It's odd."
+**Root cause.** The board was right and the planner was wrong. Channels had only
+come up INSIDE other decisions -- the ad split, one line saying Instagram does
+recognition -- and the planner never asked the question itself, so there was no
+Instagram plan, no TikTok, no email, no WhatsApp; promoters were the only channel
+discussed. The planner never saw the board: two readings of one conversation,
+made by two passes that never compared notes. The playbook's channels question
+also invited the gap -- "which channels" with no list let one channel stand for
+the plan, and KOLs had no clear home between the two channel rows.
+**Fix.** The page sends the board's open blocking decisions with each message
+(`boardNote()`), and the planner may not call the plan ready, complete, locked or
+confirmed while any is listed -- and never says CONFIRMED, because only the
+Create button confirms. The channels question walks every channel by name and
+settles only when ONE is named as the booking channel; paid creators and
+promoters are channels, borrowed trust is the other row. The board now shows
+"partly: agreed X, missing Y" instead of a bare "open", and a made choice whose
+fee is still pending counts as settled, with the fee under waiting-on.
+**Recurs?** **Wherever two model passes read the same thing.** The second pass
+exists so the planner does not mark its own homework; that only works if the
+planner is told the mark. A check nobody acts on is a second opinion, not a
+control. The note is still a hint -- the real control is that nothing is written
+without a person pressing Create.
+
+---
+
 ## 4. Security
 
 ### 4.1 Venue isolation was not enforced anywhere

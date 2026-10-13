@@ -340,3 +340,23 @@ test('brevity is not allowed to cost the insight', () => {
   assert.match(EVENT_AGENT_PROMPT, /Your REASONING is the product/);
   assert.match(EVENT_AGENT_PROMPT, /an insight is one\s+sentence, not five/);
 });
+
+test('the channels row walks every channel, Instagram plan and TikTok included', () => {
+  // Khai, 13 Oct 2026: "one channel is mentioned, the promoters -- what is the IG plan", "tik tok etc".
+  const row = PLAYBOOK.find(r => r.key === 'channels')!;
+  for (const ch of ['Instagram', 'TikTok', 'email', 'WhatsApp', 'Google', 'ticket platform', 'promoters']) {
+    assert.match(row.ask, new RegExp(ch), `channels ask is missing ${ch}`);
+  }
+  assert.match(row.challenge, /THE INSTAGRAM PLAN IS MORE THAN THE POST SCHEDULE/);
+  assert.match(row.challenge, /ONE is named as the booking channel/);
+  // Paid reach is a channel; borrowed trust is the other row.
+  assert.match(row.challenge, /KOLs and promoters are CHANNELS|KOLs.*are CHANNELS/);
+  const alt = PLAYBOOK.find(r => r.key === 'alternative_channels')!;
+  assert.match(alt.decision, /lending their trust/);
+});
+
+test('the planner is shown the board and may not claim the plan is done past it', () => {
+  assert.match(EVENT_AGENT_PROMPT, /THE BOARD IS THE RECORD, NOT YOUR MEMORY/);
+  assert.match(EVENT_AGENT_PROMPT, /\[PROGRESS BOARD\] note/);
+  assert.match(EVENT_AGENT_PROMPT, /never say CONFIRMED at all/);
+});

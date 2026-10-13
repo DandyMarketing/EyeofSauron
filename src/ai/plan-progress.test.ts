@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide } from './plan-progress.js';
+import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide, boardNote } from './plan-progress.js';
 import { PLAYBOOK } from './event-playbook.js';
 
 test('every playbook decision has a short label, and the tool offers exactly the playbook keys', () => {
@@ -59,4 +59,40 @@ test('every open item carries a one-line hint of what it means', () => {
   }
   const p = summariseProgress(null);
   assert.equal(p.open.find(o => o.key === 'scope')?.hint, DECISION_HINTS.scope);
+});
+
+test('a decision touched but not settled says what is agreed and what is missing', () => {
+  const p = summariseProgress({
+    settled: [{ key: 'objective', summary: '$30,000 at 20% net' }],
+    partial: [
+      { key: 'channels', agreed: 'promoters, Meta ads', missing: 'the Instagram plan, and which channel books' },
+      // Settled wins over partial, and an unknown key is dropped.
+      { key: 'objective', agreed: 'x', missing: 'y' },
+      { key: 'nonsense', agreed: 'x', missing: 'y' },
+    ],
+    not_applicable: [], waiting_on: [],
+  });
+  const ch = p.open.find(o => o.key === 'channels')!;
+  assert.deepEqual(ch.partial, { agreed: 'promoters, Meta ads', missing: 'the Instagram plan, and which channel books' });
+  assert.equal(p.open.some(o => o.key === 'objective'), false);
+  assert.equal(p.open.filter(o => o.partial).length, 1);
+});
+
+test('the board note tells the planner what is open, and is empty when nothing blocking is', () => {
+  // Khai, 13 Oct 2026: the planner said "CONFIRMED" while the board showed
+  // Channels and Other channels open.
+  const note = boardNote(['channels', 'alternative_channels', 'channels', 'made_up']);
+  assert.match(note, /\[PROGRESS BOARD/);
+  assert.match(note, /Channels: Every channel/);
+  assert.match(note, /Other channels:/);
+  assert.equal(note.match(/- Channels:/g)!.length, 1, 'a repeated key is listed once');
+  assert.doesNotMatch(note, /made_up/);
+  assert.match(note, /do not call the plan ready, complete, locked or confirmed/);
+  assert.equal(boardNote([]), '');
+  assert.equal(boardNote('channels'), '');
+});
+
+test('a pending fee does not hold a made choice open', () => {
+  const settled = progressTool().input_schema.properties.settled as any;
+  assert.match(settled.description, /CHOICE THAT IS MADE IS SETTLED even if its fee, quote or signature is still pending/);
 });

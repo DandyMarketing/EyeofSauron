@@ -284,6 +284,7 @@
   .pg-row.done .mk { color: var(--success); }
   .pg-row.open .mk { color: var(--text-muted); }
   .pg-row.wait .mk { color: var(--accent); }
+  .pg-row.part .mk { color: var(--accent); }
   .pg-row .sum { color: var(--text-muted); }
   .pg-note { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
   .pg-busy { opacity: .6; }
@@ -493,7 +494,14 @@ async function send() {
     const res = await fetch('/api/plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ message, history, conversation_id: conversationId }),
+      // What the board last read as still open and blocking, so the planner
+      // sees it too. Only when that reading is of THIS conversation as it
+      // stands; a stale or missing one sends nothing rather than a wrong list.
+      body: JSON.stringify({
+        message, history, conversation_id: conversationId,
+        board_open: lastProgress && lastProgressKey === progressKey()
+          ? (lastProgress.open || []).filter(o => o.blocking).map(o => o.key) : [],
+      }),
     });
     const data = await res.json();
 
@@ -1096,7 +1104,11 @@ function renderProgress(p) {
     '</summary><div class="pg-body">' +
       (done.length ? '<h4>Decided</h4>' + done.map(d => row('done', '✓', d.label, d.summary)).join('') : '') +
       (wait.length ? '<h4>Waiting on someone</h4>' + wait.map(w => row('wait', '◷', w.item, w.who)).join('') : '') +
-      (open.length ? '<h4>Still open</h4>' + open.map(o => row('open', '○', o.label, o.hint)).join('') : '') +
+      // A decision touched but not settled says what is agreed and the one
+      // thing missing, so a gap reads as a gap rather than as a fault.
+      (open.length ? '<h4>Still open</h4>' + open.map(o => o.partial
+        ? row('open part', '◐', o.label + ': partly', 'Agreed: ' + o.partial.agreed + '. Missing: ' + o.partial.missing)
+        : row('open', '○', o.label, o.hint)).join('') : '') +
       '<div class="pg-note">Read from the conversation after each answer. Tap to ' + (progressOpen ? 'close' : 'open') + '.</div>' +
     '</div></details>';
   box.querySelector('details').addEventListener('toggle', (e) => { progressOpen = e.target.open; });

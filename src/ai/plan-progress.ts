@@ -62,8 +62,8 @@ export const DECISION_HINTS: Record<string, string> = {
   cost_build_and_breakeven: 'Every cost, and the covers needed to break even',
   ad_spend: 'Paid ads: how much, what it buys, who signs it off',
   campaign_length: 'How many weeks of promotion, and what each week does',
-  channels: 'Where we post, and which one should bring bookings',
-  alternative_channels: 'Partners, media and groups beyond our own pages',
+  channels: 'Each channel in or out (IG, TikTok, email) and which books',
+  alternative_channels: 'Borrowed trust: communities, clubs, concierges, institutions',
   content_plan: 'Every post with a date: what goes out when',
   direct_outreach: 'Who gets a personal message, and on which days',
   owners_and_deadlines: 'A named person and a date against every task',
@@ -98,7 +98,7 @@ export function progressTool() {
       properties: {
         settled: {
           type: 'array',
-          description: 'Decisions the PERSON has actually settled -- said, or agreed to when the director proposed it. A question asked but not answered is NOT settled. A direction ("it is ticketed") settles what it settles and no more.',
+          description: 'Decisions the PERSON has actually settled -- said, or agreed to when the director proposed it. A question asked but not answered is NOT settled. A direction ("it is ticketed") settles what it settles and no more. A CHOICE THAT IS MADE IS SETTLED even if its fee, quote or signature is still pending -- the pending part goes in waiting_on, so one outstanding quote does not hold a decision open. A decision that came up only in passing inside another one (channels mentioned inside the ad budget) is NOT settled: it goes in partial.',
           items: {
             type: 'object',
             properties: {
@@ -106,6 +106,19 @@ export function progressTool() {
               summary: { type: 'string', description: 'What was settled, in at most twelve words, in the conversation\'s own terms. Figures only if they appear in the transcript.' },
             },
             required: ['key', 'summary'],
+          },
+        },
+        partial: {
+          description: 'Decisions the conversation has touched but not settled: something is agreed, one named thing is missing. Only for decisions not in settled.',
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: KEYS },
+              agreed: { type: 'string', description: 'What IS agreed, at most twelve words.' },
+              missing: { type: 'string', description: 'The one thing still missing, at most twelve words: "the Instagram plan, and which channel brings bookings".' },
+            },
+            required: ['key', 'agreed', 'missing'],
           },
         },
         not_applicable: {
@@ -134,7 +147,7 @@ export function progressTool() {
 
 export interface PlanProgress {
   settled: Array<{ key: string; label: string; stage: Stage; summary: string }>;
-  open: Array<{ key: string; label: string; hint: string; stage: Stage; blocking: boolean }>;
+  open: Array<{ key: string; label: string; hint: string; stage: Stage; blocking: boolean; partial?: { agreed: string; missing: string } }>;
   not_applicable: string[];
   waiting_on: Array<{ item: string; who: string | null }>;
   next: { key: string; label: string } | null;
@@ -165,8 +178,17 @@ export function summariseProgress(raw: unknown, rows: PlaybookRow[] = PLAYBOOK):
 
   const settled = rows.filter(row => settledMap.has(row.key))
     .map(row => ({ key: row.key, label: label(row.key), stage: row.stage, summary: settledMap.get(row.key)! }));
+  const partials = new Map<string, { agreed: string; missing: string }>();
+  for (const pt of Array.isArray(r.partial) ? r.partial : []) {
+    if (pt && byKey.has(pt.key) && !settledMap.has(pt.key) && !partials.has(pt.key) && String(pt.missing ?? '').trim()) {
+      partials.set(pt.key, { agreed: String(pt.agreed ?? '').trim(), missing: String(pt.missing).trim() });
+    }
+  }
   const open = rows.filter(row => !settledMap.has(row.key) && !na.has(row.key))
-    .map(row => ({ key: row.key, label: label(row.key), hint: DECISION_HINTS[row.key] ?? '', stage: row.stage, blocking: row.blocking }));
+    .map(row => ({
+      key: row.key, label: label(row.key), hint: DECISION_HINTS[row.key] ?? '', stage: row.stage, blocking: row.blocking,
+      ...(partials.has(row.key) ? { partial: partials.get(row.key)! } : {}),
+    }));
 
   const stageOrder: Stage[] = ['point', 'shape', 'money', 'campaign', 'follow_through'];
   const stages = stageOrder.map(stage => {
@@ -203,4 +225,28 @@ export function planTranscript(history: Array<{ role: string; content: string }>
   return history
     .map(m => `${m.role === 'user' ? 'THE PERSON PLANNING' : 'THE DIRECTOR (you)'}: ${m.content}`)
     .join('\n\n');
+}
+
+/**
+ * What the board says, handed to the planner with the next message.
+ *
+ * Khai, 13 Oct 2026, on the New Year's Eve plan: the board showed Channels and
+ * Other channels open while the planner told him "every blocking decision is
+ * closed" and then "CONFIRMED". The board was right -- channels had only come
+ * up inside the ad budget, and the Instagram plan, TikTok and email were never
+ * asked about. The planner could not see the board, so the two disagreed and
+ * the planner was the one that was wrong.
+ *
+ * Keys come from the browser, so each is checked against the playbook and an
+ * unknown one is dropped. Empty when nothing blocking is open. A HINT, not a
+ * control -- the control is that only the Create button writes anything.
+ */
+export function boardNote(openKeys: unknown, rows: PlaybookRow[] = PLAYBOOK): string {
+  const byKey = new Map(rows.map(r => [r.key, r]));
+  const keys = (Array.isArray(openKeys) ? openKeys : [])
+    .filter((k): k is string => typeof k === 'string' && byKey.has(k) && byKey.get(k)!.blocking);
+  const unique = [...new Set(keys)].slice(0, 20);
+  if (unique.length === 0) return '';
+  const lines = unique.map(k => `- ${DECISION_LABELS[k] ?? k}: ${byKey.get(k)!.decision}`);
+  return `\n\n[PROGRESS BOARD -- read from this conversation by a second pass, shown to the person. Still open and blocking:\n${lines.join('\n')}\nWhile anything is listed here, do not call the plan ready, complete, locked or confirmed, and do not say every blocking decision is closed. Answer the message above first, then take the next of these.]`;
 }

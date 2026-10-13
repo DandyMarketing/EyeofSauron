@@ -37,7 +37,7 @@ import {
   isConversationKind, type ConversationKind,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
-import { progressTool, summariseProgress, planTranscript, decisionGuide } from './ai/plan-progress.js';
+import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
@@ -758,13 +758,16 @@ app.post('/api/plan', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ message: string; history?: ChatMessage[]; conversation_id?: string }>();
+  const body = await c.req.json<{ message: string; history?: ChatMessage[]; conversation_id?: string; board_open?: string[] }>();
   if (!body.message) return c.json({ error: 'Missing "message" field' }, 400);
 
   try {
     const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+    // The board's open blocking decisions ride along with the message so the
+    // planner cannot call the plan finished while the board says otherwise.
+    // Sent to the model only; the saved conversation keeps what was typed.
     const result = await askSauron(
-      body.message, body.history ?? [], venueFilter, 'chat',
+      body.message + boardNote(body.board_open), body.history ?? [], venueFilter, 'chat',
       effectiveRole(user), undefined, undefined, EVENT_AGENT_PROMPT,
     );
     // Saved like a chat, listed apart from them. Saving never fails the answer.
