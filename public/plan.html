@@ -938,7 +938,12 @@ async function openMonday(eventId, venues, d) {
         '<h4>' + escapeHtml(v.venue) + ' → ' + escapeHtml(v.board.name) + '</h4>' +
         '<label class="md-note" for="md-title-' + i + '">Group name</label>' +
         '<input type="text" id="md-title-' + i + '" value="' + escapeHtml(v.group_title) + '">' +
-        (v.exists ? '<div class="md-warn">A group called "' + escapeHtml(v.group_title) + '" is already on this board. Monday will refuse a second one — rename the group above, or leave it and this venue is skipped.</div>' : '') +
+        // An unfinished group is completed, not duplicated: items already in it are skipped.
+        (v.exists ? '<div class="md-note"><strong>This group is already on the board with ' + (v.already || 0) + ' of ' + v.items.length + ' items.</strong> ' +
+          (v.items.length - (v.already || 0) > 0
+            ? 'Create in Monday adds the ' + (v.items.length - (v.already || 0)) + ' missing ones to it. Nothing already there is duplicated.'
+            : 'Every item is already there, so nothing will be added.') +
+          ' To start a separate group instead, rename it above.</div>' : '') +
         (v.member === false ? '<div class="md-warn">Sauron writes to Monday as ' + escapeHtml(preview.writes_as) + ', who is not a member of this board, so Monday will refuse. Add them to the board first.</div>' : '') +
         v.warnings.map(w => '<div class="md-note">' + escapeHtml(w) + '</div>').join('') +
         (brief && !v.attach?.brief ? '<div class="md-note">No "Concept &amp; Mechanics" step on this board\'s template, so the brief will not go on here.</div>' : '') +
@@ -1022,9 +1027,11 @@ async function openMonday(eventId, venues, d) {
         '<div class="md-venue"><h4>' + escapeHtml(r.venue || r.slug) + (r.board ? ' → ' + escapeHtml(r.board) : '') + '</h4>' +
         (r.error && !r.created
           ? '<div class="md-warn">' + escapeHtml(r.error) + '</div>'
-          : '<div class="saved">"' + escapeHtml(r.group_title) + '": ' + r.created + ' of ' + r.total + ' items created.' +
+          : '<div class="saved">"' + escapeHtml(r.group_title) + '": ' + r.created + ' item' + (r.created === 1 ? '' : 's') + ' added' +
+            (r.skipped ? ', ' + r.skipped + ' already there' : '') + ' (' + r.total + ' in the plan).' +
             (r.url ? ' <a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">Open the board</a>' : '') + '</div>' +
-            (r.error ? '<div class="md-warn">' + escapeHtml(r.error) + ' The items already made are left on the board.</div>' : '') +
+            (r.notes || []).map(n => '<div class="md-note">' + escapeHtml(n) + '</div>').join('') +
+            (r.error ? '<div class="md-warn">' + escapeHtml(r.error) + ' The items already made are left on the board. Fix the cause and send again: only the missing items are added.</div>' : '') +
             attachLine('Brief → Concept & Mechanics', r.attached?.brief) +
             attachLine('P&L → Financial Forecast', r.attached?.pnl)) +
         '</div>').join('') +

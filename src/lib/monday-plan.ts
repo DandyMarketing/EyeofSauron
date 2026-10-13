@@ -337,19 +337,27 @@ export function buildItems(input: {
   const label = (ids: number[]) => ids.map(id => nameOf.get(id) ?? `#${id}`).join(', ');
   const byIndex = new Map(input.deadlines.map(d => [d.index, d]));
 
+  // A person on the board's template who is no longer an active Monday user
+  // (13 Oct 2026: "unable to assign person with id: 48376983", which stopped a
+  // send at item 7 of 39) is left off and said, never sent.
+  const active = (ids: number[]) => ids.filter(id => nameOf.has(id));
   const template: PreviewItem[] = input.steps.map((s, i) => {
     const d = byIndex.get(i);
     const due = d?.due && /^\d{4}-\d{2}-\d{2}$/.test(d.due) ? d.due : null;
+    const owners = active(s.owner_ids), assigned = active(s.assigned_ids);
+    const gone = s.owner_ids.length + s.assigned_ids.length - owners.length - assigned.length;
+    const flags = deadlineFlags(due, d?.phase ?? 'before', input.today, input.start, input.end);
+    if (gone) flags.push(`${gone === 1 ? 'A person' : `${gone} people`} on the board's template ${gone === 1 ? 'is' : 'are'} no longer active on Monday -- left off`);
     return {
       name: s.name.slice(0, 255),
       source: 'template',
       deadline: due,
       reason: d?.reason ?? null,
-      owner_ids: s.owner_ids,
-      assigned_ids: s.assigned_ids,
-      owner_label: label(s.owner_ids),
-      assigned_label: label(s.assigned_ids),
-      flags: deadlineFlags(due, d?.phase ?? 'before', input.today, input.start, input.end),
+      owner_ids: owners,
+      assigned_ids: assigned,
+      owner_label: label(owners),
+      assigned_label: label(assigned),
+      flags,
     };
   });
 

@@ -206,3 +206,17 @@ test('an unmatched name on a planner task comes with the board\'s people to choo
   assert.deepEqual(items[0].unresolved![0].options.map(o => o.name), ['Corbin Tay Neon', 'salvin']);
   assert.match(items[0].flags.join(), /No Monday user called "Mel" -- choose one/);
 });
+
+test('a person no longer active on Monday is left off a template step and said', () => {
+  // 13 Oct 2026: "unable to assign person with id: 48376983" stopped a send at 7 of 39.
+  const salvin = { id: '99680353', name: 'salvin', email: null };
+  const items = buildItems({
+    steps: [{ name: '7. Submit GR Event Booking Rules Form', owner_ids: [48376983, 99680353], assigned_ids: [] }],
+    deadlines: [{ index: 0, due: '2026-11-01', phase: 'before', reason: 'r' }],
+    tasks: [], users: [salvin], sender: null,
+    today: '2026-10-13', start: '2026-12-31', end: '2026-12-31',
+  });
+  assert.deepEqual(items[0].owner_ids, [99680353]);
+  assert.equal(items[0].owner_label, 'salvin');
+  assert.match(items[0].flags.join(), /A person on the board's template is no longer active on Monday -- left off/);
+});

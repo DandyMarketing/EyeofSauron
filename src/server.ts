@@ -1404,7 +1404,10 @@ app.post('/api/plan/monday/preview', async (c) => {
 
       const boardUsers = users.filter(u => board.subscribers.includes(u.id));
       const items = buildItems({ steps: board.template, deadlines, tasks, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date });
-      const exists = board.groups.some(g => g.title.trim().toLowerCase() === title.toLowerCase());
+      const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
+      const exists = !!there;
+      const alreadyNames = new Set((there ? board.groupItems.get(there.id)?.names ?? [] : []).map(n => n.trim().toLowerCase()));
+      const already = items.filter(it => alreadyNames.has(it.name.trim().toLowerCase())).length;
       const warnings: string[] = [];
       if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');
       if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
@@ -1418,7 +1421,7 @@ app.post('/api/plan/monday/preview', async (c) => {
           pnl: targets.pnl === null ? null : items[targets.pnl].name,
         },
         board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
-        group_title: title, exists,
+        group_title: title, exists, already,
         member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
         items, warnings,
       };
@@ -1471,10 +1474,13 @@ app.post('/api/plan/monday/send', async (c) => {
       let board;
       try { board = await readBoardForPlan(String(v.board_id)); }
       catch (e: any) { return { slug: v.slug, venue: venue.name, error: String(e?.message ?? e) }; }
-      if (board.groups.some(g => g.title.trim().toLowerCase() === title.toLowerCase())) {
-        return { slug: v.slug, venue: venue.name, board: board.name, error: `"${title}" is already on ${board.name}. Nothing was written.` };
-      }
-      const r = await createGroupWithItems(board, title, items);
+      // A group with this name already there is FINISHED, not duplicated:
+      // items already in it are skipped and the rest added after them.
+      const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
+      const existing = there
+        ? { groupId: there.id, names: board.groupItems.get(there.id)?.names ?? [], lastId: board.groupItems.get(there.id)?.lastId ?? null }
+        : undefined;
+      const r = await createGroupWithItems(board, title, items, existing);
 
       /**
        * The brief to Concept & Mechanics and the P&L to Financial Forecast,
@@ -1488,6 +1494,7 @@ app.post('/api/plan/monday/send', async (c) => {
       if (body.attach?.brief) {
         const id = targets.brief === null ? undefined : r.item_ids[targets.brief];
         if (typeof d.brief !== 'string' || !d.brief.trim()) attached.brief = 'Not attached: the brief had no text.';
+        else if (!id && targets.brief !== null && existing) attached.brief = 'Not attached again: "Concept & Mechanics" was already on the board from the first send.';
         else if (!id) attached.brief = 'Not attached: no "Concept & Mechanics" item was created on this board.';
         else {
           try {
@@ -1501,6 +1508,7 @@ app.post('/api/plan/monday/send', async (c) => {
       if (body.attach?.pnl) {
         const id = targets.pnl === null ? undefined : r.item_ids[targets.pnl];
         if (!hasPnl(d)) attached.pnl = 'Not attached: the brief has no revenue lines for a P&L.';
+        else if (!id && targets.pnl !== null && existing) attached.pnl = 'Not attached again: "Financial Forecast" was already on the board from the first send.';
         else if (!id) attached.pnl = 'Not attached: no "Financial Forecast" item was created on this board.';
         else {
           try {
@@ -1512,11 +1520,12 @@ app.post('/api/plan/monday/send', async (c) => {
         }
       }
 
-      console.log(`[plan/monday] ${user.email ?? user.id} sent "${title}" to ${board.name} (${board.id}): ${r.created}/${items.length} item(s)${r.error ? ` -- ${r.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
+      console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
       return {
         slug: v.slug, venue: venue.name, board: board.name, group_title: title,
         url: account ? `https://${account}.monday.com/boards/${board.id}` : null,
-        created: r.created, total: items.length, error: r.error, attached,
+        created: r.created, skipped: r.skipped, finished_existing: !!existing, notes: r.notes,
+        total: items.length, error: r.error, attached,
       };
     }));
     return c.json({ results });

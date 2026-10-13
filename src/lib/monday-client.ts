@@ -76,6 +76,8 @@ export interface BoardForPlan {
   history: Map<string, { days_before: number; n: number }>;
   subscribers: string[];
   permissions: string;
+  /** What is already in each group, in board order: names, and the last item. */
+  groupItems: Map<string, { names: string[]; lastId: string | null }>;
 }
 
 const people = (value: string | null): number[] => {
@@ -116,18 +118,18 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
   // Every item, for the template and the history. A board is a few hundred
   // items; the page size is 500 and the cursor is followed regardless.
   const colIds = [columns.owner, columns.assigned, columns.deadline].filter(Boolean) as string[];
-  const items: Array<{ name: string; group: string; values: Record<string, string | null>; text: Record<string, string | null> }> = [];
+  const items: Array<{ id: string; name: string; group: string; values: Record<string, string | null>; text: Record<string, string | null> }> = [];
   let cursor: string | null = null;
   for (let page = 0; page < 20; page++) {
     const q: { boards?: Array<{ items_page: any }>; next_items_page?: any } = cursor
-      ? await gql(`query ($c: String!, $cols: [String!]) { next_items_page(limit: 500, cursor: $c) { cursor items { name group { id } column_values(ids: $cols) { id text value } } } }`, { c: cursor, cols: colIds })
-      : await gql(`query ($id: [ID!], $cols: [String!]) { boards(ids: $id) { items_page(limit: 500) { cursor items { name group { id } column_values(ids: $cols) { id text value } } } } }`, { id: [boardId], cols: colIds });
+      ? await gql(`query ($c: String!, $cols: [String!]) { next_items_page(limit: 500, cursor: $c) { cursor items { id name group { id } column_values(ids: $cols) { id text value } } } }`, { c: cursor, cols: colIds })
+      : await gql(`query ($id: [ID!], $cols: [String!]) { boards(ids: $id) { items_page(limit: 500) { cursor items { id name group { id } column_values(ids: $cols) { id text value } } } } }`, { id: [boardId], cols: colIds });
     const pageData: any = cursor ? q.next_items_page : q.boards?.[0]?.items_page;
     for (const it of pageData?.items ?? []) {
       const values: Record<string, string | null> = {};
       const text: Record<string, string | null> = {};
       for (const cv of it.column_values ?? []) { values[cv.id] = cv.value; text[cv.id] = cv.text; }
-      items.push({ name: it.name, group: String(it.group?.id ?? ''), values, text });
+      items.push({ id: String(it.id), name: it.name, group: String(it.group?.id ?? ''), values, text });
     }
     cursor = pageData?.cursor ?? null;
     if (!cursor) break;
@@ -149,7 +151,15 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
     deadline: columns.deadline ? ((i.text[columns.deadline] ?? '').slice(0, 10) || null) : null,
   })));
 
+  const groupItems = new Map<string, { names: string[]; lastId: string | null }>();
+  for (const it of items) {
+    const g = groupItems.get(it.group) ?? { names: [], lastId: null };
+    g.names.push(it.name); g.lastId = it.id;
+    groupItems.set(it.group, g);
+  }
+
   return {
+    groupItems,
     id: String(b.id), name: b.name, workspace_id: String(b.workspace_id),
     columns, groups, template, templateGroup, history,
     subscribers: (b.subscribers ?? []).map((s: any) => String(s.id)),
@@ -174,47 +184,77 @@ export async function readPeople(): Promise<{ users: MondayUser[]; me: MondayUse
 }
 
 /**
- * Create the group and its items, in order.
+ * Create the group and its items, in order -- or FINISH a group already there.
  *
  * Items are created one after another, each placed after the last, because
  * the checklist's order is part of it and Monday's default placement is not a
- * promise. A failure part-way STOPS and says how far it got: the group and the
- * items already made are left for a person to see rather than deleted, because
- * deleting things on somebody else's board is a worse failure than an
- * incomplete list.
+ * promise. `existing` is a group with this name already on the board: items
+ * whose names are already in it are skipped and the rest are added after its
+ * last item, so sending again completes a half-made group instead of
+ * duplicating it (13 Oct 2026: 7 of 39 made, then stopped).
+ *
+ * A person Monday will not accept -- a deactivated account on the board's own
+ * template ("unable to assign person") -- costs that item its people, not the
+ * whole send: the item is made without them and the note says so. Any other
+ * failure STOPS and says how far it got, leaving what was made rather than
+ * deleting from somebody's board.
+ *
+ * `item_ids` lines up with `items`: null for an item skipped or not reached.
  */
 export async function createGroupWithItems(
   board: BoardForPlan, title: string, items: Array<Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'>>,
-): Promise<{ group_id: string; created: number; item_ids: string[]; error?: string }> {
-  const anchor = board.groups.find(g => /active tasks/i.test(g.title));
-  const g = await gql<{ create_group: { id: string } }>(
-    anchor
-      ? 'mutation ($b: ID!, $n: String!, $r: String!) { create_group(board_id: $b, group_name: $n, relative_to: $r, position_relative_method: before_at) { id } }'
-      : 'mutation ($b: ID!, $n: String!) { create_group(board_id: $b, group_name: $n) { id } }',
-    anchor ? { b: board.id, n: title, r: anchor.id } : { b: board.id, n: title },
-  );
-  const groupId = String(g.create_group.id);
-
+  existing?: { groupId: string; names: string[]; lastId: string | null },
+): Promise<{ group_id: string; created: number; skipped: number; item_ids: Array<string | null>; notes: string[]; error?: string }> {
+  let groupId: string;
   let previous: string | null = null;
+  if (existing) {
+    groupId = existing.groupId;
+    previous = existing.lastId;
+  } else {
+    const anchor = board.groups.find(g => /active tasks/i.test(g.title));
+    const g = await gql<{ create_group: { id: string } }>(
+      anchor
+        ? 'mutation ($b: ID!, $n: String!, $r: String!) { create_group(board_id: $b, group_name: $n, relative_to: $r, position_relative_method: before_at) { id } }'
+        : 'mutation ($b: ID!, $n: String!) { create_group(board_id: $b, group_name: $n) { id } }',
+      anchor ? { b: board.id, n: title, r: anchor.id } : { b: board.id, n: title },
+    );
+    groupId = String(g.create_group.id);
+  }
+
+  const already = new Set((existing?.names ?? []).map(n => n.trim().toLowerCase()));
+  const itemIds: Array<string | null> = items.map(() => null);
+  const notes: string[] = [];
   let created = 0;
-  const itemIds: string[] = [];
-  for (const item of items) {
+  let skipped = 0;
+
+  const make = (item: typeof items[number], withPeople: boolean) => {
+    const vals = columnValues(withPeople ? item : { ...item, owner_ids: [], assigned_ids: [] }, board.columns);
+    const vars: Record<string, unknown> = { b: board.id, g: groupId, n: item.name, v: JSON.stringify(vals) };
+    return previous
+      ? gql<{ create_item: { id: string } }>('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON, $p: ID!) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v, position_relative_method: after_at, relative_to: $p) { id } }', { ...vars, p: previous })
+      : gql<{ create_item: { id: string } }>('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v) { id } }', vars);
+  };
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (already.has(item.name.trim().toLowerCase())) { skipped++; continue; }
     try {
-      const vars: Record<string, unknown> = {
-        b: board.id, g: groupId, n: item.name,
-        v: JSON.stringify(columnValues(item, board.columns)),
-      };
-      const r: { create_item: { id: string } } = previous
-        ? await gql('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON, $p: ID!) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v, position_relative_method: after_at, relative_to: $p) { id } }', { ...vars, p: previous })
-        : await gql('mutation ($b: ID!, $g: String!, $n: String!, $v: JSON) { create_item(board_id: $b, group_id: $g, item_name: $n, column_values: $v) { id } }', vars);
+      let r: { create_item: { id: string } };
+      try {
+        r = await make(item, true);
+      } catch (e: any) {
+        if (!/assign person|person with id/i.test(String(e?.message ?? e))) throw e;
+        r = await make(item, false);
+        notes.push(`"${item.name}" was added without its people: Monday refused one of them (often an account no longer active). Assign it on the board.`);
+      }
       previous = String(r.create_item.id);
-      itemIds.push(previous);
+      itemIds[i] = previous;
       created++;
     } catch (e: any) {
-      return { group_id: groupId, created, item_ids: itemIds, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
+      return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }
   }
-  return { group_id: groupId, created, item_ids: itemIds };
+  return { group_id: groupId, created, skipped, item_ids: itemIds, notes };
 }
 
 /**
