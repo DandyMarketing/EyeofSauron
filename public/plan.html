@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plan your event - Sauron</title>
+<title>Plan easier - Sauron</title>
 <!--
   Start the auth client downloading while the HTML is still being parsed.
 
@@ -53,6 +53,14 @@
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<!-- Home-screen app (Khai, 13 Oct 2026): Android reads the manifest, iPhone the apple- tags. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#f6f2ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1916" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sauron">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <script src="/eye-busy.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -399,14 +407,14 @@
   <header class="site-header">
     <div class="logo"></div>
     <div>
-      <h1>Plan your event</h1>
+      <h1>Plan easier</h1>
       <div class="subtitle">Argue it out, then issue the brief</div>
     </div>
     <nav class="site-nav">
       <a href="/">Dashboard</a>
       <a href="/briefing.html" data-brief-link>Weekly brief</a>
       <a href="/chat.html">Query</a>
-      <a href="/plan.html" class="active">Plan your event</a>
+      <a href="/plan.html" class="active">Plan easier</a>
       <a href="/daily.html" id="daily-link" hidden>Daily</a>
       <a href="/admin.html" id="admin-link" hidden>Admin</a>
       <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch between light and dark" title="Light or dark"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>

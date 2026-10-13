@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,595 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,596 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1163,6 +1163,20 @@ from Tolkien, whose estate and the film studios defend them. Fine for an
 internal tool; a product carrying them needs advice first. The mark was drawn
 as its own design rather than the film's, which helps and does not settle it.
 
+### A home-screen app on Android and iPhone, 13 Oct 2026
+
+Khai: "add this webpage to the home screen as an app". `public/manifest.webmanifest`
+(standalone, start at the dashboard, cream theme) with 192/512 icons and a
+MASKABLE 512 -- Android crops icons to its own shape, so the eye sits inside the
+central 60% there. Every page links it and carries the iPhone tags
+(`apple-mobile-web-app-capable`, title, the 180 px touch icon) and a light and
+dark `theme-color`. Chrome's own installability check returned no errors. **No
+service worker**, deliberately: Chrome no longer requires one to install, and a
+caching worker is exactly the stale-page trap BUILD_LOG records -- the server
+already makes every page revalidate. **On an iPhone the home-screen app keeps
+its own sign-in**, separate from Safari's, so each person signs in once more
+after adding it.
+
 ### Report an issue: built 13 Oct 2026
 
 With Sauron live with the team, Khai: "a button, report this issue, that sends
@@ -1219,7 +1233,7 @@ background, buttons a 40 px floor, in `theme.css` under
 ### Menu names, 13 Oct 2026
 
 Khai: the chat is **Query** (asking is the point of it) and the planner is
-**Plan your event**. Labels only -- the pages are still `/chat.html` and
+**Plan easier** (renamed again the same day, from "Plan your event"). Labels only -- the pages are still `/chat.html` and
 `/plan.html`, so links and bookmarks keep working.
 
 **One menu, identical on every page** (Khai, same day: "the menu buttons keep
@@ -1227,7 +1241,7 @@ shuffling"). Each page had carried its own -- Query before Weekly brief on one,
 Daily on two of six, 14 px here and 15 px there -- and the owner links, Logout
 and the brief badge appeared only after sign-in, pushing a right-aligned menu
 sideways. Now every page has the same `<nav class="site-nav">` (order:
-Dashboard, Weekly brief, Query, Plan your event, Daily, Admin, Logout), styled
+Dashboard, Weekly brief, Query, Plan easier, Daily, Admin, Logout), styled
 only in `theme.css` with the header around it, and `pages.test.ts` fails if
 any page's menu differs. Owner links and the badge are painted at first paint
 from this browser's last visit (`localStorage` `sauron.nav`, a convenience),
@@ -1281,7 +1295,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,595 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,596 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

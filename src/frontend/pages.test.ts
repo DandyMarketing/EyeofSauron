@@ -1390,7 +1390,7 @@ test('every page carries the same menu, in the same order', () => {
     return [page, nav![1].replace(/ class="active"/g, '').replace(/ hidden(?=[ >])/g, '').replace(/\s+/g, ' ').trim()] as const;
   });
   for (const [page, menu] of menus) assert.equal(menu, menus[0][1], `${page}'s menu differs from the dashboard's`);
-  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan your event.*Daily.*Admin.*Logout/);
+  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan easier.*Daily.*Admin.*Logout/);
 });
 
 test('every page picks light or dark before it draws', () => {
@@ -1424,4 +1424,26 @@ test('only theme.css lays out the menu, at every width', () => {
   assert.doesNotMatch(sidebar, /\n\s*header nav\s*\{/, 'conv-sidebar.js styles the menu again');
   const theme = readFileSync('public/theme.css', 'utf8');
   assert.match(theme, /header\.site-header > div:not\(\.logo\) \{ flex: 1 1 0;/, 'a long title could push the menu onto its own row on one page only');
+});
+
+test('Sauron installs as a home-screen app on Android and iPhone', () => {
+  /**
+   * Khai, 13 Oct 2026: "add this webpage to the home screen as an app" on
+   * Android and Apple. Android installs from the manifest (Chrome reported no
+   * installability errors against it); an iPhone reads the apple- tags and the
+   * touch icon. Every page carries both, because a person adds whichever page
+   * they happen to be on.
+   */
+  const man = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'));
+  assert.equal(man.display, 'standalone');
+  assert.equal(man.start_url, '/');
+  for (const size of ['192x192', '512x512']) assert.ok(man.icons.some((i: any) => i.sizes === size), `no ${size} icon`);
+  assert.ok(man.icons.some((i: any) => i.purpose === 'maskable'), 'Android crops icons; it needs a maskable one');
+  for (const i of man.icons) assert.ok(readFileSync('public' + i.src).length > 0);
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest">/, `${page} has no app manifest`);
+    assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/, `${page} cannot open as an app on an iPhone`);
+    assert.match(html, /<link rel="apple-touch-icon"/, `${page} has no iPhone home-screen icon`);
+  }
 });
