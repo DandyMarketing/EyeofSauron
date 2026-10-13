@@ -360,3 +360,13 @@ test('the planner is shown the board and may not claim the plan is done past it'
   assert.match(EVENT_AGENT_PROMPT, /\[PROGRESS BOARD\] note/);
   assert.match(EVENT_AGENT_PROMPT, /never say CONFIRMED at all/);
 });
+
+test('the planner writes plain words and short sentences', () => {
+  // Khai, 13 Oct 2026: "you are going to need to simplify the language used".
+  assert.match(EVENT_AGENT_PROMPT, /PLAIN WORDS, SHORT SENTENCES/);
+  assert.match(EVENT_AGENT_PROMPT, /about fifteen words at most/);
+  assert.match(EVENT_AGENT_PROMPT, /NO FIGURES OF SPEECH/);
+  assert.match(EVENT_AGENT_PROMPT, /BEFORE:[\s\S]*AFTER:/);
+  const brief = (eventDraftTool().input_schema.properties as any).brief.description;
+  assert.match(brief, /PLAIN WORDS AND SHORT SENTENCES/);
+});
