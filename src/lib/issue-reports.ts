@@ -30,6 +30,38 @@ export interface ReportInput {
   answer: string | null;
   error: string | null;
   context: { model?: string; user_agent?: string; url?: string; app_version?: string };
+  /**
+   * The conversation as it was on the person's screen. The saved conversation
+   * misses exactly what usually needs reporting: an answer that errored is
+   * never saved, and a chat whose first answer failed has no saved record.
+   */
+  screen: ScreenMessage[];
+}
+
+export interface ScreenMessage { role: 'user' | 'assistant'; content: string }
+
+/** Nothing shorter is a description of a problem. */
+export const MIN_DESCRIPTION = 3;
+
+function cleanScreen(raw: unknown): ScreenMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(-300).flatMap((m: any) => {
+    const content = text(m?.content, 20000);
+    if (!content || (m.role !== 'user' && m.role !== 'assistant')) return [];
+    return [{ role: m.role, content }];
+  });
+}
+
+/**
+ * Whether the screen shows the admins something the saved conversation does
+ * not: nothing was saved, or the person asked more than was saved. Counted on
+ * questions because a saved answer is markdown and the screen shows it
+ * rendered, so the two never match as text.
+ */
+export function screenAddsToSaved(saved: Array<{ role: string }>, screen: ScreenMessage[]): boolean {
+  if (!screen.length) return false;
+  const asked = (xs: Array<{ role: string }>) => xs.filter(m => m.role === 'user').length;
+  return saved.length === 0 || asked(screen) > asked(saved);
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -54,6 +86,7 @@ export function cleanReportInput(raw: any): ReportInput | null {
     question: text(raw.question, 20000),
     answer: text(raw.answer, 40000),
     error: text(raw.error, 4000),
+    screen: cleanScreen(raw.screen),
     context: {
       ...(text(ctx.model, 80) ? { model: text(ctx.model, 80)! } : {}),
       ...(text(ctx.user_agent, 300) ? { user_agent: text(ctx.user_agent, 300)! } : {}),
@@ -112,7 +145,7 @@ export function reportMarkdown(r: StoredReport): string {
   lines.push(`- **Status:** ${r.status}`);
   const ctx = r.context ?? {};
   for (const [k, v] of Object.entries(ctx)) {
-    if (k === 'plan_progress') continue;
+    if (k === 'plan_progress' || k === 'screen') continue;
     lines.push(`- **${k}:** ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
   }
   if (r.comment) { lines.push('', '## What they said', '', r.comment); }
@@ -138,6 +171,14 @@ export function reportMarkdown(r: StoredReport): string {
         if (t.result) lines.push('  - returned:', '', '```json', t.result, '```');
       }
     });
+  }
+  const screen: ScreenMessage[] = Array.isArray((ctx as any).screen) ? (ctx as any).screen : [];
+  if (screenAddsToSaved(r.transcript ?? [], screen)) {
+    lines.push('', `## On their screen (${screen.length} messages)`, '',
+      r.transcript?.length
+        ? '_More than was saved: an exchange that failed is never saved. Text as the page showed it._'
+        : '_Nothing of this conversation was saved, so this is the only record. Text as the page showed it._');
+    screen.forEach((m, i) => lines.push('', `### ${i + 1}. ${m.role === 'user' ? 'Question' : 'Sauron'}`, '', m.content));
   }
   if (ctx && (ctx as any).plan_progress) {
     lines.push('', '## Plan progress board at the time', '', '```json', JSON.stringify((ctx as any).plan_progress, null, 1).slice(0, 12000), '```');

@@ -37,7 +37,7 @@ import {
   renameConversation, deleteConversation, titleConversation,
   isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress, setPinned, inTurnOrder,
 } from './ai/conversations.js';
-import { cleanReportInput, reportMarkdown, REPORT_STATUSES, type StoredReport, type TranscriptEntry } from './lib/issue-reports.js';
+import { cleanReportInput, reportMarkdown, MIN_DESCRIPTION, REPORT_STATUSES, type StoredReport, type TranscriptEntry } from './lib/issue-reports.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool, eventPnlTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
@@ -1839,6 +1839,9 @@ app.post('/api/report', async (c) => {
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
   const input = cleanReportInput(await c.req.json().catch(() => null));
   if (!input) return c.json({ error: 'That report did not come through intact. Please try again.' }, 400);
+  if ((input.comment ?? '').length < MIN_DESCRIPTION) {
+    return c.json({ error: 'Please describe the problem in a few words, so the admins know what to look for.' }, 400);
+  }
 
   let transcript: TranscriptEntry[] = [];
   let conversationId: string | null = null;
@@ -1898,7 +1901,8 @@ app.post('/api/report', async (c) => {
     answer: input.answer,
     error: input.error,
     transcript,
-    context: { ...input.context, ...serverContext },
+    // The screen goes in context (jsonb) rather than a new column: no migration.
+    context: { ...input.context, ...serverContext, ...(input.screen.length ? { screen: input.screen } : {}) },
   }).select('id').single();
   if (error) {
     console.error(`[report] could not save a report from ${user.email ?? user.id}: ${error.message}`);

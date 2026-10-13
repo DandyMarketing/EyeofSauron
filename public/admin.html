@@ -1417,13 +1417,27 @@ async function toggleReport(row) {
       '</details>' : '') +
     '</div>').join('');
   const ctx = r.context || {};
+  /**
+   * The conversation as it was on their screen, shown when it holds more than
+   * was saved -- an answer that errored is never saved. Same rule as
+   * screenAddsToSaved() in issue-reports.ts: counted on questions.
+   */
+  const screen = Array.isArray(ctx.screen) ? ctx.screen : [];
+  const asked = xs => xs.filter(m => m.role === 'user').length;
+  const showScreen = screen.length && (!(r.transcript || []).length || asked(screen) > asked(r.transcript || []));
+  const screenHtml = showScreen
+    ? '<div class="r-block"><div class="m-label">On their screen (' + screen.length + ' messages)</div>' +
+      '<div class="muted" style="font-size:13px;margin-bottom:6px">' + ((r.transcript || []).length ? 'More than was saved: an exchange that failed is never saved.' : 'Nothing of this conversation was saved, so this is the only record.') + '</div>' +
+      screen.map(m => '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + '</div><div class="r-text">' + esc(m.content) + '</div></div>').join('') + '</div>'
+    : '';
   const ctxLine = ['role', 'venues', 'model', 'commit'].filter(k => ctx[k]).map(k => k + ': ' + (k === 'commit' ? String(ctx[k]).slice(0, 7) : ctx[k])).join(' · ');
   box.innerHTML =
     (ctxLine ? '<div class="r-block muted" style="font-size:13px">' + esc(ctxLine) + '</div>' : '') +
     (r.comment ? '<div class="r-block"><div class="m-label">What they said</div>' + esc(r.comment) + '</div>' : '') +
     (r.error ? '<div class="r-block"><div class="m-label">Error shown</div><pre>' + esc(r.error) + '</pre></div>' : '') +
-    '<div class="r-block"><div class="m-label">Conversation</div>' + (transcript || '<div class="muted">No saved conversation. The question and answer reported:</div>' +
-      '<div class="r-msg r-q"><div class="r-text">' + esc(r.question || '—') + '</div></div><div class="r-msg r-a"><div class="r-text">' + esc(r.answer || '—') + '</div></div>') + '</div>' +
+    '<div class="r-block"><div class="m-label">Conversation</div>' + (transcript || (showScreen ? '<div class="muted">No saved conversation; see what was on their screen below.</div>' : '<div class="muted">No saved conversation. The question and answer reported:</div>' +
+      '<div class="r-msg r-q"><div class="r-text">' + esc(r.question || '—') + '</div></div><div class="r-msg r-a"><div class="r-text">' + esc(r.answer || '—') + '</div></div>')) + '</div>' +
+    screenHtml +
     '<div class="r-block r-review">' +
       '<div class="m-label">Review</div>' +
       '<div class="role-actions"><select class="r-status-pick">' + Object.entries(REPORT_STATUS).map(([v, l]) => '<option value="' + v + '"' + (v === r.status ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +

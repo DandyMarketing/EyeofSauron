@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanReportInput, reportMarkdown, KIND_LABELS, type StoredReport } from './issue-reports.js';
+import { cleanReportInput, reportMarkdown, screenAddsToSaved, KIND_LABELS, type StoredReport } from './issue-reports.js';
 
 test('a report from the browser is checked: fixed kinds and pages, ids, ceilings', () => {
   const ok = cleanReportInput({
@@ -40,4 +40,38 @@ test('the copied report carries the conversation and every tool\'s input and res
   assert.match(md, /## What they said\n\nBrunch was 55/);
   assert.match(md, /How it ran: 2 tool round\(s\), 41\.2s, purpose chat/);
   assert.match(md, /call: claude-opus-5 \(high\), stop tool_use, in 12000 \/ out 800 tokens, cache read 9000, 9100 ms/);
+});
+
+test('what was on screen is kept, checked, and shown when it holds more than was saved', () => {
+  /**
+   * Khai, 13 Oct 2026: "the log should be the entire chat log". The saved
+   * conversation misses what usually needs reporting -- an answer that errored
+   * is never saved -- so the page sends the conversation as it showed it.
+   */
+  const input = cleanReportInput({
+    kind: 'error', page: 'chat', comment: 'It crashed',
+    screen: [
+      { role: 'user', content: 'Brunch bookings 10 Oct?' }, { role: 'assistant', content: '41 bookings' },
+      { role: 'user', content: 'And covers?' }, { role: 'assistant', content: 'Something went wrong' },
+      { role: 'system', content: 'not a message' }, { role: 'user', content: '   ' },
+    ],
+  });
+  assert.equal(input?.screen.length, 4);
+
+  const saved = [{ role: 'user' }, { role: 'assistant' }];
+  assert.equal(screenAddsToSaved(saved, input!.screen), true, 'the failed second question was never saved');
+  assert.equal(screenAddsToSaved(saved, input!.screen.slice(0, 2)), false, 'nothing new on screen');
+  assert.equal(screenAddsToSaved([], input!.screen.slice(0, 2)), true, 'nothing saved at all');
+  assert.equal(screenAddsToSaved([], []), false);
+
+  const r: StoredReport = {
+    id: 'r2', created_at: '2026-10-13T10:00:00Z', reporter_name: 'Lukasz', reporter_email: null,
+    kind: 'error', page: 'chat', comment: 'It crashed', question: null, answer: null, error: 'Timeout',
+    status: 'new', admin_notes: null, context: { model: 'opus', screen: input!.screen },
+    transcript: [{ role: 'user', content: 'Brunch bookings 10 Oct?' }, { role: 'assistant', content: '41 bookings' }],
+  };
+  const md = reportMarkdown(r);
+  assert.match(md, /## On their screen \(4 messages\)/);
+  assert.match(md, /And covers\?/);
+  assert.doesNotMatch(md, /\*\*screen:\*\*/, 'the screen is its own section, not a context line');
 });

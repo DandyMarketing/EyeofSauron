@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 62 migrations, 25 query tools, 11 ingest sources, 1,585 tests.
+started.** 62 migrations, 25 query tools, 11 ingest sources, 1,586 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1113,7 +1113,15 @@ actually served each call, effort, stop reason, tokens, cache reads, time,
 tool rounds, and whether it ran out of time and was rescued -- stored as
 `tool_trace = {tools, run}`. A report adds what only the server knows: the
 reporter's role and venues (the tools filter by them), the commit that
-answered, and for a plan its progress board. **"Copy for Claude"** on a report
+answered, and for a plan its progress board. **The person must say what went wrong, and the report carries the conversation
+as it was on SCREEN** (Khai, 13 Oct 2026). The saved conversation misses what
+usually needs reporting: an answer that errored is never saved, and a chat
+whose first answer failed has no saved record at all. The page sends its
+messages as text (`screenTranscript()`, `public/report-issue.js`), stored in
+`issue_reports.context.screen` with no migration, and the admin view and the
+copied text show it whenever it holds more questions than were saved. A
+description under three characters is refused by the page and the server.
+**"Copy for Claude"** on a report
 gives the whole thing as one block of text (`reportMarkdown()`), to paste into
 a session for review.
 
@@ -1164,7 +1172,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,585 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,586 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
