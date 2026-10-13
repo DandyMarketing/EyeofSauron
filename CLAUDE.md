@@ -529,6 +529,12 @@ matters.
   fetch now races the terms gate, and a request issued before an acceptance
   exists is refused by the server — correctly. `enforceTerms()` reports which
   case it was so the page can re-fetch. Speed must not change an answer.
+- **The page's own CSS and JS revalidate on every load, like the HTML**
+  (13 Oct 2026). They went out with no Cache-Control, so Khai's phone kept
+  yesterday's `theme.css` under today's page and the deploy looked undone.
+  A stylesheet change that must reach phones already holding an old copy also
+  bumps its `?v=` in every page's link (`/theme.css?v=2`), because the new
+  header only arrives with the next fetch.
 - **Render it and look at it, at a real phone width.** Tests pass on things that
   are visibly wrong — a tick that drew as a chevron, a chart palette that
   wrapped. And check what width the browser actually laid out at: a headless

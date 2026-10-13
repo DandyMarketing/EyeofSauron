@@ -255,7 +255,7 @@ test('a page using the hidden attribute also neutralises display rules', () => {
     if (!/<[a-z-]+[^>]*\shidden(\s|>)/i.test(html)) continue;
 
     // theme.css carries the reset for every page that loads it.
-    const theme = html.includes('<link rel="stylesheet" href="/theme.css">') ? readFileSync('public/theme.css', 'utf8') : '';
+    const theme = /<link rel="stylesheet" href="\/theme\.css(\?v=\d+)?">/.test(html) ? readFileSync('public/theme.css', 'utf8') : '';
     assert.match(
       html + theme,
       /\[hidden\]\s*\{[^}]*display:\s*none/,
@@ -1317,7 +1317,7 @@ test('every page wears the shared look, and none brings back its own palette', (
    */
   for (const page of pages) {
     const html = readFileSync(`public/${page}`, 'utf8');
-    assert.match(html, /<link rel="stylesheet" href="\/theme\.css">/, `${page} does not load /theme.css`);
+    assert.match(html, /<link rel="stylesheet" href="\/theme\.css(\?v=\d+)?">/, `${page} does not load /theme.css`);
     assert.match(html, /<link rel="preload" href="\/vendor\/fonts\/inter-latin-400-normal\.woff2"/, `${page} does not preload the body font`);
     // Paper is the one place a page may set its own: white, for printing.
     for (const m of html.matchAll(/:root\s*\{[^}]*--bg\s*:/g)) {
@@ -1424,7 +1424,7 @@ test('every page picks light or dark before it draws', () => {
     const html = readFileSync(`public/${page}`, 'utf8');
     const script = html.indexOf("localStorage.getItem('sauron.theme')");
     assert.ok(script > 0, `${page} does not choose light or dark`);
-    assert.ok(script < html.indexOf('<link rel="stylesheet" href="/theme.css">'), `${page} chooses its theme after the stylesheet, so it flashes`);
+    assert.ok(script < html.search(/<link rel="stylesheet" href="\/theme\.css/), `${page} chooses its theme after the stylesheet, so it flashes`);
     if (html.includes('<nav class="site-nav">')) assert.match(html, /id="theme-toggle"/, `${page} has the menu but no light/dark switch`);
   }
   const theme = readFileSync('public/theme.css', 'utf8');
@@ -1500,4 +1500,16 @@ test('every page with a password box can show what is being typed', () => {
   }
   const js = readFileSync('public/password-reveal.js', 'utf8');
   assert.match(js, /addEventListener\('submit'[\s\S]*input\.type = 'password'/, 'a shown password must be hidden again before the form is sent');
+});
+
+test('the page\'s own styles and scripts are re-checked on every load, like the pages', () => {
+  /**
+   * 13 Oct 2026: theme.css went out with no Cache-Control, so a phone kept
+   * yesterday's stylesheet under today's page -- the new menu and the
+   * home-screen offer drew with no styles and the deploy looked as if it had
+   * not happened.
+   */
+  const server = readFileSync('src/server.ts', 'utf8');
+  assert.match(server, /const isPageAsset = \/\\\.\(css\|js\|webmanifest\)\$\/\.test\(last\);/);
+  assert.match(server, /if \(!isShell && !isPageAsset\) return;/);
 });

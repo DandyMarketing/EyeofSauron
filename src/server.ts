@@ -3802,8 +3802,8 @@ app.get('/admin/api/watchdog', async (c) => {
  * buttons that are missing. It cost two rounds of "where is this button?"
  * before anyone suspected the cache.
  *
- * Only the HTML shell revalidates. Everything else keeps default caching --
- * the shell is the app, not an asset.
+ * The HTML shell and the page's own CSS and JS revalidate (see below);
+ * /vendor/ and /brand/ are cached for a day.
  */
 app.use('/*', async (c, next) => {
   await next();
@@ -3837,7 +3837,17 @@ app.use('/*', async (c, next) => {
     return;
   }
 
-  if (!isShell) return;
+  /**
+   * THE PAGE'S OWN STYLES AND SCRIPTS REVALIDATE TOO (13 Oct 2026). Only the
+   * HTML did, and theme.css and the page scripts went out with no
+   * Cache-Control -- so a phone kept yesterday's stylesheet under today's page
+   * by the same heuristic as above: Khai's dashboard drew the new menu and the
+   * home-screen offer with no styles at all, and it looked like the deploy had
+   * not happened. They are small (the largest 17 KB) and every one changes with
+   * the pages, so they are checked on every load like the pages themselves.
+   */
+  const isPageAsset = /\.(css|js|webmanifest)$/.test(last);
+  if (!isShell && !isPageAsset) return;
 
   // Rebuilt rather than mutated: a Response's headers are immutable once it
   // has been constructed, so setting on c.res directly silently does nothing.
