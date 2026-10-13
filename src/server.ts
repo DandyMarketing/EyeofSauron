@@ -36,7 +36,7 @@ import {
   renameConversation, deleteConversation, titleConversation,
   isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress, setPinned,
 } from './ai/conversations.js';
-import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
+import { EVENT_AGENT_PROMPT, eventDraftTool, eventPnlTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
@@ -818,6 +818,43 @@ async function draftRequest(user: SessionUser, history: ChatMessage[]) {
 }
 
 /**
+ * Finish a fresh draft: the P&L if the brief left it out, then every field
+ * checked against its kind of cell. Shared by both draft routes.
+ *
+ * The P&L is the one large optional part the brief writer sometimes skips
+ * (Khai, 13 Oct 2026: "sometimes the P&L doesn't appear"), so it gets its own
+ * small pass when missing. If there is still none, the draft SAYS so rather
+ * than the download button quietly not being there.
+ */
+async function finishDraft(user: SessionUser, history: ChatMessage[], input: any, stopReason: string | null, onStage?: (label: string) => void) {
+  const notes: string[] = [];
+  if (stopReason === 'max_tokens') {
+    notes.push('The brief writer ran out of room, so the end of the brief may be cut short. Press "Prepare the brief" again if anything is missing.');
+  }
+  let d = input;
+  if (!hasPnl(d)) {
+    onStage?.('Laying out the P&L on its own');
+    try {
+      const base = await draftRequest(user, history);
+      const r = await anthropic.messages.create({
+        ...base, max_tokens: 8192,
+        tools: [eventPnlTool() as any],
+        tool_choice: { type: 'tool' as const, name: 'record_event_pnl' },
+      });
+      const call = r.content.find((b: any) => b.type === 'tool_use') as any;
+      if (call?.input?.pnl) d = { ...d, pnl: call.input.pnl };
+    } catch (e: any) {
+      console.error(`[plan/draft] P&L pass failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
+    }
+    if (!hasPnl(d)) {
+      notes.push('No P&L in this draft: the conversation never set out the revenue lines (rooms, times, covers and prices). Settle them with the planner, then prepare the brief again.');
+    }
+  }
+  const checked = cleanDraft(d);
+  return { ...checked.draft, _notes: [...notes, ...checked.notes] };
+}
+
+/**
  * Turn a settled conversation into a draft. WRITES NOTHING.
  *
  * A forced tool over the transcript, the same shape the recommendation engine
@@ -839,8 +876,7 @@ app.post('/api/plan/draft', async (c) => {
     const structured = await anthropic.messages.create(await draftRequest(user, history));
     const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
     if (!call?.input) return c.json({ error: 'Could not build a draft from this conversation.' }, 422);
-    const checked = cleanDraft(call.input);
-    return c.json({ draft: { ...checked.draft, _notes: checked.notes } });
+    return c.json({ draft: await finishDraft(user, history, call.input, structured.stop_reason ?? null) });
   } catch (e: any) {
     console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
@@ -887,9 +923,11 @@ app.post('/api/plan/draft-stream', async (c) => {
       const call = msg.content.find((b: any) => b.type === 'tool_use') as any;
       if (!call?.input) push({ kind: 'error', error: 'Could not build a draft from this conversation.' });
       else {
-        // Every field checked against its kind of cell before the person sees it.
-        const checked = cleanDraft(call.input);
-        push({ kind: 'done', draft: { ...checked.draft, _notes: checked.notes } });
+        // The P&L if it was left out, then every field checked against its
+        // kind of cell, before the person sees it.
+        const draft = await finishDraft(user, history, call.input, msg.stop_reason ?? null,
+          label => push({ kind: 'stage', label }));
+        push({ kind: 'done', draft });
       }
     } catch (e: any) {
       console.error(`[plan/draft-stream] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);

@@ -461,6 +461,70 @@ you need for each. Do not call record_event_draft.`;
  * confirms, and the app posts it. See the header.
  */
 /**
+ * The event P&L's shape, shared by the brief and by the P&L's own pass below.
+ */
+const PNL_SCHEMA = {
+          type: 'object',
+          description: 'The event P&L, for the Excel download, in the shape of the group\'s own template: revenue programmed by floor and time slot, and cost lines by section. ONLY what the conversation settled or proposed -- every row carries its basis. Do NOT add product cost or group fees: the workbook computes both from the venue\'s measured rates.',
+          properties: {
+            service_charge_pct: { type: 'number', description: 'Service charge %, e.g. 10. Omit if never discussed.' },
+            programming: {
+              type: 'array',
+              description: 'Every revenue slot: one row per floor x time slot x thing sold (a dinner seating, a ticket tier, free flow, VIP tables, a late door).',
+              items: {
+                type: 'object',
+                properties: {
+                  floor: { type: 'string', description: 'The room or floor, e.g. "NP ground", "NP rooftop", "Barter rooftop".' },
+                  time: { type: 'string', description: 'e.g. "7.30pm - 9.30pm".' },
+                  concept: { type: 'string', description: 'What is sold: "Dinner, seating 1", "All-access band", "Free flow 2 hours", "Late door".' },
+                  covers: { type: 'number', description: 'Heads or units sold in this slot.' },
+                  per_person: { type: 'number', description: 'Price per head or unit, excluding service charge.' },
+                  cost_basis: { type: 'string', enum: ['food', 'drink', 'food_and_drink', 'none'], description: 'What it costs to serve: a set dinner is food, free flow and tables are drink, a dinner with drinks included is food_and_drink, door entry alone is none. Drink tokens on a ticket make it drink.' },
+                  target_market: { type: 'string' },
+                  comments: { type: 'string' },
+                  basis: { type: 'string', enum: ['our data', 'source', 'proposal', 'to fill'] },
+                },
+                required: ['floor', 'time', 'concept', 'cost_basis', 'basis'],
+              },
+            },
+            costs: {
+              type: 'array',
+              description: 'Every cost line discussed: hire, acts, equipment, ads, promoters, labour. SECURITY IS LABOUR (section "labour", guards x hours x rate), not an additional cost. A cost named but never priced goes in with no unit_price and basis "to fill".',
+              items: {
+                type: 'object',
+                properties: {
+                  section: { type: 'string', enum: ['operating', 'furniture', 'entertainment', 'marketing', 'additional', 'labour'] },
+                  item: { type: 'string' },
+                  qty: { type: 'number', description: 'Count: 1 for a fee, staff for labour, heads for a per-head charge.' },
+                  hours: { type: 'number', description: 'Labour only: hours per person.' },
+                  unit_price: { type: 'number', description: 'Price each (or hourly rate for labour).' },
+                  note: { type: 'string', description: 'What the number is, e.g. "capped at $8,000", "8 staff x 16 h".' },
+                  basis: { type: 'string', enum: ['our data', 'source', 'proposal', 'to fill'] },
+                },
+                required: ['section', 'item', 'basis'],
+              },
+            },
+          },
+          required: ['programming', 'costs'],
+        };
+
+/**
+ * The P&L on its own, for when the brief left it out.
+ *
+ * Khai, 13 Oct 2026: "sometimes the P&L doesn't appear". It is one optional
+ * part of a very large forced-tool call, and the model sometimes skips it -- the
+ * download button then simply was not there. A second, small call that has
+ * nothing else to do is far more reliable than asking the big one again.
+ */
+export function eventPnlTool() {
+  return {
+    name: 'record_event_pnl',
+    description: 'Record the event P&L from the planning conversation: every revenue slot (room x time x what is sold, with covers and price) and every cost line. Only what the conversation settled or proposed; every row carries its basis. Do NOT add product cost or group fees -- the workbook computes both.',
+    input_schema: { type: 'object' as const, properties: { pnl: PNL_SCHEMA }, required: ['pnl'] },
+  };
+}
+
+/**
  * venueSlugs: OUR venues, as a fixed choice. Given, the AI picks from them and
  * cannot write a rented rooftop in as a venue (Khai, 13 Oct 2026: Barter);
  * anything else goes in other_spaces.
@@ -577,50 +641,7 @@ export function eventDraftTool(venueSlugs?: string[]) {
           },
         },
         abort_condition: { type: 'string', description: 'The book needed, the date it is checked, and what happens if it is not there.' },
-        pnl: {
-          type: 'object',
-          description: 'The event P&L, for the Excel download, in the shape of the group\'s own template: revenue programmed by floor and time slot, and cost lines by section. ONLY what the conversation settled or proposed -- every row carries its basis. Do NOT add product cost or group fees: the workbook computes both from the venue\'s measured rates.',
-          properties: {
-            service_charge_pct: { type: 'number', description: 'Service charge %, e.g. 10. Omit if never discussed.' },
-            programming: {
-              type: 'array',
-              description: 'Every revenue slot: one row per floor x time slot x thing sold (a dinner seating, a ticket tier, free flow, VIP tables, a late door).',
-              items: {
-                type: 'object',
-                properties: {
-                  floor: { type: 'string', description: 'The room or floor, e.g. "NP ground", "NP rooftop", "Barter rooftop".' },
-                  time: { type: 'string', description: 'e.g. "7.30pm - 9.30pm".' },
-                  concept: { type: 'string', description: 'What is sold: "Dinner, seating 1", "All-access band", "Free flow 2 hours", "Late door".' },
-                  covers: { type: 'number', description: 'Heads or units sold in this slot.' },
-                  per_person: { type: 'number', description: 'Price per head or unit, excluding service charge.' },
-                  cost_basis: { type: 'string', enum: ['food', 'drink', 'food_and_drink', 'none'], description: 'What it costs to serve: a set dinner is food, free flow and tables are drink, a dinner with drinks included is food_and_drink, door entry alone is none. Drink tokens on a ticket make it drink.' },
-                  target_market: { type: 'string' },
-                  comments: { type: 'string' },
-                  basis: { type: 'string', enum: ['our data', 'source', 'proposal', 'to fill'] },
-                },
-                required: ['floor', 'time', 'concept', 'cost_basis', 'basis'],
-              },
-            },
-            costs: {
-              type: 'array',
-              description: 'Every cost line discussed: hire, acts, equipment, ads, promoters, labour. SECURITY IS LABOUR (section "labour", guards x hours x rate), not an additional cost. A cost named but never priced goes in with no unit_price and basis "to fill".',
-              items: {
-                type: 'object',
-                properties: {
-                  section: { type: 'string', enum: ['operating', 'furniture', 'entertainment', 'marketing', 'additional', 'labour'] },
-                  item: { type: 'string' },
-                  qty: { type: 'number', description: 'Count: 1 for a fee, staff for labour, heads for a per-head charge.' },
-                  hours: { type: 'number', description: 'Labour only: hours per person.' },
-                  unit_price: { type: 'number', description: 'Price each (or hourly rate for labour).' },
-                  note: { type: 'string', description: 'What the number is, e.g. "capped at $8,000", "8 staff x 16 h".' },
-                  basis: { type: 'string', enum: ['our data', 'source', 'proposal', 'to fill'] },
-                },
-                required: ['section', 'item', 'basis'],
-              },
-            },
-          },
-          required: ['programming', 'costs'],
-        },
+        pnl: PNL_SCHEMA,
         brief: { type: 'string', description: 'The brief itself, in markdown — what every stakeholder reads. PLAIN WORDS AND SHORT SENTENCES: everyday words, one idea per sentence, no jargon or figures of speech; table cells a few words each. Lead with what this is and what success looks like; put the schedule in a table. Include a "What to push hardest" table (Draw | Push: lead / support / do not market | Why): the draw the campaign leads with, the ones that support it, and why. Use the ranking agreed in the conversation; if none was agreed, rank from what was settled and head the table "Suggested — not yet agreed". Include, per ticket, the package comparison from the conversation -- ours against its closest rivals, with the verdict (we have the edge / level / they have the edge) and the edge and gap -- only if it was made in the conversation; never build one here, because rival details must come from a source read there.' },
       },
       required: ['name', 'start_date', 'end_date', 'venue_slugs', 'brief'],

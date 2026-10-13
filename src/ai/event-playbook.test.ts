@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { PLAYBOOK, renderPlaybook, blockingRows } from './event-playbook.js';
-import { EVENT_AGENT_PROMPT, eventDraftTool, openDecisions } from './event-agent.js';
+import { EVENT_AGENT_PROMPT, eventDraftTool, eventPnlTool, openDecisions } from './event-agent.js';
 
 /**
  * These assert the rules that make the conversation worth having, rather than
@@ -406,4 +406,12 @@ test('our venues are a fixed choice, and other spaces have their own place', () 
   assert.deepEqual(spaces.items.properties.access.enum, ['rented', 'partner', 'public']);
   assert.match(EVENT_AGENT_PROMPT, /OUR VENUES, AND SPACES WE DO NOT CONTROL/);
   assert.match(EVENT_AGENT_PROMPT, /never as a venue/);
+});
+
+test('the P&L has its own pass, with the same shape as the brief\'s', () => {
+  // Khai, 13 Oct 2026: "sometimes the P&L doesn't appear".
+  const own = eventPnlTool().input_schema.properties.pnl;
+  const inBrief = (eventDraftTool().input_schema.properties as any).pnl;
+  assert.deepEqual(own, inBrief);
+  assert.deepEqual(eventPnlTool().input_schema.required, ['pnl']);
 });
