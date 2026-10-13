@@ -22,6 +22,8 @@
  * happens in /api/conversations/:id, as before.
  */
 (function () {
+  // A pushpin, drawn rather than an emoji so it looks the same everywhere.
+  var PIN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/></svg>';
   const PHONE = '(max-width: 899px)';
   const STORE = 'sauron.sidebar.collapsed';
 
@@ -63,6 +65,12 @@
   }
   #conv-sidebar .cs-act:hover { color: var(--accent); }
   #conv-sidebar .cs-act.cs-del:hover { color: var(--error); }
+  #conv-sidebar .cs-section { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); padding: 8px 8px 4px; }
+  #conv-sidebar .cs-pin svg { width: 14px; height: 14px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  #conv-sidebar .cs-item:not(.pinned) .cs-pin { opacity: .45; }
+  #conv-sidebar .cs-item:not(.pinned):hover .cs-pin { opacity: 1; }
+  #conv-sidebar .cs-item.pinned .cs-pin { color: var(--accent); }
+  #conv-sidebar .cs-item.pinned .cs-pin svg { fill: currentColor; }
   #conv-sidebar .cs-empty { color: var(--text-muted); font-size: 13px; padding: 8px 4px; line-height: 1.5; }
   #conv-sidebar .cs-note { font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border);
     padding-top: 8px; line-height: 1.5; }
@@ -246,17 +254,44 @@
         return;
       }
       const current = opts.currentId();
-      list.innerHTML = items.map(c =>
-        '<div class="cs-item' + (c.id === current ? ' current' : '') + '" data-id="' + esc(c.id) + '">' +
+      /**
+       * Pinned first, under their own heading, then the recent ones (Khai,
+       * 13 Oct 2026: "the ability to PIN events on the left column"). A pin is
+       * saved on the server, so it is the same on a phone and a laptop.
+       */
+      const row = c =>
+        '<div class="cs-item' + (c.id === current ? ' current' : '') + (c.pinned_at ? ' pinned' : '') + '" data-id="' + esc(c.id) + '">' +
           '<button class="cs-open" type="button"><span class="cs-title">' + esc(c.title || 'Untitled') + '</span>' +
             '<span class="cs-when">' + whenText(c.updated_at) + '</span></button>' +
+          '<button class="cs-act cs-pin" type="button" data-pinned="' + (c.pinned_at ? '1' : '') + '" title="' + (c.pinned_at ? 'Unpin' : 'Pin to the top') + '" aria-label="' + (c.pinned_at ? 'Unpin' : 'Pin to the top') + '">' + PIN_SVG + '</button>' +
           '<button class="cs-act cs-rename" type="button" title="Rename">&#9998;</button>' +
           '<button class="cs-act cs-del" type="button" title="Delete">&times;</button>' +
-        '</div>').join('');
+        '</div>';
+      const pins = items.filter(c => c.pinned_at);
+      const rest = items.filter(c => !c.pinned_at);
+      list.innerHTML =
+        (pins.length ? '<div class="cs-section">Pinned</div>' + pins.map(row).join('') + (rest.length ? '<div class="cs-section">Recent</div>' : '') : '') +
+        rest.map(row).join('');
 
       list.querySelectorAll('.cs-item').forEach(row => {
         const id = row.dataset.id;
         row.querySelector('.cs-open').addEventListener('click', () => { openPhone(false); opts.onOpen(id); });
+        row.querySelector('.cs-pin').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const res = await fetch('/api/conversations/' + id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + opts.token() },
+            body: JSON.stringify({ pinned: !btn.dataset.pinned }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.error || 'Could not pin that ' + opts.noun + '.');
+            btn.disabled = false;
+            return;
+          }
+          refresh();
+        });
         row.querySelector('.cs-rename').addEventListener('click', async () => {
           const next = prompt('Rename this ' + opts.noun, row.querySelector('.cs-title').textContent);
           if (next === null || !next.trim()) return;

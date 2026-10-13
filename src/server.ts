@@ -34,7 +34,7 @@ import { queryTools } from './ai/tools.js';
 import {
   createConversation, appendTurn, listConversations, readConversation,
   renameConversation, deleteConversation, titleConversation,
-  isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress,
+  isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress, setPinned,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
 import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
@@ -517,7 +517,13 @@ app.patch('/api/conversations/:id', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
-  const body = await c.req.json<{ title?: string }>();
+  const body = await c.req.json<{ title?: string; pinned?: boolean }>();
+  // Pin or unpin to the top of the sidebar (migration 058).
+  if (typeof body.pinned === 'boolean') {
+    const r = await setPinned(user.id, c.req.param('id'), body.pinned);
+    if (!r.ok) return c.json({ error: r.error }, 400);
+    if (body.title === undefined) return c.json({ ok: true });
+  }
   const ok = await renameConversation(user.id, c.req.param('id'), body.title ?? '');
   if (!ok) return c.json({ error: 'Could not rename that conversation' }, 400);
   return c.json({ ok: true });

@@ -22,6 +22,8 @@ export interface ConversationSummary {
   created_at: string;
   updated_at: string;
   message_count?: number;
+  /** When it was pinned to the top of the sidebar; null when not pinned. */
+  pinned_at?: string | null;
 }
 
 /**
@@ -216,20 +218,73 @@ export function cleanTitle(raw: string): string {
 export async function listConversations(
   userId: string, kind: ConversationKind = 'chat', limit = 50,
 ): Promise<ConversationSummary[]> {
+  /**
+   * Pinned first, then the newest. Pins are read on their own so a pinned plan
+   * stays listed however old it is -- the recent list is a top-50 and would
+   * otherwise drop it. Before migration 058 there is no pinned_at column, and
+   * the list falls back to recent only, exactly as before.
+   */
+  // row-cap: pins are capped at MAX_PINS by setPinned, far under a page.
+  const pinned = await supabaseAdmin
+    .from('conversations')
+    .select('id, title, created_at, updated_at, pinned_at')
+    .eq('user_id', userId)
+    .eq('kind', kind)
+    .not('pinned_at', 'is', null)
+    .order('pinned_at', { ascending: false })
+    .limit(MAX_PINS);
+  const havePins = !pinned.error;
+  if (pinned.error) console.error(`[conversations] pins unavailable (is migration 058 applied?): ${pinned.error.message}`);
+
   // row-cap: a deliberate top-N, the newest `limit` threads (50 by default).
-  const { data, error } = await supabaseAdmin
+  let q = supabaseAdmin
     .from('conversations')
     .select('id, title, created_at, updated_at')
     .eq('user_id', userId)
-    .eq('kind', kind)
-    .order('updated_at', { ascending: false })
-    .limit(limit);
+    .eq('kind', kind);
+  if (havePins) q = q.is('pinned_at', null);
+  const { data, error } = await q.order('updated_at', { ascending: false }).limit(limit);
 
   if (error) {
     console.error(`[conversations] could not list for ${userId}: ${error.message}`);
     return [];
   }
-  return data ?? [];
+  return [...(havePins ? (pinned.data ?? []) : []), ...(data ?? [])];
+}
+
+export const MAX_PINS = 20;
+
+/**
+ * Pin to the top of the sidebar, or unpin. Owner-only: the user_id filter is
+ * the control. A pin beyond MAX_PINS is refused rather than silently dropping
+ * an older one.
+ */
+export async function setPinned(userId: string, id: string, pinned: boolean): Promise<{ ok: boolean; error?: string }> {
+  if (pinned) {
+    // The limit is per list: plans and chats each hold up to MAX_PINS.
+    // row-cap: one conversation by id.
+    const { data: row } = await supabaseAdmin
+      .from('conversations').select('kind').eq('id', id).eq('user_id', userId).maybeSingle();
+    if (!row) return { ok: false, error: 'That was not found.' };
+    // row-cap: a head-only count, no rows returned.
+    const { count } = await supabaseAdmin
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('kind', (row as any).kind)
+      .not('pinned_at', 'is', null);
+    if ((count ?? 0) >= MAX_PINS) return { ok: false, error: `You can pin up to ${MAX_PINS} at a time. Unpin one first.` };
+  }
+  const { error } = await supabaseAdmin
+    .from('conversations')
+    .update({ pinned_at: pinned ? new Date().toISOString() : null })
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) {
+    console.error(`[conversations] pin failed (is migration 058 applied?): ${error.message}`);
+    return { ok: false, error: 'Could not pin that. If this keeps happening, migration 058 may not have been run yet.' };
+  }
+  return { ok: true };
 }
 
 /**

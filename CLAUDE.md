@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 57 migrations, 25 query tools, 11 ingest sources, 1,559 tests.
+started.** 58 migrations, 25 query tools, 11 ingest sources, 1,559 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1010,6 +1010,11 @@ the board's Event Template). Items already in a group of that name are skipped
 and the rest added after them. People no longer active on Monday are dropped
 from template steps and flagged on the preview, and a person Monday still
 refuses costs that one item its people, not the whole send.
+
+**Plans and chats can be pinned** to the top of the left sidebar (migration
+058, `conversations.pinned_at`; 13 Oct 2026). Pins are listed under their own
+heading however old they are -- the recent list is a top-50 -- up to 20 per
+list, saved on the server so they match across devices.
 
 **Not built:** reading Done / Stuck back into the brief.
 
