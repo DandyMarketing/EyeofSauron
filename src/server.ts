@@ -1300,7 +1300,13 @@ app.post('/api/plan/monday/preview', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ event_id?: string; boards?: Record<string, string>; brief?: string }>().catch(() => null);
+  const body = await c.req.json<{ event_id?: string; boards?: Record<string, string>; brief?: string; remembered?: Record<string, unknown> }>().catch(() => null);
+  // Earlier picks from this browser: lower-cased name -> Monday user id. Only
+  // short names and whole-number ids survive; anything else is ignored.
+  const remembered: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body?.remembered ?? {}).slice(0, 200)) {
+    if (k.length <= 80 && /^\d+$/.test(String(v))) remembered[k.toLowerCase()] = String(v);
+  }
   if (!body?.event_id) return c.json({ error: 'Issue the brief first -- Monday gets the event as it was recorded.' }, 400);
 
   try {
@@ -1336,7 +1342,8 @@ app.post('/api/plan/monday/preview', async (c) => {
           .map((s: any) => ({ index: s.index, due: typeof s.due === 'string' ? s.due : null, phase: s.phase === 'after' ? 'after' : 'before', reason: String(s.reason ?? '').slice(0, 200) }));
       }
 
-      const items = buildItems({ steps: board.template, deadlines, tasks, users, sender, today, start: ev.start_date, end: ev.end_date });
+      const boardUsers = users.filter(u => board.subscribers.includes(u.id));
+      const items = buildItems({ steps: board.template, deadlines, tasks, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date });
       const exists = board.groups.some(g => g.title.trim().toLowerCase() === title.toLowerCase());
       const warnings: string[] = [];
       if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');

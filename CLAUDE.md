@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 57 migrations, 25 query tools, 11 ingest sources, 1,548 tests.
+started.** 57 migrations, 25 query tools, 11 ingest sources, 1,551 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -948,7 +948,12 @@ a task with an Owner, Assigned To and Deadline. Decided with Khai:
   group per venue board. A failure part-way stops and reports, leaving what was
   made rather than deleting from somebody's board.
 - **People are matched, never guessed**: full name, then a first name only one
-  Monday user has; anything else is left blank and flagged.
+  Monday user has. Most of the venue team are Monday GUESTS (Corbin, Marcus,
+  Byron, Lovely...), so the lookup covers guests, and searches the chosen
+  board's own people before the rest of the account. A shared owner
+  ("Corbin / Josh Wilson") is split and both assigned. A name still unmatched
+  or ambiguous gets a dropdown on the preview for the person to choose, and
+  the choice is remembered in that browser ("your earlier pick").
 - **The Event/Campaign Name label is not set.** NP and FS have exactly 40
   labels on it and the group name already says which event it is.
 
@@ -1036,7 +1041,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,548 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,551 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

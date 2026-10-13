@@ -56,6 +56,8 @@ export interface PreviewItem {
   owner_label: string;
   assigned_label: string;
   flags: string[];
+  /** Names nobody could be matched to, each with the people to choose from. */
+  unresolved?: Array<{ name: string; options: Array<{ id: number; name: string }> }>;
 }
 
 /**
@@ -153,6 +155,52 @@ export function matchPerson(name: string | null | undefined, users: MondayUser[]
   if (byFirst.length === 1) return { status: 'matched', user: byFirst[0] };
   if (byFirst.length > 1) return { status: 'ambiguous', candidates: byFirst };
   return { status: 'none' };
+}
+
+/**
+ * "Corbin / Josh Wilson" is two people. Owners are split on / + & , and "and"
+ * before matching, so a shared task assigns both instead of matching neither.
+ */
+export function splitNames(name: string | null | undefined): string[] {
+  return String(name ?? '').split(/\s*(?:\/|\+|&|,|\band\b)\s*/i).map(x => x.trim()).filter(Boolean);
+}
+
+export interface PeopleMatch {
+  ids: number[];
+  labels: string[];
+  unresolved: Array<{ name: string; candidates: MondayUser[] }>;
+}
+
+/**
+ * Every name in an owner, matched safely (Khai, 13 Oct 2026, after "No Monday
+ * user called Corbin"). Most of the venue team are GUESTS on Monday, and the
+ * lookup searched members only. In order, per name:
+ *   1. a pick the person made before for this exact name ("your earlier pick");
+ *   2. the people on THIS board, members and guests alike -- a guest can
+ *      usually only be assigned on a board shared with them;
+ *   3. everyone else on the account.
+ * Anything still unmatched or ambiguous is returned unresolved, for the person
+ * to choose on the preview. Never a guess.
+ */
+export function matchPeople(
+  owner: string | null | undefined,
+  boardUsers: MondayUser[],
+  allUsers: MondayUser[],
+  remembered: Record<string, string> = {},
+): PeopleMatch {
+  const out: PeopleMatch = { ids: [], labels: [], unresolved: [] };
+  const byId = new Map(allUsers.map(u => [u.id, u]));
+  for (const part of splitNames(owner)) {
+    const pick = remembered[part.toLowerCase()];
+    const pickUser = pick ? byId.get(String(pick)) : undefined;
+    if (pickUser) { out.ids.push(Number(pickUser.id)); out.labels.push(`${pickUser.name} (your earlier pick)`); continue; }
+    let m = matchPerson(part, boardUsers);
+    if (m.status === 'none') m = matchPerson(part, allUsers);
+    if (m.status === 'matched') { out.ids.push(Number(m.user.id)); out.labels.push(m.user.name); }
+    else out.unresolved.push({ name: part, candidates: m.status === 'ambiguous' ? m.candidates : [] });
+  }
+  out.ids = [...new Set(out.ids)];
+  return out;
 }
 
 /**
@@ -276,6 +324,10 @@ export function buildItems(input: {
   deadlines: StepDeadline[];
   tasks: PlannerTask[];
   users: MondayUser[];
+  /** The chosen board's own people; matched first. Defaults to everyone. */
+  boardUsers?: MondayUser[];
+  /** Earlier picks from the preview: lower-cased name -> Monday user id. */
+  remembered?: Record<string, string>;
   sender: MondayUser | null;
   today: string;
   start: string;
@@ -304,15 +356,24 @@ export function buildItems(input: {
   const planner: PreviewItem[] = input.tasks
     .slice().sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
     .map(t => {
-      const m = matchPerson(t.owner_name, input.users);
+      const boardUsers = input.boardUsers ?? input.users;
+      const m = matchPeople(t.owner_name, boardUsers, input.users, input.remembered ?? {});
       const flags = deadlineFlags(t.due_date, 'before', input.today, input.start, input.end)
         // The day itself is a valid date for a planner task (a story on the night).
         .filter(f => f !== 'Due after the event starts' || (t.due_date ?? '') > input.end);
-      let assigned: number[] = [];
-      let assignedLabel = '';
-      if (m.status === 'matched') { assigned = [Number(m.user.id)]; assignedLabel = m.user.name; }
-      else if (m.status === 'ambiguous') { assignedLabel = ''; flags.push(`"${t.owner_name}" matches ${m.candidates.map(c => c.name).join(' and ')} -- left blank`); }
-      else if (t.owner_name) flags.push(`No Monday user called "${t.owner_name}" -- left blank`);
+      for (const u of m.unresolved) {
+        flags.push(u.candidates.length
+          ? `"${u.name}" matches ${u.candidates.map(c => c.name).join(' and ')} -- choose one`
+          : `No Monday user called "${u.name}" -- choose one or leave blank`);
+      }
+      // The people to choose from: whoever the name matched, then the board.
+      const options = (cands: MondayUser[]) => {
+        const seen = new Set<string>();
+        return [...cands, ...boardUsers].filter(u => !seen.has(u.id) && seen.add(u.id))
+          .map(u => ({ id: Number(u.id), name: u.name }));
+      };
+      const assigned = m.ids;
+      const assignedLabel = m.labels.join(', ');
       const name = `${t.description}${t.channel ? ` (${t.channel})` : ''}`.slice(0, 255);
       return {
         name,
@@ -324,6 +385,7 @@ export function buildItems(input: {
         owner_label: input.sender?.name ?? '',
         assigned_label: assignedLabel,
         flags,
+        ...(m.unresolved.length ? { unresolved: m.unresolved.map(u => ({ name: u.name, options: options(u.candidates) })) } : {}),
       };
     });
 

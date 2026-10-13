@@ -210,6 +210,8 @@
   #monday-sheet .md-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   #monday-sheet .md-msg { font-size: 13px; margin-top: 8px; }
   #monday-sheet a { color: var(--accent); }
+  #monday-sheet .md-pick-l { display: block; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+  #monday-sheet .md-pick { max-width: 100%; margin-top: 2px; padding: 3px 4px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg); color: var(--text); font-size: 12px; }
   #monday-sheet .md-attach { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; }
   #monday-sheet .md-attach label { display: block; padding: 4px 0; cursor: pointer; }
   #monday-sheet .md-attach small { display: block; color: var(--text-muted); font-size: 11px; margin-left: 22px; }
@@ -740,6 +742,17 @@ function printBrief(d) {
  * deadline pass is not re-run, so the dates approved are the dates written.
  */
 let mondayBoards = null;
+// Names you matched to a Monday person by hand, remembered in this browser so
+// the next preview matches them itself (shown as "your earlier pick").
+const PEOPLE_KEY = 'sauron.monday.people';
+function rememberedPeople() { try { return JSON.parse(localStorage.getItem(PEOPLE_KEY) || '{}') || {}; } catch { return {}; } }
+function rememberPerson(name, id) {
+  try {
+    const m = rememberedPeople();
+    if (id) m[name.toLowerCase()] = String(id); else delete m[name.toLowerCase()];
+    localStorage.setItem(PEOPLE_KEY, JSON.stringify(m));
+  } catch { /* private mode: the pick still applies to this send */ }
+}
 const boardKey = slug => 'sauron.monday.board.' + slug;
 function rememberedBoard(slug) { try { return localStorage.getItem(boardKey(slug)); } catch { return null; } }
 function rememberBoard(slug, id) { try { localStorage.setItem(boardKey(slug), id); } catch { /* private mode */ } }
@@ -839,7 +852,7 @@ async function openMonday(eventId, venues, d) {
       const res = await fetch('/api/plan/monday/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ event_id: eventId, boards: chosen, brief }),
+        body: JSON.stringify({ event_id: eventId, boards: chosen, brief, remembered: rememberedPeople() }),
       });
       const out = await res.json();
       if (!res.ok || out.error) throw new Error(out.error || 'Could not build the preview.');
@@ -862,6 +875,8 @@ async function openMonday(eventId, venues, d) {
   // A group that already exists is refused by the server unless renamed here,
   // so it stays sendable: renaming it in the preview is the fix.
   const sendable = v => !v.error && v.member !== false;
+  // A name you have chosen a person for is no longer a problem to flag.
+  const visibleFlags = it => it.flags.filter(f => !(it.unresolved || []).some(u => u.picked && f.includes('"' + u.name + '"')));
   const attachLine = (what, status) => !status ? ''
     : status === 'ok' ? '<div class="saved">' + escapeHtml(what) + ': attached.</div>'
     : '<div class="md-warn">' + escapeHtml(what) + ': ' + escapeHtml(status) + ' Download it from the brief and drop it in.</div>';
@@ -869,7 +884,7 @@ async function openMonday(eventId, venues, d) {
   const drawPreview = () => {
     const blocks = preview.venues.map((v, i) => {
       if (v.error) return '<div class="md-venue"><h4>' + escapeHtml(v.venue || v.slug) + '</h4><div class="md-warn">' + escapeHtml(v.error) + '</div></div>';
-      const flagged = v.items.filter(it => it.flags.length).length;
+      const flagged = v.items.filter(it => visibleFlags(it).length).length;
       return '<div class="md-venue" data-i="' + i + '">' +
         '<h4>' + escapeHtml(v.venue) + ' → ' + escapeHtml(v.board.name) + '</h4>' +
         '<label class="md-note" for="md-title-' + i + '">Group name</label>' +
@@ -881,13 +896,20 @@ async function openMonday(eventId, venues, d) {
         (hasPnl && !v.attach?.pnl ? '<div class="md-note">No "Financial Forecast" step on this board\'s template, so the P&amp;L will not go on here.</div>' : '') +
         '<div class="md-note">' + v.items.length + ' items' + (flagged ? ', <span style="color:var(--error)">' + flagged + ' flagged</span> — check them in Monday after, or fix the plan and send again' : '') + '.</div>' +
         '<table><thead><tr><th>Deadline</th><th>Task</th><th>Owner</th><th>Assigned to</th><th>Why / flags</th></tr></thead><tbody>' +
-        v.items.map(it =>
+        v.items.map((it, j) =>
           '<tr><td class="md-date" data-l="Due">' + escapeHtml(fmt(it.deadline)) + '</td>' +
           '<td class="md-task">' + escapeHtml(it.name) + '<span class="md-src">' + (it.source === 'template' ? 'board template' : 'from the plan') + '</span></td>' +
           '<td data-l="Owner">' + escapeHtml(it.owner_label || '—') + '</td>' +
-          '<td data-l="Assigned">' + escapeHtml(it.assigned_label || '—') + '</td>' +
+          '<td data-l="Assigned">' + escapeHtml(it.assigned_label || '—') +
+            // A name nobody could be matched to: you choose, never a guess.
+            (it.unresolved || []).map((u, k) => '<label class="md-pick-l">' + escapeHtml(u.name) + ': ' +
+              '<select class="md-pick" data-v="' + i + '" data-it="' + j + '" data-u="' + k + '">' +
+                '<option value="">leave blank</option>' +
+                u.options.map(o => '<option value="' + o.id + '"' + (String(u.picked || '') === String(o.id) ? ' selected' : '') + '>' + escapeHtml(o.name) + '</option>').join('') +
+              '</select></label>').join('') +
+          '</td>' +
           '<td>' + (it.reason ? '<span class="md-why">' + escapeHtml(it.reason) + '</span>' : '') +
-            it.flags.map(f => '<span class="md-flag">' + escapeHtml(f) + '</span>').join('') + '</td></tr>').join('') +
+            visibleFlags(it).map(f => '<span class="md-flag">' + escapeHtml(f) + '</span>').join('') + '</td></tr>').join('') +
         '</tbody></table></div>';
     }).join('');
     const any = preview.venues.some(sendable);
@@ -907,6 +929,18 @@ async function openMonday(eventId, venues, d) {
       '<button type="button" class="md-send"' + (any ? '' : ' disabled') + '>Create in Monday</button></div>' +
       '<div class="md-msg"></div>';
     sheet.querySelectorAll('.md-attach input').forEach(cb => cb.addEventListener('change', () => { attach[cb.dataset.a] = cb.checked; }));
+    sheet.querySelectorAll('.md-pick').forEach(sel => sel.addEventListener('change', () => {
+      // Keep any renamed group titles before drawing again.
+      preview.venues.forEach((v, i) => { const t = sheet.querySelector('#md-title-' + i); if (t) v.group_title = t.value; });
+      const v = preview.venues[+sel.dataset.v], it = v.items[+sel.dataset.it], u = it.unresolved[+sel.dataset.u];
+      if (!it._base) it._base = { ids: it.assigned_ids.slice(), label: it.assigned_label };
+      u.picked = sel.value ? Number(sel.value) : null;
+      rememberPerson(u.name, u.picked);
+      const picks = it.unresolved.filter(x => x.picked);
+      it.assigned_ids = [...new Set([...it._base.ids, ...picks.map(x => x.picked)])];
+      it.assigned_label = [it._base.label, ...picks.map(x => (x.options.find(o => o.id === x.picked) || {}).name)].filter(Boolean).join(', ');
+      drawPreview();
+    }));
     sheet.querySelector('.md-back').addEventListener('click', pick);
     sheet.querySelector('.md-send').addEventListener('click', runSend);
   };

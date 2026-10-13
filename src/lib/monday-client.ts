@@ -157,10 +157,14 @@ export async function readBoardForPlan(boardId: string): Promise<BoardForPlan> {
   };
 }
 
-/** The account's people, and who the key writes as. Guests are left out. */
+/**
+ * The account's people -- members AND guests -- and who the key writes as.
+ * Guests were left out until 13 Oct 2026, and most of the venue team are
+ * guests (Corbin, Marcus, Byron, Lovely...), so "Corbin" matched nobody.
+ */
 export async function readPeople(): Promise<{ users: MondayUser[]; me: MondayUser; account: string | null }> {
   const d = await gql<{ users: Array<{ id: string; name: string; email: string | null }>; me: { id: string; name: string; email: string | null; account?: { slug: string } } }>(
-    'query { users(limit: 1000, kind: non_guests) { id name email } me { id name email account { slug } } }',
+    'query { users(limit: 1000, kind: all) { id name email } me { id name email account { slug } } }',
   );
   return {
     users: (d.users ?? []).map(u => ({ id: String(u.id), name: u.name, email: u.email ?? null })),

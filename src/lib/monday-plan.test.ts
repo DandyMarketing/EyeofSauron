@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
-  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, type MondayUser,
+  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople, type MondayUser,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -157,4 +157,52 @@ test('the brief and the P&L find their steps by words, whatever the number', () 
   assert.match(html, /Profit: \$20,000<\/strong> \(37\.3% of nett\)/);
   assert.match(html, /60%: -\$1,500; 80%: \$9,000/);
   assert.match(html, /Still to fill: Card rate: enter the quote/);
+});
+
+test('a shared owner is two people, matched one by one', () => {
+  assert.deepEqual(splitNames('Corbin / Josh Wilson'), ['Corbin', 'Josh Wilson']);
+  assert.deepEqual(splitNames('Khai + Josh & Fairuz, salvin and Raj'), ['Khai', 'Josh', 'Fairuz', 'salvin', 'Raj']);
+  assert.deepEqual(splitNames(''), []);
+});
+
+test('the board\'s own people are matched first, guests included, then the account, then a pick', () => {
+  // 13 Oct 2026: Corbin is a GUEST on Monday and the lookup searched members only.
+  const corbin = { id: '37868628', name: 'Corbin Tay Neon', email: null };
+  const josh = { id: '106554939', name: 'Josh Wilson', email: null };
+  const joshua = { id: '116390364', name: 'Joshua Hariharan Ashokan', email: null };
+  const victor = { id: '100467333', name: 'Victor', email: null };
+  const victorFoo = { id: '73479978', name: 'Victor Foo', email: null };
+  const all = [corbin, josh, joshua, victor, victorFoo];
+
+  const m = matchPeople('Corbin / Josh Wilson', [corbin, josh], all);
+  assert.deepEqual(m.ids, [37868628, 106554939]);
+  assert.deepEqual(m.unresolved, []);
+
+  // Not on the board, found on the account.
+  assert.deepEqual(matchPeople('Joshua Hariharan Ashokan', [corbin], all).ids, [116390364]);
+
+  // Nobody by that name: unresolved, never guessed.
+  const none = matchPeople('Mel', [corbin], all);
+  assert.deepEqual(none.ids, []);
+  assert.equal(none.unresolved[0].name, 'Mel');
+
+  // An earlier pick wins, and says so.
+  const pick = matchPeople('Mel', [corbin], all, { mel: '37868628' });
+  assert.deepEqual(pick.ids, [37868628]);
+  assert.match(pick.labels[0], /your earlier pick/);
+});
+
+test('an unmatched name on a planner task comes with the board\'s people to choose from', () => {
+  const corbin = { id: '37868628', name: 'Corbin Tay Neon', email: null };
+  const salvin = { id: '99680353', name: 'salvin', email: null };
+  const items = buildItems({
+    steps: [], deadlines: [],
+    tasks: [{ description: 'Shoot the roof at night', channel: null, kind: 'content', due_date: '2026-11-10', owner_name: 'Salvin / Mel' }],
+    users: [corbin, salvin], boardUsers: [corbin, salvin], sender: null,
+    today: '2026-10-13', start: '2026-12-31', end: '2026-12-31',
+  });
+  assert.deepEqual(items[0].assigned_ids, [99680353]);
+  assert.equal(items[0].unresolved![0].name, 'Mel');
+  assert.deepEqual(items[0].unresolved![0].options.map(o => o.name), ['Corbin Tay Neon', 'salvin']);
+  assert.match(items[0].flags.join(), /No Monday user called "Mel" -- choose one/);
 });
