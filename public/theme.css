@@ -299,16 +299,29 @@ header.site-header nav.site-nav { flex: 0 0 auto; }
    row -- and the menu under it -- sits at the same height on every page. */
 header.site-header #cs-menu { width: 32px; height: 32px; min-height: 0; }
 @media (max-width: 920px) {
-  header.site-header { flex-wrap: wrap; row-gap: 6px; padding: 12px 16px; }
+  header.site-header { flex-wrap: wrap; row-gap: 6px; column-gap: 0; padding: 12px 16px; }
   header.site-header .subtitle { display: none; }
-  header.site-header nav.site-nav { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: -8px; }
-  /* The light/dark switch sits apart at the top right, level with the logo
-     (Khai, 13 Oct 2026: "move the dark and light theme on mobile to the top
-     right, separate away from logout"). Still in the nav's markup, so the menu
-     stays identical on every page; the title leaves room for it. */
-  header.site-header { position: relative; }
-  header.site-header > div:not(.logo) { padding-right: 44px; }
-  header.site-header .theme-toggle { position: absolute; top: 10px; right: 16px; margin: 0; }
+  header.site-header > div:not(.logo) { margin-left: 12px; }
+  header.site-header #cs-menu { margin-right: 10px; }
+  /*
+   * TWO ROWS ON A PHONE (Khai, 13 Oct 2026: the light/dark switch, then "the
+   * cog and logout go to top right"). The logo row carries Settings, the
+   * switch and Logout at its right end; the pages fill the row below. The
+   * menu's markup is untouched -- the same on every page -- and only laid out
+   * differently: `display: contents` lets each link take its own place in the
+   * header, and the header's ::after is a full-width break between the rows.
+   */
+  header.site-header nav.site-nav { display: contents; }
+  header.site-header nav.site-nav > * { order: 4; }
+  header.site-header nav.site-nav > .nav-icon,
+  header.site-header nav.site-nav > .theme-toggle,
+  header.site-header nav.site-nav > #logout-link { order: 2; }
+  /* The pages' links: no left padding, so whichever link starts a line --
+     the first, or one a narrow phone wraps -- lines up with the logo. */
+  header.site-header nav.site-nav > a:not(.nav-icon):not(#logout-link) { padding: 6px 12px 6px 0; }
+  header.site-header nav.site-nav > .nav-icon, header.site-header nav.site-nav > .theme-toggle { margin-left: 6px; }
+  header.site-header nav.site-nav > #logout-link { margin-left: 4px; }
+  header.site-header::after { content: ''; order: 3; flex: 0 0 100%; height: 0; }
 }
 
 /* Settings (the admin console), owners only: a cog beside the light/dark

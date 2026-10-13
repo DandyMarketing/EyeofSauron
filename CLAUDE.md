@@ -1274,7 +1274,7 @@ background, buttons a 40 px floor, in `theme.css` under
 ### Menu names, 13 Oct 2026
 
 Khai: the chat is **Query** (asking is the point of it) and the planner is
-**Plan easier** (renamed again the same day, from "Plan your event"). Labels only -- the pages are still `/chat.html` and
+**Plan** (Khai, same day, after "Plan your event" and then "Plan easier": "it just plan"). Labels only -- the pages are still `/chat.html` and
 `/plan.html`, so links and bookmarks keep working.
 
 **One menu, identical on every page** (Khai, same day: "the menu buttons keep
@@ -1282,16 +1282,17 @@ shuffling"). Each page had carried its own -- Query before Weekly brief on one,
 Daily on two of six, 14 px here and 15 px there -- and the owner links, Logout
 and the brief badge appeared only after sign-in, pushing a right-aligned menu
 sideways. Now every page has the same `<nav class="site-nav">` (order:
-Dashboard, Weekly brief, Query, Plan easier, Daily, Settings (a cog, renamed from
+Dashboard, Weekly brief, Query, Plan, Daily, Settings (a cog, renamed from
 Admin on 13 Oct 2026), the light/dark switch, Logout), styled
 only in `theme.css` with the header around it, and `pages.test.ts` fails if
 any page's menu differs. Owner links and the badge are painted at first paint
 from this browser's last visit (`localStorage` `sauron.nav`, a convenience),
 then corrected by `setNavOwner()` / `setNavBrief()` once the page knows.
 Measured: every link at the same pixel on all six pages, laptop and phone.
-On a phone the light/dark switch sits apart at the top right, level with the
-logo (Khai, 13 Oct 2026: "separate away from logout") -- moved by CSS only, so
-the markup stays the same on every page.
+On a phone, Settings, the light/dark switch and Logout sit at the top right on
+the logo's row, and the pages fill the row below (Khai, 13 Oct 2026) -- laid
+out by CSS only (`display: contents` on the menu), so the markup stays the same
+on every page.
 
 ## Later: parked features (recorded 11 Oct 2026)
 
