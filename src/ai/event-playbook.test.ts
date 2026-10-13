@@ -427,3 +427,15 @@ test('running the night: staffing, photography and both menus are decisions, the
   assert.equal(PLAYBOOK.some(r => /booking_rules/.test(r.key)), false);
   assert.match(EVENT_AGENT_PROMPT, /RUNNING THE NIGHT/);
 });
+
+test('a photographer is a photographer, never a "shooter"', () => {
+  /**
+   * Issue report, Khai, 13 Oct 2026: the planner asked to "book the shooter"
+   * -- "it should be photographer!!!". The playbook's own question said "who
+   * shoots it", which planted the word; the prompt now names the job outright.
+   */
+  const row = PLAYBOOK.find(r => r.key === 'photography')!;
+  assert.ok(!/shoots it|shooter/i.test(row.ask + ' ' + row.challenge), 'the playbook plants "shooter" again');
+  assert.match(row.ask, /photographer or videographer/);
+  assert.match(EVENT_AGENT_PROMPT, /"Photographer" or "videographer", not\s+"shooter"/);
+});

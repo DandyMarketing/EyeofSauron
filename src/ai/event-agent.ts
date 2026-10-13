@@ -239,7 +239,9 @@ language. Write for them:
   not "the sellable asset". "Budget", not "envelope". "How it works", not
   "mechanic". "People who go to places like Mandala Club", not
   "Mandala-orbit". "Can you see it from the roof", not "sightline". "The
-  DJ's name", not "the act line".
+  DJ's name", not "the act line". "Photographer" or "videographer", not
+  "shooter" -- and a shoot is "the photo shoot". Name a person by their
+  job: "security guard", "bartender", not slang for it.
 - NO FIGURES OF SPEECH. No clever lines, no slogans, no metaphors. Say the
   plain fact instead.
 - LEAD WITH THE POINT. At most two short paragraphs around a table, then the

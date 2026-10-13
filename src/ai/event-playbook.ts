@@ -309,10 +309,10 @@ export const PLAYBOOK: PlaybookRow[] = [
     key: 'photography',
     stage: 'running',
     decision: 'Whether we need a photographer or videographer -- before the event for the campaign, on the night, or both -- who, the shot list, and the cost.',
-    ask: 'Do we need photos or video -- to sell it beforehand, to capture the night, or both? Who shoots it, and what must they get?',
+    ask: 'Do we need photos or video -- to sell it beforehand, to capture the night, or both? Which photographer or videographer, and what must they capture?',
     weak: 'Nobody decided, so the campaign launches on last year\'s photos and nobody films the night.',
     challenge:
-      'The campaign needs pictures before the event exists: if the posts need the room, the dishes or the team, that is a shoot with a date BEFORE the first post. The night itself is next year\'s campaign. Settle: needed or not, before and/or on the night, who shoots it, a short shot list, and the cost as a line in the P&L. PROPOSE it from the content plan and what the posts need. "No" is a valid answer and settles it.',
+      'The campaign needs pictures before the event exists: if the posts need the room, the dishes or the team, that is a shoot with a date BEFORE the first post. The night itself is next year\'s campaign. Settle: needed or not, before and/or on the night, which photographer or videographer, a short shot list, and the cost as a line in the P&L. PROPOSE it from the content plan and what the posts need. "No" is a valid answer and settles it.',
     measurable: false,
     sharpen_with: ['query_post_patterns', 'query_top_posts'],
     blocking: true,
