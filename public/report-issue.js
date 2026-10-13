@@ -80,7 +80,8 @@ function injectStyles() {
     #ri-sheet button { border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer; border: 1px solid var(--border);
       background: transparent; color: var(--text); }
     #ri-sheet button.ri-send { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-    #ri-sheet button:disabled { opacity: .6; cursor: default; }
+    #ri-sheet button:disabled { opacity: .85; cursor: default; }
+    #ri-sheet button .eye-busy { margin-right: 4px; vertical-align: -3px; }
     #ri-sheet .ri-msg { font-size: 13px; margin-top: 8px; color: var(--error); }
     #ri-sheet .ri-done { color: var(--success); font-size: 15px; line-height: 1.5; }
   `;
@@ -126,7 +127,7 @@ export function openReport(ctx) {
       msg.hidden = false; box.focus();
       return;
     }
-    btn.disabled = true; btn.textContent = 'Sending…'; msg.hidden = true;
+    btn.disabled = true; btn.innerHTML = (window.eyeBusy ? window.eyeBusy(18) + ' ' : '') + 'Sending…'; msg.hidden = true;
     try {
       const res = await fetch('/api/report', {
         method: 'POST',

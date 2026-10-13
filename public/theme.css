@@ -129,3 +129,28 @@ select:focus { outline: none; border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .sauron-watch video { display: none; }
 }
+
+/*
+ * The Eye at work (/eye-busy.js): glances left, right and back, and blinks.
+ * Two cycles of different lengths, so the blink lands on a different glance
+ * each time rather than repeating like a metronome. Translations are in the
+ * logo's own units; 140 tucks the pupil just under the flames.
+ */
+.eye-busy { display: inline-block; vertical-align: middle; flex-shrink: 0; overflow: visible; }
+.eye-busy .eb-pupil { animation: eb-look 3.4s ease-in-out infinite; }
+.eye-busy .eb-lids { transform-box: fill-box; transform-origin: center; animation: eb-blink 4.3s ease-in-out infinite; }
+.eye-busy.long .eb-pupil { animation-duration: 1.9s; }
+@keyframes eb-look {
+  0%, 10% { transform: translateX(0); }
+  25%, 40% { transform: translateX(-140px); }
+  58%, 72% { transform: translateX(140px); }
+  88%, 100% { transform: translateX(0); }
+}
+@keyframes eb-blink {
+  0%, 88%, 100% { transform: scaleY(1); }
+  92% { transform: scaleY(0.08); }
+  95% { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eye-busy .eb-pupil, .eye-busy .eb-lids { animation: none; }
+}

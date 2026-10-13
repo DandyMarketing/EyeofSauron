@@ -29,6 +29,7 @@
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<script src="/eye-busy.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -407,25 +408,17 @@
 
   .typing {
     display: flex;
-    gap: 4px;
-    padding: 4px 0;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+    color: var(--text-muted);
+    font-size: 14px;
   }
-
-  .typing span {
-    width: 6px;
-    height: 6px;
-    background: var(--accent);
-    border-radius: 50%;
-    opacity: 0.4;
-    animation: pulse 1.4s infinite;
-  }
-
-  .typing span:nth-child(2) { animation-delay: 0.2s; }
-  .typing span:nth-child(3) { animation-delay: 0.4s; }
 
   @keyframes pulse {
     0%, 80%, 100% { opacity: 0.4; transform: scale(1); }
     40% { opacity: 1; transform: scale(1.2); }
+  }
   }
 
   /**
@@ -456,6 +449,7 @@
   }
 
   .progress-live::-webkit-details-marker { display: none; }
+  .progress-eye { display: inline-flex; flex-shrink: 0; }
 
   .progress-now { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 
@@ -1368,7 +1362,8 @@ function createProgress() {
 
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  // The Eye at work (/eye-busy.js) in place of the three dots it replaced.
+  bubble.innerHTML = '<div class="typing">' + (window.eyeBusy ? window.eyeBusy(26) : '') + '<span>Thinking…</span></div>';
 
   msg.appendChild(avatar);
   msg.appendChild(bubble);
@@ -1411,7 +1406,8 @@ function createProgress() {
     const summary = document.createElement('summary');
     summary.className = 'progress-live';
     live = document.createElement('span');
-    live.className = 'dot';
+    live.className = 'progress-eye';
+    live.innerHTML = (window.eyeBusy ? window.eyeBusy(22) : '');
     liveText = document.createElement('span');
     liveText.className = 'progress-now';
     count = document.createElement('span');

@@ -1335,3 +1335,20 @@ test('the Eye is the mark everywhere, and the tower plays where it should', () =
   const theme = readFileSync('public/theme.css', 'utf8');
   assert.match(theme, /prefers-reduced-motion: reduce\)\s*\{\s*\.sauron-watch video \{ display: none; \}/, 'reduced motion must stop the tower');
 });
+
+test('a page that shows the working Eye loads it', () => {
+  /**
+   * The working eye (Khai, 13 Oct 2026) is drawn by /eye-busy.js. A page that
+   * calls window.eyeBusy without loading the script degrades to no animation
+   * at all -- quietly, which is the failure this guards: the call sites check
+   * for the function so nothing breaks, so nothing would say it was missing.
+   */
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    if (!html.includes('eyeBusy(')) continue;
+    assert.match(html, /<script src="\/eye-busy\.js"><\/script>/, `${page} shows the working eye but does not load /eye-busy.js`);
+  }
+  const css = readFileSync('public/theme.css', 'utf8');
+  assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.eye-busy \.eb-pupil, \.eye-busy \.eb-lids \{ animation: none; \}/, 'reduced motion must still the working eye');
+  assert.match(readFileSync('public/eye-busy.js', 'utf8'), /class="eb-pupil"/, 'the pupil has to be its own shape to move');
+});

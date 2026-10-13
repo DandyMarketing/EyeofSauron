@@ -30,6 +30,7 @@
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<script src="/eye-busy.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -109,14 +110,9 @@
   .intro li { margin: 4px 0; }
 
   .thinking { color: var(--text-muted); font-size: 15px; padding: 8px 0; }
-  .draft-progress .pulse {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px;
-    background: var(--accent); vertical-align: middle; animation: dp-pulse 1.2s ease-in-out infinite;
-  }
   .draft-progress .stage { color: var(--text); }
   .draft-progress .elapsed { margin-left: 6px; font-variant-numeric: tabular-nums; }
   .draft-progress .note { font-size: 13px; margin-top: 2px; }
-  @keyframes dp-pulse { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
   .err { color: var(--error); font-size: 15px; padding: 10px 0; }
 
   footer {
@@ -249,7 +245,8 @@
   @media (max-width: 640px) { #monday-sheet tr.md-sub { margin-left: 16px; width: calc(100% - 16px); box-sizing: border-box; border-left: 2px solid var(--accent); } }
   #monday-sheet .md-arrow { color: var(--text-muted); margin-right: 4px; }
   #monday-sheet .md-progress { font-size: 14px; line-height: 1.5; }
-  #monday-sheet .md-clock { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  #monday-sheet .md-clock { font-size: 13px; color: var(--text-muted); }
+  #monday-sheet .md-working { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   #monday-sheet .md-detail { display: block; font-weight: 400; color: var(--text-muted); font-size: 13px; margin-top: 2px; }
   #monday-sheet tr.md-parent .md-task { font-weight: 600; }
   #monday-sheet .md-parent-pick { max-width: 100%; }
@@ -564,7 +561,7 @@ async function send() {
   addMessage('You', 'planner', '<p>' + escapeHtml(message).replace(/\n/g, '<br>') + '</p>');
   setBusy(true);
 
-  const pending = addMessage('Planner', 'agent', '<div class="thinking">Thinking, and checking the figures…</div>');
+  const pending = addMessage('Planner', 'agent', '<div class="thinking">' + (window.eyeBusy ? window.eyeBusy(24) : '') + ' Thinking, and checking the figures…</div>');
 
   try {
     const res = await fetch('/api/plan', {
@@ -944,7 +941,7 @@ async function openMonday(eventId, venues, d) {
   };
 
   const runPreview = async () => {
-    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board, fitting the deadlines to the plan, and grouping the tasks. Nothing is written yet. This usually takes under a minute.</div><div class="md-clock"></div>';
+    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board, fitting the deadlines to the plan, and grouping the tasks. Nothing is written yet. This usually takes under a minute.</div><div class="md-working">' + (window.eyeBusy ? window.eyeBusy(24) : '') + '<span class="md-clock"></span></div>';
     // A clock, so a long preview reads as working rather than stalled.
     const started = Date.now();
     const clockEl = sheet.querySelector('.md-clock');
@@ -1177,7 +1174,7 @@ async function openMonday(eventId, venues, d) {
     const started = Date.now();
     let lastStep = Date.now();
     const lines = {};
-    msg.innerHTML = '<div class="md-progress"></div><div class="md-clock"></div>';
+    msg.innerHTML = '<div class="md-progress"></div><div class="md-working">' + (window.eyeBusy ? window.eyeBusy(24) : '') + '<span class="md-clock"></span></div>';
     const prog = msg.querySelector('.md-progress'), clock = msg.querySelector('.md-clock');
     const mmss = ms => { const t = Math.floor(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
     const drawClock = () => {
@@ -1370,7 +1367,7 @@ async function prepareDraft(force) {
    * the server reading the brief as it streams; the clock only says how long.
    */
   const pending = addMessage('Planner', 'agent',
-    '<div class="thinking draft-progress"><span class="pulse"></span><span class="stage">Reading the conversation</span>…' +
+    '<div class="thinking draft-progress">' + (window.eyeBusy ? window.eyeBusy(24) : '') + ' <span class="stage">Reading the conversation</span>…' +
     ' <span class="elapsed">0:00</span><div class="note">Long plans take a minute or two.</div></div>');
   const started = Date.now();
   const tick = setInterval(() => {

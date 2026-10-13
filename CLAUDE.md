@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 62 migrations, 25 query tools, 11 ingest sources, 1,587 tests.
+started.** 62 migrations, 25 query tools, 11 ingest sources, 1,588 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1121,6 +1121,18 @@ last frame, the model held still for five seconds. Giving it the two ENDS of
 the swing -- beam left, beam right -- forced the sweep; the loop is made by
 reversing, not asked of the model.
 
+**The Eye at work** (Khai, same day: "the eye blinking and looking around" as
+the processing animation) is the logo itself, animated in code by
+`/eye-busy.js` with its motion in `theme.css`: the pupil glances left and
+right and the eye blinks, on two cycles of different length so the blink
+lands somewhere new each time. It replaced the chat's three dots and the
+empty marker on its live step, the planner's pulse while thinking and while
+the brief is built, and sits beside the Monday preview's and send's clocks
+and the report window's "Sending". After 20 seconds it looks around faster,
+so a long wait still looks alive. Code, not a video, because it sits beside a
+line of text at 22 px where a video would blur. The pupil is drawn UNDER the
+flame shapes so a sideways glance tucks behind them like a lid.
+
 **Before Sauron is sold (Phase 4), check the name and the Eye.** Both come
 from Tolkien, whose estate and the film studios defend them. Fine for an
 internal tool; a product carrying them needs advice first. The mark was drawn
@@ -1207,7 +1219,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,587 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,588 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
