@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { describeLastSeen } from './last-seen.js';
+import { describeLastSeen, latestOf } from './last-seen.js';
 
 const NOW = Date.parse('2026-10-03T12:00:00Z');
 const daysAgo = (n: number) => new Date(NOW - n * 24 * 60 * 60 * 1000).toISOString();
@@ -52,4 +52,14 @@ test('an unparseable value is treated as never, not as a crash', () => {
   assert.equal(describeLastSeen('not a date', NOW).tone, 'never');
   assert.equal(describeLastSeen(undefined, NOW).tone, 'never');
   assert.equal(describeLastSeen('', NOW).tone, 'never');
+});
+
+test('last seen is the later of using Sauron and signing in (13 Oct 2026: "I saw Lukasz logged in today")', () => {
+  // Signed in weeks ago, used this morning: the use is what counts.
+  assert.equal(latestOf('2026-10-13T02:00:00Z', '2026-09-20T09:00:00Z'), '2026-10-13T02:00:00Z');
+  // Not seen since use began to be recorded: the sign-in still counts.
+  assert.equal(latestOf(null, '2026-09-20T09:00:00Z'), '2026-09-20T09:00:00Z');
+  assert.equal(latestOf('2026-10-13T02:00:00Z', null), '2026-10-13T02:00:00Z');
+  assert.equal(latestOf(null, undefined), null);
+  assert.equal(latestOf('garbage', '2026-09-20T09:00:00Z'), '2026-09-20T09:00:00Z');
 });

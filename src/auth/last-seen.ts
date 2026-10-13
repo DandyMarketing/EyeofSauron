@@ -56,3 +56,12 @@ export function describeLastSeen(iso: string | null | undefined, now: number = D
   const years = Math.floor(days / 365);
   return { text: `${years} year${years === 1 ? '' : 's'} ago`, tone: 'dormant' };
 }
+
+/** The later of two timestamps, either of which may be missing or unreadable. */
+export function latestOf(a: string | null | undefined, b: string | null | undefined): string | null {
+  const ta = a ? Date.parse(a) : NaN;
+  const tb = b ? Date.parse(b) : NaN;
+  if (Number.isNaN(ta)) return Number.isNaN(tb) ? null : b!;
+  if (Number.isNaN(tb)) return a!;
+  return ta >= tb ? a! : b!;
+}

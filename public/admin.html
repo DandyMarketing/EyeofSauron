@@ -1707,7 +1707,7 @@ function fillUsers(usersSection, users) {
       <div class="u-who"><div class="u-name">${esc(user.full_name || '—')}${isSelf ? ' <span class="muted">(you)</span>' : ''}</div><div class="u-email">${esc(user.email)}</div></div>
       <div class="u-access">${access}</div>
       <div class="u-status">
-        <div class="last-seen last-seen-${esc(seen.tone)}" title="${esc(seen.error || user.last_sign_in_at || 'No sign-in recorded')}">${esc(seen.tone === 'unknown' || seen.tone === 'never' ? seen.text : 'Seen ' + seen.text.toLowerCase())}</div>
+        <div class="last-seen last-seen-${esc(seen.tone)}" title="${esc(seen.error || ('Last used: ' + (user.last_active_at ? new Date(user.last_active_at).toLocaleString('en-SG') : 'not recorded yet') + ' · Last signed in: ' + (user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString('en-SG') : 'never')))}">${esc(seen.tone === 'unknown' || seen.tone === 'never' ? seen.text : 'Seen ' + seen.text.toLowerCase())}</div>
         <div class="u-terms">${terms}</div>
       </div>
       <div class="u-act"><button class="btn btn-small btn-outline" onclick="toggleManage('${user.id}')">${openManage.has(user.id) ? 'Close' : 'Manage'}</button></div>

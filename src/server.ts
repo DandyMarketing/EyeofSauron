@@ -62,7 +62,7 @@ import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
 import { fetchSections } from './lib/staffany-client.js';
-import { validateSession, listUsers, inviteUser, renameUser, assignRole, removeRole, deleteUser, resetUserPassword, acceptTerms, supabaseAdmin } from './auth/session.js';
+import { validateSession, noteActivity, listUsers, inviteUser, renameUser, assignRole, removeRole, deleteUser, resetUserPassword, acceptTerms, supabaseAdmin } from './auth/session.js';
 import { TERMS_VERSION, TERMS_TITLE, TERMS_BODY } from './auth/terms.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -178,7 +178,10 @@ async function requireAuth(c: any): Promise<SessionUser | null> {
   const auth = c.req.header('Authorization');
   if (!auth?.startsWith('Bearer ')) return null;
   const token = auth.slice(7);
-  return validateSession(token);
+  const user = await validateSession(token);
+  // When they last USED Sauron, for "last seen" on the admin page.
+  if (user) noteActivity(user.id);
+  return user;
 }
 
 async function requireOwner(c: any): Promise<SessionUser | null> {

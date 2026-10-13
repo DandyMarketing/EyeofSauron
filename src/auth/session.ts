@@ -3,7 +3,7 @@ import { selectAll } from '../lib/paged.js';
 import { rowCapFetch } from '../lib/paged.js';
 import { hasAcceptedCurrentTerms, termsAcceptanceSummary, TERMS_VERSION } from './terms.js';
 import { SessionCache, SingleFlight } from './session-cache.js';
-import { describeLastSeen } from './last-seen.js';
+import { describeLastSeen, latestOf } from './last-seen.js';
 
 const url = process.env.SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -84,6 +84,32 @@ const inflight = new SingleFlight<SessionUser | null>();
  */
 export function forgetSessions(userId?: string): void {
   sessionCache.forget(userId);
+}
+
+/**
+ * When somebody last USED Sauron (migration 062), as opposed to when they last
+ * signed in -- a session lasts for weeks, so the sign-in time said nothing
+ * about daily use (Khai, 13 Oct 2026: "I saw Lukasz logged in today").
+ *
+ * Called on every signed-in request and written at most once every ten
+ * minutes per person per server, so use costs one small write per person per
+ * ten minutes. Never awaited and never fails a request: it is a note, not a
+ * gate. A failure is logged once, not on every request.
+ */
+const ACTIVITY_EVERY_MS = 10 * 60 * 1000;
+const lastNoted = new Map<string, number>();
+let activityWarned = false;
+export function noteActivity(userId: string, now: number = Date.now()): void {
+  if (now - (lastNoted.get(userId) ?? 0) < ACTIVITY_EVERY_MS) return;
+  lastNoted.set(userId, now);
+  void Promise.resolve(
+    supabaseAdmin.from('profiles').update({ last_active_at: new Date(now).toISOString() }).eq('id', userId),
+  ).then(({ error }) => {
+    if (error && !activityWarned) {
+      activityWarned = true;
+      console.warn(`[users] could not record activity (is migration 062 applied?): ${error.message}`);
+    }
+  }).catch(() => { /* a note, never a failure */ });
 }
 
 export async function validateSession(accessToken: string): Promise<SessionUser | null> {
@@ -229,9 +255,15 @@ async function lastSignIns(): Promise<{ seen: Map<string, string | null>; error:
 }
 
 export async function listUsers() {
-  const { data: profiles } = await selectAll(() => supabaseAdmin
+  // last_active_at is migration 062; read without it until that is applied.
+  let { data: profiles, error: profilesError } = await selectAll(() => supabaseAdmin
     .from('profiles')
-    .select('id, email, full_name, created_at'));
+    .select('id, email, full_name, created_at, last_active_at'));
+  if (profilesError && /last_active_at/.test(profilesError.message)) {
+    ({ data: profiles } = await selectAll(() => supabaseAdmin
+      .from('profiles')
+      .select('id, email, full_name, created_at')));
+  }
 
   const { seen: signedIn, error: signInError } = await lastSignIns();
 
@@ -276,11 +308,18 @@ export async function listUsers() {
      * The read failing used to leave the map empty, which drew a confident
      * wrong answer on every row. Now the row says it does not know, and why.
      */
-    last_seen: signInError
-      ? { text: 'Unknown', tone: 'unknown', error: signInError }
-      : signedIn.has(p.id)
-        ? describeLastSeen(signedIn.get(p.id) ?? null)
-        : { text: 'No login account', tone: 'never' },
+    last_active_at: p.last_active_at ?? null,
+    /**
+     * The LATER of when they last used Sauron and when they last signed in.
+     * Use is what "last seen" means; the sign-in still counts for anyone not
+     * seen since use began to be recorded.
+     */
+    last_seen: (() => {
+      const seen = latestOf(p.last_active_at ?? null, signedIn.get(p.id) ?? null);
+      if (seen) return describeLastSeen(seen);
+      if (signInError) return { text: 'Unknown', tone: 'unknown', error: signInError };
+      return signedIn.has(p.id) ? describeLastSeen(null) : { text: 'No login account', tone: 'never' };
+    })(),
     terms: termsAcceptanceSummary((acceptances ?? []).filter((a: any) => a.user_id === p.id), !!termsError),
     roles: (allRoles ?? [])
       .filter((r: any) => r.user_id === p.id)
