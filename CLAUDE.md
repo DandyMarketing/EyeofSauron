@@ -1135,6 +1135,15 @@ values, and the only option, because the SVG is all that was kept. The series
 palette keeps each slot's hue (orange, blue, green, purple, gold, red), each
 darkened to hold 3:1 on white.
 
+**Every chart opens full screen** (Khai, 13 Oct 2026: "too small to see",
+phone and computer). `/chart-zoom.js` is one viewer for the dashboard, Weekly
+Recommends and Query (Query's own modal is gone). Charts are drawn about 720
+wide, so on a 390 px phone every label is at half size: the viewer opens a
+chart at its OWN width when the screen is narrower -- labels at their drawn
+size, scrolling sideways -- and fits it when wider; + and - zoom, pinch still
+works, and the phone's Back closes it rather than leaving the page. Each chart
+shows an expand mark in its corner (always on a phone, on hover with a mouse).
+
 ### The mark: the Eye, and its tower, settled 13 Oct 2026
 
 Khai: "since I called it Sauron I would love the logo to be the eye of Sauron."

@@ -1531,3 +1531,21 @@ test('the phone sidebar\'s dimming sits beside the sidebar, never above it', () 
   assert.match(js, /opts\.aside\.parentNode\.insertBefore\(overlay, opts\.aside\)/);
   assert.ok(!/document\.body\.appendChild\(overlay\)/.test(js), 'the overlay is back on <body>, above a fixed shell');
 });
+
+test('every page that draws a chart can open it full screen', () => {
+  /**
+   * Khai, 13 Oct 2026: "All charts need to be expandable on mobile and
+   * computer because it's too small to see". One viewer, /chart-zoom.js, for
+   * every chart container; Query's own modal is gone so a tap opens one view.
+   */
+  for (const page of ['index.html', 'briefing.html', 'chat.html']) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<script src="\/chart-zoom\.js" defer><\/script>/, `${page} draws charts nobody can enlarge`);
+  }
+  assert.match(readFileSync('public/briefing.html', 'utf8'), /'<div class="zoom-chart">' \+ c\.svg/, "a recommendation's chart is not zoomable");
+  assert.ok(!/chart-modal/.test(readFileSync('public/chat.html', 'utf8')), 'Query still carries its old viewer as well');
+  const js = readFileSync('public/chart-zoom.js', 'utf8');
+  // On a narrow screen a chart opens at the width it was drawn, not squeezed to fit.
+  assert.match(js, /size\(natural > fit \? natural : fit\)/);
+  assert.match(js, /ZOOMABLE = '\.chart-card, \.chart, \.ask-chart, \.zoom-chart'/);
+});

@@ -276,62 +276,11 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 14px;
-    cursor: zoom-in;
-    position: relative;
     transition: border-color 0.15s;
   }
   .chart-card:hover { border-color: var(--accent-dim); }
   .chart-card svg { display: block; width: 100%; height: auto; }
-  .chart-card::after {
-    content: 'Click to enlarge';
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    font-size: 13px;
-    color: var(--text-muted);
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .chart-card:hover::after { opacity: 1; }
 
-  /* Full-screen chart view */
-  #chart-modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(246,242,236,0.97);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
-    z-index: 1000;
-    cursor: zoom-out;
-  }
-  #chart-modal.open { display: flex; }
-  #chart-modal-inner {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 20px 24px;
-    width: 100%;
-    max-width: 1200px;
-    max-height: 90vh;
-    overflow: auto;
-    cursor: default;
-  }
-  #chart-modal-inner svg { display: block; width: 100%; height: auto; }
-  #chart-modal-close {
-    position: absolute;
-    top: 20px;
-    right: 26px;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 26px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 4px 10px;
-  }
-  #chart-modal-close:hover { color: var(--text); }
 
   .bubble code {
     background: rgba(46,42,37,0.06);
@@ -382,7 +331,7 @@
     html, body { background: #fff !important; color: #14181f !important; height: auto; }
     #app-shell { position: static; overflow: visible; display: block; }
     header, #composer, .input-row, #model-row, .teach-bar, .export-btn,
-    .tool-indicator, #chart-modal, .welcome { display: none !important; }
+    .tool-indicator, #zoom-view, .welcome { display: none !important; }
 
     #chat { overflow: visible; padding: 0; display: block; }
     .message { display: block; max-width: none; }
@@ -893,10 +842,6 @@
   </div><!-- #workspace -->
 </div>
 
-<div id="chart-modal" aria-hidden="true">
-  <button id="chart-modal-close" aria-label="Close chart">&times;</button>
-  <div id="chart-modal-inner"></div>
-</div>
 
 <!--
   The ONE markdown renderer, shared by every page that shows an answer.
@@ -907,6 +852,7 @@
 <script src="/markdown.js"></script>
 <!-- The saved-conversations sidebar, shared with the planner. -->
 <script src="/conv-sidebar.js"></script>
+<script src="/chart-zoom.js" defer></script>
 <script>
 const chat = document.getElementById('chat');
 const input = document.getElementById('question');
@@ -1141,35 +1087,8 @@ function escapeHtml(text) {
 }
 
 
-// Charts render small inline to keep the conversation readable, so a click
-// opens the same SVG at full width. The SVG has a viewBox, so it scales
-// cleanly rather than being re-rendered at a second size.
-function openChart(svgHtml) {
-  const modal = document.getElementById('chart-modal');
-  document.getElementById('chart-modal-inner').innerHTML = svgHtml;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
-function closeChart() {
-  const modal = document.getElementById('chart-modal');
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
-  document.getElementById('chart-modal-inner').innerHTML = '';
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const modal = document.getElementById('chart-modal');
-  if (!modal) return;
-  // Backdrop closes; clicks inside the panel do not bubble out and close it.
-  modal.addEventListener('click', closeChart);
-  document.getElementById('chart-modal-inner').addEventListener('click', e => e.stopPropagation());
-  document.getElementById('chart-modal-close').addEventListener('click', closeChart);
-});
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeChart();
-});
+// Charts open full screen on a tap or click: /chart-zoom.js, shared with the
+// dashboard and Weekly Recommends.
 
 /**
  * "Teach Sauron this" — capture a lesson where it is actually created.
@@ -1688,7 +1607,6 @@ async function openConversation(id) {
       wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
       const card = wrap.querySelector('.chart-card');
       card.title = chart.title || 'Chart';
-      card.addEventListener('click', () => openChart(card.innerHTML));
       chat.appendChild(wrap);
     }
 
@@ -1789,8 +1707,7 @@ async function send() {
         wrap.innerHTML = '<div class="avatar"></div><div class="chart-card">' + chart.svg + '</div>';
         const card = wrap.querySelector('.chart-card');
         card.title = chart.title || 'Chart';
-        card.addEventListener('click', () => openChart(card.innerHTML));
-        chat.appendChild(wrap);
+          chat.appendChild(wrap);
       }
     }
 

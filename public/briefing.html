@@ -577,7 +577,7 @@ function renderPeriod(key, rows, withheld, isLatest) {
 }
 
 function renderRecommendation(r) {
-  const charts = (r.charts || []).map(c => '<div>' + c.svg + '</div>').join('');
+  const charts = (r.charts || []).map(c => '<div class="zoom-chart">' + c.svg + '</div>').join('');
   return '' +
     '<div class="rec' + (r.status === 'dismissed' ? ' dismissed' : '') + '" id="rec-' + r.id + '">' +
       '<div class="rec-head">' +
@@ -758,5 +758,6 @@ function escapeHtml(text) {
 
 
 </script>
+<script src="/chart-zoom.js" defer></script>
 </body>
 </html>
