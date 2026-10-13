@@ -335,9 +335,10 @@ export async function createGroupWithItems(
         r = await makeSub(item, pid, false);
         notes.push(`"${item.name}" was added without its people: Monday refused one of them. Assign it on the board.`);
       }
+      // Not added to `under`: that holds what was there BEFORE this send, so
+      // two tasks with the same name (one per person, as the plan sometimes
+      // writes them) are both made rather than the second skipped.
       itemIds[i] = String(r.create_subitem.id);
-      under.add(key(item.name));
-      subNames.set(pid, under);
       created++;
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
