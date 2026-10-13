@@ -304,6 +304,18 @@ header.site-header #cs-menu { width: 32px; height: 32px; min-height: 0; }
   header.site-header nav.site-nav { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: -8px; }
 }
 
+/* Settings (the admin console), owners only: a cog beside the light/dark
+   switch, the same round button, rather than a word in the menu. */
+header nav.site-nav a.nav-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; min-height: 0; padding: 0; margin-left: 2px;
+  border: 1px solid var(--border); border-radius: 50%; background: var(--surface);
+}
+header nav.site-nav a.nav-icon:hover { color: var(--text); background: var(--surface-hover); }
+header nav.site-nav a.nav-icon.active { color: var(--accent); border-color: var(--accent); }
+header nav.site-nav a.nav-icon[hidden] { display: none; }
+header nav.site-nav a.nav-icon svg { width: 18px; height: 18px; }
+
 /* The light/dark switch in the menu: a moon in the light, a sun in the dark. */
 .theme-toggle {
   display: inline-flex; align-items: center; justify-content: center;

@@ -1405,10 +1405,12 @@ test('every page carries the same menu, in the same order', () => {
     const html = readFileSync(`public/${page}`, 'utf8');
     const nav = html.match(/<nav class="site-nav">([\s\S]*?)<\/nav>/);
     assert.ok(nav, `${page} does not use the shared menu`);
-    return [page, nav![1].replace(/ class="active"/g, '').replace(/ hidden(?=[ >])/g, '').replace(/\s+/g, ' ').trim()] as const;
+    return [page, nav![1].replace(/ class="active"/g, '').replace(/ active(?=")/g, '').replace(/ hidden(?=[ >])/g, '').replace(/\s+/g, ' ').trim()] as const;
   });
   for (const [page, menu] of menus) assert.equal(menu, menus[0][1], `${page}'s menu differs from the dashboard's`);
-  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan easier.*Daily.*Admin.*Logout/);
+  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan easier.*Daily.*aria-label="Settings".*Logout/);
+  // Settings is a cog, not a word (Khai, 13 Oct 2026), and still named for a screen reader.
+  assert.ok(!/>Admin</.test(menus[0][1]), 'the menu still says Admin');
 });
 
 test('every page picks light or dark before it draws', () => {
