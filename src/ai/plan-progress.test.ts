@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide, boardNote, cleanPrevious, withPrevious } from './plan-progress.js';
+import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './plan-progress.js';
 import { PLAYBOOK } from './event-playbook.js';
 
 test('every playbook decision has a short label, and the tool offers exactly the playbook keys', () => {
@@ -133,4 +133,36 @@ test('the board note carries what is missing, so the planner asks for exactly th
 test('a parked task settles its decision rather than holding it open', () => {
   const settled = progressTool().input_schema.properties.settled as any;
   assert.match(settled.description, /PARKED as a task with an owner and a date[\s\S]*is SETTLED/);
+});
+
+test('a decision the person marks as decided is decided, and only they can undo it', () => {
+  // Khai, 13 Oct 2026: the board kept listing the DJ's name after he had parked it.
+  const reading = {
+    settled: [{ key: 'objective', summary: '$30,000 at 20% net' }],
+    partial: [{ key: 'owners_and_deadlines', agreed: 'all tasks', missing: "the rooftop act's name" }],
+    reopened: [{ key: 'owners_and_deadlines', why: 'model thinks so' }],
+    not_applicable: [], waiting_on: [], next: 'owners_and_deadlines',
+  };
+  const manual = toggleManual([], 'owners_and_deadlines', true);
+  const p = summariseProgress(applyManual(reading, manual));
+  const own = p.settled.find(d => d.key === 'owners_and_deadlines')!;
+  assert.equal(own.by_you, true);
+  assert.equal(p.open.some(o => o.key === 'owners_and_deadlines'), false);
+  assert.deepEqual(p.reopened, [], 'a later reading cannot reopen a hand mark');
+  assert.notEqual(p.next?.key, 'owners_and_deadlines');
+  assert.equal(p.settled.find(d => d.key === 'objective')!.by_you, undefined);
+
+  // Undo puts it back to whatever the reading says.
+  const undone = summariseProgress(applyManual(reading, toggleManual(manual, 'owners_and_deadlines', false)));
+  assert.ok(undone.open.some(o => o.key === 'owners_and_deadlines'));
+
+  assert.deepEqual(toggleManual(['objective'], 'not_a_decision', true), ['objective']);
+});
+
+test('the saved board comes back in one piece, and junk saved reads as nothing', () => {
+  const stored = parseStored({ reading: { settled: [{ key: 'objective', summary: 'x' }] }, manual: ['channels', 'bogus', 'channels'] });
+  assert.deepEqual(stored!.manual, ['channels']);
+  assert.ok(stored!.reading);
+  assert.equal(parseStored(null), null);
+  assert.equal(parseStored('text'), null);
 });

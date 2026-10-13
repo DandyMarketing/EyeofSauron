@@ -319,3 +319,33 @@ export function inTurnOrder<T extends { role: string; created_at: string }>(rows
     .sort((a, b) => (a.t - b.t) || ((a.r.role === 'user' ? 0 : 1) - (b.r.role === 'user' ? 0 : 1)) || (a.i - b.i))
     .map(x => x.r);
 }
+
+/**
+ * The progress board's saved reading of one plan (migration 056).
+ *
+ * Owner-only, like rename and delete: the user_id filter is the control. A
+ * missing column -- migration 056 not yet run -- reads as "no saved reading"
+ * and the board simply starts fresh, as it did before; it never breaks the
+ * plan.
+ */
+export async function getPlanProgress(userId: string, id: string): Promise<unknown | null> {
+  // row-cap: one conversation by id.
+  const { data, error } = await supabaseAdmin
+    .from('conversations')
+    .select('progress')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) { console.error(`[conversations] progress read failed (is migration 056 applied?): ${error.message}`); return null; }
+  return (data as any)?.progress ?? null;
+}
+
+export async function savePlanProgress(userId: string, id: string, progress: unknown): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('conversations')
+    .update({ progress })
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) { console.error(`[conversations] progress save failed (is migration 056 applied?): ${error.message}`); return false; }
+  return true;
+}

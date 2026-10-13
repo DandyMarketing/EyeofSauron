@@ -158,7 +158,7 @@ export function progressTool() {
 }
 
 export interface PlanProgress {
-  settled: Array<{ key: string; label: string; stage: Stage; summary: string }>;
+  settled: Array<{ key: string; label: string; stage: Stage; summary: string; by_you?: boolean }>;
   open: Array<{ key: string; label: string; hint: string; stage: Stage; blocking: boolean; partial?: { agreed: string; missing: string } }>;
   not_applicable: string[];
   waiting_on: Array<{ item: string; who: string | null }>;
@@ -241,8 +241,12 @@ export function summariseProgress(raw: unknown, rows: PlaybookRow[] = PLAYBOOK):
     (Array.isArray(r.not_applicable) ? r.not_applicable : []).filter((k: string) => byKey.has(k) && !settledMap.has(k)),
   );
 
+  const manual = new Set<string>(Array.isArray(r.manual) ? r.manual : []);
   const settled = rows.filter(row => settledMap.has(row.key))
-    .map(row => ({ key: row.key, label: label(row.key), stage: row.stage, summary: settledMap.get(row.key)! }));
+    .map(row => ({
+      key: row.key, label: label(row.key), stage: row.stage, summary: settledMap.get(row.key)!,
+      ...(manual.has(row.key) ? { by_you: true } : {}),
+    }));
   const partials = new Map<string, { agreed: string; missing: string }>();
   for (const pt of Array.isArray(r.partial) ? r.partial : []) {
     if (pt && byKey.has(pt.key) && !settledMap.has(pt.key) && !partials.has(pt.key) && String(pt.missing ?? '').trim()) {
@@ -328,4 +332,48 @@ export function boardNote(openKeys: unknown, rows: PlaybookRow[] = PLAYBOOK): st
   if (unique.length === 0) return '';
   const lines = unique.map(k => `- ${DECISION_LABELS[k] ?? k}: ${byKey.get(k)!.decision}${missing.has(k) ? ` MISSING: ${missing.get(k)}` : ''}`);
   return `\n\n[PROGRESS BOARD -- read from this conversation by a second pass, shown to the person. Still open and blocking:\n${lines.join('\n')}\nWhile anything is listed here, do not call the plan ready, complete, locked or confirmed, and do not say every blocking decision is closed. Answer the message above first, then take the next of these.]`;
+}
+
+/**
+ * What is saved on the conversation (migration 056): the board's last reading,
+ * already merged, and the decisions the person marked by hand.
+ */
+export interface StoredProgress { reading: unknown; manual: string[] }
+
+export function parseStored(raw: unknown, rows: PlaybookRow[] = PLAYBOOK): StoredProgress | null {
+  const r = raw as any;
+  if (!r || typeof r !== 'object') return null;
+  const known = new Set(rows.map(x => x.key));
+  const manual = (Array.isArray(r.manual) ? r.manual : []).filter((k: any) => typeof k === 'string' && known.has(k));
+  return { reading: r.reading ?? null, manual: [...new Set<string>(manual)] };
+}
+
+/**
+ * The person's hand marks, laid over a reading. Khai, 13 Oct 2026: the board
+ * is a model's reading of the chat, and the person is the one who knows what
+ * is settled -- so a decision they mark as decided IS decided. It cannot be
+ * reopened by a later reading, only by the person taking the mark off.
+ */
+export function applyManual(raw: unknown, manual: string[]): unknown {
+  if (!manual.length) return raw;
+  const r = { ...((raw ?? {}) as any) };
+  const marked = new Set(manual);
+  const settled: Array<{ key: string; summary: string }> = (Array.isArray(r.settled) ? r.settled : []).filter((x: any) => x && x.key);
+  const has = new Set(settled.map(x => x.key));
+  for (const k of manual) if (!has.has(k)) settled.push({ key: k, summary: 'Marked as decided by you' });
+  r.settled = settled;
+  r.not_applicable = (Array.isArray(r.not_applicable) ? r.not_applicable : []).filter((k: string) => !marked.has(k));
+  r.partial = (Array.isArray(r.partial) ? r.partial : []).filter((x: any) => !marked.has(x?.key));
+  r.reopened = (Array.isArray(r.reopened) ? r.reopened : []).filter((x: any) => !marked.has(x?.key));
+  if (marked.has(r.next)) delete r.next;
+  r.manual = manual;
+  return r;
+}
+
+/** Add or remove one hand mark. Unknown keys change nothing. */
+export function toggleManual(manual: string[], key: string, decided: boolean, rows: PlaybookRow[] = PLAYBOOK): string[] {
+  if (!rows.some(r => r.key === key)) return manual;
+  const set = new Set(manual);
+  if (decided) set.add(key); else set.delete(key);
+  return [...set];
 }

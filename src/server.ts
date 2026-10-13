@@ -34,10 +34,10 @@ import { queryTools } from './ai/tools.js';
 import {
   createConversation, appendTurn, listConversations, readConversation,
   renameConversation, deleteConversation, titleConversation,
-  isConversationKind, type ConversationKind,
+  isConversationKind, type ConversationKind, getPlanProgress, savePlanProgress,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
-import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious } from './ai/plan-progress.js';
+import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
@@ -843,12 +843,17 @@ app.post('/api/plan/progress', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ history?: ChatMessage[]; previous?: unknown }>();
+  const body = await c.req.json<{ history?: ChatMessage[]; previous?: unknown; conversation_id?: string }>();
   const history = body.history ?? [];
   if (history.length === 0) return c.json(summariseProgress(null));
-  // The last reading of this conversation, carried forward so the board does
-  // not re-decide everything from scratch on every answer.
-  const previous = cleanPrevious(body.previous);
+  // The last reading of this plan, carried forward so the board does not
+  // re-decide everything from scratch on every answer. The SAVED reading wins
+  // (migration 056) -- it survives a refresh and another device; the page's
+  // own copy is the fallback for a plan not saved yet. Hand marks are laid
+  // over it, so the model sees them as settled too.
+  const stored = body.conversation_id ? parseStored(await getPlanProgress(user.id, body.conversation_id)) : null;
+  const manual = stored?.manual ?? [];
+  const previous = cleanPrevious(stored?.reading ? applyManual(stored.reading, manual) : body.previous);
   const previousText = previous
     ? `\n\nPREVIOUS READING of this same conversation. Treat it as settled unless the conversation has since GENUINELY reopened something -- then list it in reopened with the reason. Missing it on this read is not a reason. Settled: ${previous.settled.map(p => `${p.key} (${p.summary})`).join('; ') || 'none'}. Not applicable: ${previous.not_applicable.join(', ') || 'none'}.`
     : '';
@@ -867,11 +872,49 @@ app.post('/api/plan/progress', async (c) => {
       messages: [{ role: 'user', content: `The planning conversation:\n\n${planTranscript(history)}${previousText}` }],
     });
     const call = res.content.find((b: any) => b.type === 'tool_use') as any;
-    return c.json(summariseProgress(withPrevious(call?.input, previous)));
+    const reading = withPrevious(call?.input, previous);
+    if (body.conversation_id) await savePlanProgress(user.id, body.conversation_id, { reading, manual });
+    return c.json(summariseProgress(applyManual(reading, manual)));
   } catch (e: any) {
     console.error(`[plan/progress] failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
   }
+});
+
+/**
+ * A plan's saved board, for opening it: no model call, so a reopened plan
+ * shows where it stood at once and on any device. Null when nothing is saved
+ * (a new plan, or migration 056 not yet run) -- the page then reads afresh.
+ */
+app.get('/api/plan/progress/:id', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const stored = parseStored(await getPlanProgress(user.id, c.req.param('id')));
+  if (!stored || (!stored.reading && stored.manual.length === 0)) return c.json({ progress: null });
+  return c.json({ progress: summariseProgress(applyManual(stored.reading, stored.manual)) });
+});
+
+/**
+ * The person marks a decision as decided, or takes the mark off. Their word
+ * beats the board's reading (Khai, 13 Oct 2026). Saved on the plan, so it
+ * holds across refreshes; only the person can undo it.
+ */
+app.post('/api/plan/progress/mark', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const body = await c.req.json<{ conversation_id?: string; key?: string; decided?: boolean; reading?: unknown }>().catch(() => null);
+  if (!body?.conversation_id || !body.key) return c.json({ error: 'Send a message first, so the plan is saved.' }, 400);
+  const stored = parseStored(await getPlanProgress(user.id, body.conversation_id));
+  // The page's own reading stands in when none is saved yet.
+  const reading = stored?.reading ?? withPrevious(null, cleanPrevious(body.reading));
+  const manual = toggleManual(stored?.manual ?? [], body.key, body.decided !== false);
+  const ok = await savePlanProgress(user.id, body.conversation_id, { reading, manual });
+  if (!ok) return c.json({ error: 'Could not save that. If this keeps happening, migration 056 may not have been run yet.' }, 500);
+  return c.json({ progress: summariseProgress(applyManual(reading, manual)) });
 });
 
 /**
@@ -1022,40 +1065,48 @@ app.post('/api/events', async (c) => {
     return c.json({ error: `You do not have access to: ${refused.join(', ')}` }, 403);
   }
 
-  const { data: created, error } = await supabaseAdmin
-    .from('events')
-    .insert({
-      name: d.name,
-      start_date: d.start_date,
-      end_date: d.end_date,
-      occasion: d.occasion ?? null,
-      concept_type: d.concept_type ?? null,
-      partner: d.partner ?? null,
-      format: d.format ?? null,
-      demographic: d.demographic ?? null,
-      concept: d.concept ?? null,
-      usp: d.usp ?? null,
-      venue_fit: d.venue_fit ?? null,
-      target_net_sales: d.target_net_sales ?? null,
-      target_covers: d.target_covers ?? null,
-      target_spend_per_head: d.target_spend_per_head ?? null,
-      baseline_net_sales: d.baseline_net_sales ?? null,
-      baseline_covers: d.baseline_covers ?? null,
-      baseline_spend_per_head: d.baseline_spend_per_head ?? null,
-      baseline_basis: d.baseline_basis ?? null,
-      price: d.price ?? null,
-      price_basis_food_avg: d.price_basis_food_avg ?? null,
-      price_basis_bev_avg: d.price_basis_bev_avg ?? null,
-      cost_lines: Array.isArray(d.cost_lines) ? d.cost_lines : [],
-      cost_total: d.cost_total ?? null,
-      break_even_covers: d.break_even_covers ?? null,
-      ad_budget: d.ad_budget ?? null,
-      ad_plan: d.ad_plan ?? null,
-      status: 'brief_issued',
-      created_by: user.id,
-    })
-    .select('id')
-    .single();
+  /**
+   * The brief's text and P&L are stored with the event (migration 056) -- the
+   * thing the person confirmed, not just its fields. Before 056 is run the
+   * columns do not exist and the insert would fail outright, taking the event
+   * with it; so a refusal naming them retries without them and says so.
+   */
+  const eventRow: Record<string, unknown> = {
+    name: d.name,
+    start_date: d.start_date,
+    end_date: d.end_date,
+    occasion: d.occasion ?? null,
+    concept_type: d.concept_type ?? null,
+    partner: d.partner ?? null,
+    format: d.format ?? null,
+    demographic: d.demographic ?? null,
+    concept: d.concept ?? null,
+    usp: d.usp ?? null,
+    venue_fit: d.venue_fit ?? null,
+    target_net_sales: d.target_net_sales ?? null,
+    target_covers: d.target_covers ?? null,
+    target_spend_per_head: d.target_spend_per_head ?? null,
+    baseline_net_sales: d.baseline_net_sales ?? null,
+    baseline_covers: d.baseline_covers ?? null,
+    baseline_spend_per_head: d.baseline_spend_per_head ?? null,
+    baseline_basis: d.baseline_basis ?? null,
+    price: d.price ?? null,
+    price_basis_food_avg: d.price_basis_food_avg ?? null,
+    price_basis_bev_avg: d.price_basis_bev_avg ?? null,
+    cost_lines: Array.isArray(d.cost_lines) ? d.cost_lines : [],
+    cost_total: d.cost_total ?? null,
+    break_even_covers: d.break_even_covers ?? null,
+    ad_budget: d.ad_budget ?? null,
+    ad_plan: d.ad_plan ?? null,
+    status: 'brief_issued',
+    created_by: user.id,
+  };
+  const withBrief = { ...eventRow, brief: typeof d.brief === 'string' ? d.brief.slice(0, 100_000) : null, pnl: d.pnl ?? null };
+  let { data: created, error } = await supabaseAdmin.from('events').insert(withBrief).select('id').single();
+  if (error && /\b(brief|pnl)\b/.test(error.message)) {
+    console.error(`[events] brief/pnl not stored (is migration 056 applied?): ${error.message}`);
+    ({ data: created, error } = await supabaseAdmin.from('events').insert(eventRow).select('id').single());
+  }
 
   if (error || !created) {
     console.error(`[events] insert failed for ${user.email ?? user.id}: ${error?.message}`);

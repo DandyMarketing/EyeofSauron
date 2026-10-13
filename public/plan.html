@@ -285,6 +285,12 @@
   .pg-row.open .mk { color: var(--text-muted); }
   .pg-row.wait .mk { color: var(--accent); }
   .pg-row.part .mk { color: var(--accent); }
+  .pg-row .pg-mark {
+    margin-left: auto; flex-shrink: 0; align-self: center; white-space: nowrap;
+    padding: 3px 9px; font-size: 11px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: none; color: var(--text-muted);
+  }
+  .pg-row .pg-mark:hover { border-color: var(--accent); color: var(--accent); }
   .pg-row .sum { color: var(--text-muted); }
   .pg-note { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
   .pg-busy { opacity: .6; }
@@ -1065,6 +1071,7 @@ async function refreshProgress() {
       // re-deciding everything (Khai, 13 Oct 2026: "kept fluctuating").
       body: JSON.stringify({
         history,
+        conversation_id: conversationId,
         previous: lastProgress ? {
           settled: (lastProgress.settled || []).map(d => ({ key: d.key, summary: d.summary })),
           not_applicable: lastProgress.not_applicable || [],
@@ -1104,8 +1111,11 @@ function renderProgress(p) {
   const box = document.getElementById('progress');
   const seg = (s) => '<div class="pg-seg" title="' + escapeHtml(s.label + ': ' + s.settled + ' of ' + s.applicable) + '">' +
     '<i style="width:' + (s.applicable ? Math.round(100 * s.settled / s.applicable) : 0) + '%"></i></div>';
-  const row = (cls, mk, label, sum) => '<div class="pg-row ' + cls + '"><span class="mk">' + mk + '</span><span>' +
-    escapeHtml(label) + (sum ? ' <span class="sum">— ' + escapeHtml(sum) + '</span>' : '') + '</span></div>';
+  const row = (cls, mk, label, sum, act) => '<div class="pg-row ' + cls + '"><span class="mk">' + mk + '</span><span>' +
+    escapeHtml(label) + (sum ? ' <span class="sum">— ' + escapeHtml(sum) + '</span>' : '') + '</span>' + (act || '') + '</div>';
+  // Only a saved plan can be marked: the mark is stored on it.
+  const btn = (key, decided, text) => conversationId
+    ? '<button type="button" class="pg-mark" data-key="' + escapeHtml(key) + '" data-decided="' + decided + '">' + text + '</button>' : '';
 
   const done = p.settled || [], open = p.open || [], wait = p.waiting_on || [];
   box.innerHTML =
@@ -1116,18 +1126,25 @@ function renderProgress(p) {
       '<div class="pg-bar">' + (p.stages || []).map(seg).join('') + '</div>' +
       '<div class="pg-stages">' + (p.stages || []).map(s => '<span>' + escapeHtml(s.label) + '</span>').join('') + '</div>' +
     '</summary><div class="pg-body">' +
-      (done.length ? '<h4>Decided</h4>' + done.map(d => row('done', '✓', d.label, d.summary)).join('') : '') +
+      (done.length ? '<h4>Decided</h4>' + done.map(d => d.by_you
+        ? row('done', '✓', d.label + ' (by you)', d.summary === 'Marked as decided by you' ? '' : d.summary, btn(d.key, false, 'Undo'))
+        : row('done', '✓', d.label, d.summary)).join('') : '') +
       // A decision only goes back to open with a reason, and the reason shows.
       ((p.reopened || []).length ? '<h4>Reopened</h4>' + p.reopened.map(r => row('wait', '↺', r.label, r.why)).join('') : '') +
       (wait.length ? '<h4>Waiting on someone</h4>' + wait.map(w => row('wait', '◷', w.item, w.who)).join('') : '') +
       // A decision touched but not settled says what is agreed and the one
       // thing missing, so a gap reads as a gap rather than as a fault.
       (open.length ? '<h4>Still open</h4>' + open.map(o => o.partial
-        ? row('open part', '◐', o.label + ': partly', 'Agreed: ' + o.partial.agreed + '. Missing: ' + o.partial.missing)
-        : row('open', '○', o.label, o.hint)).join('') : '') +
-      '<div class="pg-note">Read from the conversation after each answer. Tap to ' + (progressOpen ? 'close' : 'open') + '.</div>' +
+        ? row('open part', '◐', o.label + ': partly', 'Agreed: ' + o.partial.agreed + '. Missing: ' + o.partial.missing, btn(o.key, true, 'Decided'))
+        : row('open', '○', o.label, o.hint, btn(o.key, true, 'Decided'))).join('') : '') +
+      '<div class="pg-note">Read from the conversation after each answer' + (conversationId ? ', and saved with the plan. Tap Decided where you know better' : '') + '. Tap to ' + (progressOpen ? 'close' : 'open') + '.</div>' +
     '</div></details>';
   box.querySelector('details').addEventListener('toggle', (e) => { progressOpen = e.target.open; });
+  box.querySelectorAll('.pg-mark').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    markDecision(b.dataset.key, b.dataset.decided === 'true');
+  }));
 }
 
 /* --- saved plans ---------------------------------------------------------- */
@@ -1196,7 +1213,48 @@ async function openPlan(id) {
   }
   setBusy(false);
   document.getElementById('progress').innerHTML = '';
+  // The board as it was saved with this plan (migration 056): shown at once,
+  // on any device, with no fresh reading to disagree with it. A plan with
+  // nothing saved is read afresh, as before.
+  try {
+    const res = await fetch('/api/plan/progress/' + id, { headers: { Authorization: 'Bearer ' + token } });
+    const out = res.ok ? await res.json() : null;
+    if (out && out.progress && conversationId === id) {
+      lastProgress = out.progress; lastProgressKey = progressKey();
+      document.getElementById('progress').hidden = false;
+      renderProgress(out.progress);
+      return;
+    }
+  } catch (e) { /* fall through to a fresh reading */ }
   refreshProgress();
+}
+
+/**
+ * The person's word beats the board's reading (Khai, 13 Oct 2026). Saved on
+ * the plan; only the person can take a mark off again.
+ */
+async function markDecision(key, decided) {
+  if (!conversationId) return;
+  const note = document.querySelector('#progress .pg-note');
+  try {
+    const res = await fetch('/api/plan/progress/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({
+        conversation_id: conversationId, key, decided,
+        reading: lastProgress ? {
+          settled: (lastProgress.settled || []).filter(d => !d.by_you).map(d => ({ key: d.key, summary: d.summary })),
+          not_applicable: lastProgress.not_applicable || [],
+        } : null,
+      }),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) throw new Error(out.error || 'Could not save that.');
+    lastProgress = out.progress; lastProgressKey = progressKey();
+    renderProgress(out.progress);
+  } catch (e) {
+    if (note) note.textContent = String(e.message || e);
+  }
 }
 
 sendBtn.addEventListener('click', send);
