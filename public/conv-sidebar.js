@@ -103,19 +103,9 @@
     #conv-sidebar .cs-plus, #conv-sidebar.collapsed .cs-plus { display: none; }
     #conv-sidebar.cs-ready { transition: transform .2s ease; }
     #conv-sidebar.phone-open { transform: none; }
-    /*
-     * The header on a phone. The menu button, logo, title and five links on one
-     * row squeezed the title to a word a line (Khai's phone, 13 Oct 2026). The
-     * links take their own row under the title; the subtitle goes.
-     */
-    header { flex-wrap: wrap; row-gap: 8px; }
-    header > div:not(.logo) { flex: 1; min-width: 0; }
-    header h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    header .subtitle { display: none; }
-    header nav {
-      order: 3; flex-basis: 100%; margin-left: 0 !important; gap: 18px !important;
-      overflow-x: auto; white-space: nowrap;
-    }
+    /* The header on a phone is laid out by theme.css, the same on every page
+       (13 Oct 2026: rules here made the Query and Plan menus wrap differently
+       from every other page's). */
     #cs-overlay.show { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim); }
     #cs-menu {
       display: inline-flex; align-items: center; justify-content: center;

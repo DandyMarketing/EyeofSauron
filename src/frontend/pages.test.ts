@@ -1411,3 +1411,17 @@ test('every page picks light or dark before it draws', () => {
   assert.match(theme, /:root\[data-theme="dark"\] \{[^}]*--bg:/, 'theme.css has no dark palette');
   assert.match(theme, /:root\[data-theme="dark"\] svg \[fill="#2e2a25"\]/, 'stored charts would keep dark ink on a dark page');
 });
+
+test('only theme.css lays out the menu, at every width', () => {
+  /**
+   * 13 Oct 2026, Khai's phone: the Query and Plan menus broke into rows at
+   * different places from every other page, because the sidebar script on
+   * those two pages carried its own phone rules for the header. The layout
+   * now lives only in theme.css; a script that styles `header nav` again
+   * brings the shuffle back on exactly the pages it loads on.
+   */
+  const sidebar = readFileSync('public/conv-sidebar.js', 'utf8');
+  assert.doesNotMatch(sidebar, /\n\s*header nav\s*\{/, 'conv-sidebar.js styles the menu again');
+  const theme = readFileSync('public/theme.css', 'utf8');
+  assert.match(theme, /header\.site-header > div:not\(\.logo\) \{ flex: 1 1 0;/, 'a long title could push the menu onto its own row on one page only');
+});

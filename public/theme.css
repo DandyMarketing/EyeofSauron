@@ -161,10 +161,7 @@ select:focus { outline: none; border-color: var(--accent); }
  * off the edge. Inter at 15px is wider than the old 14px system font, and an
  * owner sees five links.
  */
-@media (max-width: 600px) {
-  header { flex-wrap: wrap; row-gap: 8px; }
-  header nav { flex-wrap: wrap; column-gap: 14px; row-gap: 4px; }
-}
+/* (The header on phones is laid out with the menu below; see header.site-header.) */
 
 /*
  * The Eye on its tower (Khai, 13 Oct 2026): the sign-in page, and the chat and
@@ -287,7 +284,25 @@ header.site-header { display: flex; align-items: center; gap: 12px; padding: 14p
 header.site-header .logo { width: 32px; height: 32px; flex-shrink: 0; margin: 0; }
 header.site-header h1 { font-size: 17px; font-weight: 600; line-height: 1.25; margin: 0; }
 header.site-header .subtitle { font-size: 13px; line-height: 1.35; color: var(--text-muted); margin: 1px 0 0; }
-@media (max-width: 600px) { header.site-header { padding: 12px 16px; } }
+/*
+ * ONE layout at every width (Khai's phone, 13 Oct 2026: the menu broke into
+ * rows at different places on different pages). Wide: the menu beside the
+ * title, and a long title shortens with an ellipsis rather than pushing the
+ * menu down -- its flex basis is 0, so title length never decides the wrap.
+ * Narrower than the menu can sit beside a title: the menu takes its own full
+ * row, left-aligned, so every page wraps it at exactly the same points.
+ */
+header.site-header > div:not(.logo) { flex: 1 1 0; min-width: 0; }
+header.site-header h1, header.site-header .subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header.site-header nav.site-nav { flex: 0 0 auto; }
+/* The sidebar's menu button (Query, Plan) is the logo's height, so the title
+   row -- and the menu under it -- sits at the same height on every page. */
+header.site-header #cs-menu { width: 32px; height: 32px; min-height: 0; }
+@media (max-width: 920px) {
+  header.site-header { flex-wrap: wrap; row-gap: 6px; padding: 12px 16px; }
+  header.site-header .subtitle { display: none; }
+  header.site-header nav.site-nav { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: -8px; }
+}
 
 /* The light/dark switch in the menu: a moon in the light, a sun in the dark. */
 .theme-toggle {
