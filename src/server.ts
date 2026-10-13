@@ -2326,6 +2326,15 @@ app.get('/api/daily-report', async (c) => {
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
   const gated = requireTerms(c, user);
   if (gated) return gated;
+  /**
+   * OWNERS ONLY, for now (Khai, 13 Oct 2026: "that's for WhatsApp"). The page
+   * previews a message nobody receives yet, so it is an owner's check, not a
+   * manager's tool. Refused here, not just hidden from the menu: a hidden
+   * link is a hint, the server is the control.
+   */
+  if (!user.isOwner) {
+    return c.json({ error: 'owner_only', message: 'The daily report is for owners for now.' }, 403);
+  }
 
   const scoped = await venuesInScope(user);
   if (scoped.length === 0) {
