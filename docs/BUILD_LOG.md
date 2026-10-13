@@ -941,6 +941,25 @@ item, not just its name, so a wrong reading can be seen to be wrong.
 
 ---
 
+### 3.7 A sentence in a number field took the whole event down
+**Symptom.** 13 Oct 2026: "Create this event" failed with `invalid input syntax
+for type integer: "NA - break-even expressed as revenue: $24,000 cost envelope
+against $30,000 ticket revenue target (20% net)"`.
+**Root cause.** The draft tool's schema declares `break_even_covers` a number,
+and the model wrote its explanation there instead -- the plan had worked the
+break-even out as revenue, not covers. A schema is guidance to the model, not
+validation of its output, and nothing between the draft and the insert checked
+types, so one field failed the entire save.
+**Fix.** `cleanDraft()` checks every field of a fresh draft against its kind
+of cell -- numbers, dates, enums, the numbers inside tasks, P&L lines and other
+spaces -- clears what is the wrong shape and lists it on the draft before
+anything is saved. Create also cleans the number fields again on its own.
+**Recurs?** **Anywhere model output goes into a typed column.** Treat a tool
+schema as a request, and check the result as you would a form a stranger
+filled in.
+
+---
+
 ## 4. Security
 
 ### 4.1 Venue isolation was not enforced anywhere

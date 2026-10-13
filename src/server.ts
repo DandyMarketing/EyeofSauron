@@ -42,6 +42,8 @@ import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
+import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
+import { draftStage } from './lib/draft-stages.js';
 import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, sanitiseItems, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, createGroupWithItems, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor } from './ai/model-policy.js';
@@ -784,21 +786,42 @@ app.post('/api/plan', async (c) => {
 });
 
 /**
+ * The draft request, shared by the plain route and the streamed one so the two
+ * cannot drift. Who "you" is and which venues exist are said outright: without
+ * it the draft wrote the person planning down as an owner called "Planner",
+ * and listed Barter -- a rooftop being RENTED -- as one of our venues, which
+ * Create then refused (Khai, 13 Oct 2026).
+ */
+async function draftRequest(user: SessionUser, history: ChatMessage[]) {
+  const transcript = planTranscript(history);
+  const scoped = await venuesInScope(user);
+  const facts = `THE PERSON PLANNING is ${user.fullName || user.email}. Where the conversation makes "you" or "me" the owner of a task, write that name -- never "Planner" or "You".\n` +
+    `OUR VENUES -- the only values allowed in venue_slugs: ${scoped.map(v => `${v.slug} (${v.name})`).join(', ') || 'none'}. A space being rented or a partner's venue is NOT one of ours: describe it in the concept and the brief, never in venue_slugs.\n\n`;
+  return {
+    model: modelFor('lookup', process.env).model,
+    max_tokens: 16384,
+    system: [{
+      type: 'text' as const,
+      text: 'You are turning a finished planning conversation into a structured brief. Everything must already be in the transcript: do not add a decision, do not invent a figure, and do not fill a field that was never settled — leave it out. Numbers appear only where the conversation quoted them from a query tool.',
+      cache_control: { type: 'ephemeral' as const },
+    }],
+    tools: [eventDraftTool(scoped.map(v => v.slug)) as any],
+    tool_choice: { type: 'tool' as const, name: 'record_event_draft' },
+    messages: [{ role: 'user' as const, content: `${facts}The planning conversation:\n\n${transcript}` }],
+  };
+}
+
+/**
  * Turn a settled conversation into a draft. WRITES NOTHING.
  *
  * A forced tool over the transcript, the same shape the recommendation engine
- * uses: the arguing pass writes naturally and a separate call turns it into
- * records, because asking one model to end an argument with JSON produces
- * worse arguments and worse JSON.
- *
- * The draft comes back to the browser, a person reads it and clicks, and
- * POST /api/events does the writing. That ordering is the whole design -- see
- * the note there.
+ * uses. The draft comes back to the browser, a person reads it and clicks, and
+ * POST /api/events does the writing. The page uses the streamed route below;
+ * this one stays as its fallback.
  */
 app.post('/api/plan/draft', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
-
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
@@ -806,39 +829,70 @@ app.post('/api/plan/draft', async (c) => {
   const history = body.history ?? [];
   if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
 
-  const transcript = planTranscript(history);
-  /**
-   * Who "you" is and which venues exist, said outright. Without it the draft
-   * wrote the person planning down as an owner called "Planner", and listed
-   * Barter -- a rooftop being RENTED -- as one of our venues, which Create then
-   * refused (Khai, 13 Oct 2026).
-   */
-  const scoped = await venuesInScope(user);
-  const facts = `THE PERSON PLANNING is ${user.fullName || user.email}. Where the conversation makes "you" or "me" the owner of a task, write that name -- never "Planner" or "You".\n` +
-    `OUR VENUES -- the only values allowed in venue_slugs: ${scoped.map(v => `${v.slug} (${v.name})`).join(', ') || 'none'}. A space being rented or a partner's venue is NOT one of ours: describe it in the concept and the brief, never in venue_slugs.\n\n`;
-
   try {
-    const structured = await anthropic.messages.create({
-      model: modelFor('lookup', process.env).model,
-      max_tokens: 16384,
-      system: [{
-        type: 'text',
-        text: 'You are turning a finished planning conversation into a structured brief. Everything must already be in the transcript: do not add a decision, do not invent a figure, and do not fill a field that was never settled — leave it out. Numbers appear only where the conversation quoted them from a query tool.',
-        cache_control: { type: 'ephemeral' },
-      }],
-      tools: [eventDraftTool(scoped.map(v => v.slug)) as any],
-      tool_choice: { type: 'tool', name: 'record_event_draft' },
-      messages: [{ role: 'user', content: `${facts}The planning conversation:\n\n${transcript}` }],
-    });
-
+    const structured = await anthropic.messages.create(await draftRequest(user, history));
     const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
     if (!call?.input) return c.json({ error: 'Could not build a draft from this conversation.' }, 422);
-
-    return c.json({ draft: call.input });
+    const checked = cleanDraft(call.input);
+    return c.json({ draft: { ...checked.draft, _notes: checked.notes } });
   } catch (e: any) {
     console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
   }
+});
+
+/**
+ * The same draft, streamed, so the page shows what is being written.
+ *
+ * Khai, 13 Oct 2026: a static "Putting the brief together..." for minutes
+ * "makes it feel like the process hanged". The tool input arrives as streamed
+ * JSON; the field it is on now is the honest progress (draftStage), sent as it
+ * changes. The steady traffic also keeps a long draft from looking idle to a
+ * proxy -- the likely end of the earlier "Could not build a draft".
+ */
+app.post('/api/plan/draft-stream', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  const body = await c.req.json<{ history?: ChatMessage[] }>().catch(() => ({} as { history?: ChatMessage[] }));
+  const history = body.history ?? [];
+  if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
+
+  return streamSSE(c, async (stream) => {
+    let chain: Promise<void> = Promise.resolve();
+    const push = (event: Record<string, unknown>) => {
+      chain = chain.then(() => stream.writeSSE({ data: JSON.stringify(event) })).catch(() => {});
+    };
+    const heartbeat = setInterval(() => {
+      chain = chain.then(async () => { await stream.write(': ping\n\n'); }).catch(() => {});
+    }, 15_000);
+
+    try {
+      push({ kind: 'stage', label: 'Reading the conversation' });
+      const s = anthropic.messages.stream(await draftRequest(user, history));
+      let last = '';
+      s.on('inputJson', (_partial: string, snapshot: unknown) => {
+        const st = draftStage(snapshot);
+        if (st && st.label !== last) { last = st.label; push({ kind: 'stage', label: st.label }); }
+      });
+      const msg = await s.finalMessage();
+      const call = msg.content.find((b: any) => b.type === 'tool_use') as any;
+      if (!call?.input) push({ kind: 'error', error: 'Could not build a draft from this conversation.' });
+      else {
+        // Every field checked against its kind of cell before the person sees it.
+        const checked = cleanDraft(call.input);
+        push({ kind: 'done', draft: { ...checked.draft, _notes: checked.notes } });
+      }
+    } catch (e: any) {
+      console.error(`[plan/draft-stream] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+      push({ kind: 'error', error: humanApiError(e) });
+    } finally {
+      clearInterval(heartbeat);
+      await chain;
+    }
+  });
 });
 
 /**
@@ -1088,6 +1142,9 @@ app.post('/api/events', async (c) => {
    * columns do not exist and the insert would fail outright, taking the event
    * with it; so a refusal naming them retries without them and says so.
    */
+  // A sentence in a number field is dropped and named rather than failing the
+  // whole save (13 Oct 2026: break-even written as a paragraph).
+  const numbers = cleanEventNumbers(d);
   const eventRow: Record<string, unknown> = {
     name: d.name,
     start_date: d.start_date,
@@ -1100,20 +1157,20 @@ app.post('/api/events', async (c) => {
     concept: d.concept ?? null,
     usp: d.usp ?? null,
     venue_fit: d.venue_fit ?? null,
-    target_net_sales: d.target_net_sales ?? null,
-    target_covers: d.target_covers ?? null,
-    target_spend_per_head: d.target_spend_per_head ?? null,
-    baseline_net_sales: d.baseline_net_sales ?? null,
-    baseline_covers: d.baseline_covers ?? null,
-    baseline_spend_per_head: d.baseline_spend_per_head ?? null,
+    target_net_sales: numbers.values.target_net_sales,
+    target_covers: numbers.values.target_covers,
+    target_spend_per_head: numbers.values.target_spend_per_head,
+    baseline_net_sales: numbers.values.baseline_net_sales,
+    baseline_covers: numbers.values.baseline_covers,
+    baseline_spend_per_head: numbers.values.baseline_spend_per_head,
     baseline_basis: d.baseline_basis ?? null,
-    price: d.price ?? null,
-    price_basis_food_avg: d.price_basis_food_avg ?? null,
-    price_basis_bev_avg: d.price_basis_bev_avg ?? null,
+    price: numbers.values.price,
+    price_basis_food_avg: numbers.values.price_basis_food_avg,
+    price_basis_bev_avg: numbers.values.price_basis_bev_avg,
     cost_lines: Array.isArray(d.cost_lines) ? d.cost_lines : [],
-    cost_total: d.cost_total ?? null,
-    break_even_covers: d.break_even_covers ?? null,
-    ad_budget: d.ad_budget ?? null,
+    cost_total: numbers.values.cost_total,
+    break_even_covers: numbers.values.break_even_covers,
+    ad_budget: numbers.values.ad_budget,
     ad_plan: d.ad_plan ?? null,
     status: 'brief_issued',
     created_by: user.id,
@@ -1241,7 +1298,10 @@ app.post('/api/events', async (c) => {
     id: created.id,
     venues: chosen.map(v => v.name),
     venue_list: chosen.map(v => ({ slug: v.slug, name: v.name })),
-    warning: notOurs.length ? `${notOurs.join(', ')} is not one of our venues, so it stays in the brief but is not linked as a venue.` : undefined,
+    warning: [
+      notOurs.length ? `${notOurs.join(', ')} is not one of our venues, so it stays in the brief but is not linked as a venue.` : '',
+      numbers.dropped.length ? `Not saved as figures because the draft wrote words there: ${numbers.dropped.join(', ')}. They are still in the brief.` : '',
+    ].filter(Boolean).join(' ') || undefined,
     tasks: tasks.length,
     city_events_added: calendarAdded || undefined,
   });

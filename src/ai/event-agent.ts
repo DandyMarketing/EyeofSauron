@@ -536,7 +536,7 @@ export function eventDraftTool(venueSlugs?: string[]) {
           },
         },
         cost_total: { type: 'number' },
-        break_even_covers: { type: 'number', description: 'The cover count where it washes its face.' },
+        break_even_covers: { type: 'number', description: 'The cover count where it washes its face. A WHOLE NUMBER ONLY -- if it was never worked out as covers, leave it out and say so in the brief. Every number field takes a number or nothing, never words.' },
         ad_budget: { type: 'number' },
         ad_plan: { type: 'string', description: 'What the paid spend buys, on which platform, over which dates.' },
 

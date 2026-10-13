@@ -22,6 +22,7 @@
 -->
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
+<link rel="modulepreload" href="/sse-parse.js">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -109,6 +110,14 @@
   .intro li { margin: 4px 0; }
 
   .thinking { color: var(--text-muted); font-size: 14px; padding: 8px 0; }
+  .draft-progress .pulse {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px;
+    background: var(--accent); vertical-align: middle; animation: dp-pulse 1.2s ease-in-out infinite;
+  }
+  .draft-progress .stage { color: var(--text); }
+  .draft-progress .elapsed { margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .draft-progress .note { font-size: 12px; margin-top: 2px; }
+  @keyframes dp-pulse { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
   .err { color: var(--error); font-size: 14px; padding: 10px 0; }
 
   footer {
@@ -155,6 +164,8 @@
   .draft th { background: var(--bg); }
   .draft .missing { color: var(--error); font-size: 13px; margin-bottom: 12px; }
   .draft .draft-sub { font-size: 13px; margin: 6px 0 6px; color: var(--text-muted); font-weight: 600; }
+  .draft .draft-notes { border: 1px solid var(--accent-dim); border-radius: 8px; padding: 8px 10px; margin: 6px 0 10px; font-size: 13px; }
+  .draft .draft-notes .note { margin: 4px 0 0; }
   .draft .space-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
   .draft .space-card .note { margin: 0; display: inline; }
   .draft .confirm-row { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
@@ -617,6 +628,12 @@ function renderDraft(d) {
     (d.concept ? '<p>' + escapeHtml(d.concept) + '</p>' : '') +
     taskTable +
     spacesTable +
+    // What the check cleared before saving: a value in the wrong kind of cell
+    // is left empty and said here, never stored as something it is not.
+    ((d._notes || []).length
+      ? '<div class="draft-notes"><strong>Checked before saving</strong>' + d._notes.map(n => '<div>' + escapeHtml(n) + '</div>').join('') +
+        '<div class="note">These are still in the brief text; only the figure fields were left empty.</div></div>'
+      : '') +
     // Each piece downloads on its own (Khai, 12 Oct 2026), before or after the
     // event is created -- the same files Send to Monday attaches.
     '<div class="confirm-row download-row">' +
@@ -1000,6 +1017,46 @@ async function openMonday(eventId, venues, d) {
  * reading is a model's, so a way past it is offered -- a board that misreads
  * one answer must not lock the brief away entirely.
  */
+/**
+ * The brief, streamed: each stage line as the server sends it, then the draft.
+ * Throws only when the stream cannot be had at all, so the caller can fall
+ * back to the plain route; a stream that breaks part-way says so instead of
+ * silently starting the whole draft again.
+ */
+async function draftStream(onStage) {
+  const res = await fetch('/api/plan/draft-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ history }),
+  });
+  if (res.status === 401 || res.status === 403 || res.status === 400) {
+    const err = await res.json().catch(() => ({}));
+    return { error: err.error || ('Could not build a draft (' + res.status + ').') };
+  }
+  if (!res.ok || !res.body) throw new Error('stream unavailable: ' + res.status);
+  const { createEventParser } = await import('/sse-parse.js');
+  const parser = createEventParser();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let heard = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const ev of parser.push(decoder.decode(value, { stream: true }))) {
+        heard = true;
+        if (ev.kind === 'stage') onStage(ev.label);
+        else if (ev.kind === 'done') return { draft: ev.draft };
+        else if (ev.kind === 'error') return { error: ev.error };
+      }
+    }
+  } catch (e) {
+    if (!heard) throw e;
+  }
+  if (!heard) throw new Error('stream ended before it started');
+  return { error: 'The connection dropped while the brief was being written. Press "Prepare the brief" again.' };
+}
+
 async function prepareDraft(force) {
   if (busy || history.length === 0) return;
   if (force !== true) {
@@ -1032,16 +1089,39 @@ async function prepareDraft(force) {
     }
   }
   setBusy(true);
-  const pending = addMessage('Planner', 'agent', '<div class="thinking">Putting the brief together…</div>');
+  /**
+   * What is being written, as it is written (Khai, 13 Oct 2026: a static line
+   * for minutes "makes it feel like the process hanged"). The stage comes from
+   * the server reading the brief as it streams; the clock only says how long.
+   */
+  const pending = addMessage('Planner', 'agent',
+    '<div class="thinking draft-progress"><span class="pulse"></span><span class="stage">Reading the conversation</span>…' +
+    ' <span class="elapsed">0:00</span><div class="note">Long plans take a minute or two.</div></div>');
+  const started = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.floor((Date.now() - started) / 1000);
+    const el = pending.querySelector('.elapsed');
+    if (el) el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }, 1000);
+  const setStage = (label) => { const el = pending.querySelector('.stage'); if (el) el.textContent = label; };
 
   try {
-    const res = await fetch('/api/plan/draft', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ history }),
-    });
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await draftStream(setStage);
+    } catch (streamErr) {
+      // The stream could not be had: the plain route, as before.
+      const res = await fetch('/api/plan/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ history }),
+      });
+      data = await res.json().catch(() => ({ error: 'Could not build a draft (' + res.status + ').' }));
+      if (!res.ok && !data.error) data.error = 'Could not build a draft (' + res.status + ').';
+    }
+    clearInterval(tick);
     pending.remove();
+    const res = { ok: !data.error };
 
     if (!res.ok || data.error) {
       addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(data.error || 'Could not build a draft.') + '</div>');
@@ -1054,6 +1134,7 @@ async function prepareDraft(force) {
     }
     renderDraft(data.draft || {});
   } catch (e) {
+    clearInterval(tick);
     pending.remove();
     addMessage('Planner', 'agent', '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>');
   }
