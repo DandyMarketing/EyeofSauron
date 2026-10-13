@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,593 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,595 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -887,6 +887,14 @@ Built in `src/lib/daily-report.ts` (pure, tested) and `daily-report-read.ts`,
 served at `/api/daily-report` and previewed at `/daily.html`. **Nothing is sent
 yet**: the preview exists so the figures are checked against the dashboard and
 the Monday board before the message reaches anybody's phone.
+
+**Covers are split by meal beside the total** (Khai, 13 Oct 2026): "87 covers
+(−13%): lunch 26, dinner 61", and the morning's book as "*Today*: 52 covers
+booked: lunch 14, dinner 38" -- "Today", no longer "Tonight", since it now
+includes lunch. Every meal served in either span is listed (a lunch venue shows
+"lunch 0" on a day without lunch; a dinner-only venue gets the total alone),
+brunch is its own meal, and anything the meals do not explain is named as
+"other" so the parts always add up (`mealSplit()`).
 
 **Owners only, for now** (Khai, 13 Oct 2026): `/api/daily-report` refuses
 anyone else and the dashboard shows the Daily link only to owners -- the API
@@ -1273,7 +1281,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,593 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,595 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

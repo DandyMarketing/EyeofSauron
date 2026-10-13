@@ -104,6 +104,13 @@ export interface SalesDay {
 export interface SpanFigures {
   net_sales: number | null;
   covers: number | null;
+  /**
+   * The same covers by meal (Khai, 13 Oct 2026: "split lunch and dinner covers
+   * with the total"). Null with covers. Brunch is its own meal, as everywhere
+   * else in Sauron; Fat Prince's DAY and LEGACY shifts arrive as lunch and
+   * dinner already (SHIFT_MAP).
+   */
+  covers_by_meal: Record<string, number> | null;
   spend_per_head: number | null;
   trading_days: number;
 }
@@ -131,15 +138,18 @@ export function spanFigures(rows: SalesDay[], covers: Map<string, CoversSummary>
     trading++;
   }
   let c = 0, seen = false;
+  const byMeal: Record<string, number> = {};
   for (const [d, s] of covers) {
     if (!within(d, span)) continue;
     seen = true;
     c += s.covers;
+    for (const [meal, n] of Object.entries(s.by_shift ?? {})) byMeal[meal] = (byMeal[meal] ?? 0) + n;
   }
   const coversOut = seen ? c : null;
   return {
     net_sales: trading > 0 ? round2(net) : null,
     covers: coversOut,
+    covers_by_meal: seen ? byMeal : null,
     spend_per_head: trading > 0 && coversOut ? round2(fb / coversOut) : null,
     trading_days: trading,
   };
@@ -167,7 +177,7 @@ export interface VenueDailyReport {
   day: ReportLine | null;
   wtd: ReportLine | null;
   mtd: ReportLine | null;
-  tonight: { closed: boolean; booked: number | null };
+  tonight: { closed: boolean; booked: number | null; booked_by_meal: Record<string, number> | null };
   /** The message as it would be sent. */
   text: string;
 }
@@ -200,6 +210,7 @@ export function composeVenueReport(input: {
   const tonight = {
     closed: closedTonight,
     booked: closedTonight ? null : (covers.get(today)?.expected_covers ?? (sevenRoomsSeen ? 0 : null)),
+    booked_by_meal: closedTonight ? null : (covers.get(today)?.expected_by_shift ?? (sevenRoomsSeen ? {} : null)),
   };
 
   const r: Omit<VenueDailyReport, 'text'> = {
@@ -240,6 +251,29 @@ export function spanLabel(s: Span): string {
 const money = (v: number) => '$' + Math.round(v).toLocaleString('en-SG');
 const pct = (p: number | null) => (p === null ? null : `${p > 0 ? '+' : p < 0 ? '−' : '±'}${Math.abs(p)}%`);
 
+const MEAL_ORDER = ['brunch', 'lunch', 'dinner'];
+
+/**
+ * "lunch 8, dinner 13" -- every meal served in EITHER span, in the order of the
+ * day, so a venue that does lunch shows "lunch 0" on a day it had none, and a
+ * dinner-only venue is not told "dinner 21" beside a total of 21. Anything the
+ * meals do not account for is named rather than dropped, so the parts always
+ * add up to the total printed beside them.
+ */
+export function mealSplit(total: number, now: Record<string, number> | null, then: Record<string, number> | null = null): string | null {
+  if (!now) return null;
+  const meals = new Set([...Object.keys(now), ...Object.keys(then ?? {})].filter(m => (now[m] ?? 0) > 0 || ((then ?? {})[m] ?? 0) > 0));
+  if (meals.size < 2) return null;
+  const ordered = [...meals].sort((a, b) => {
+    const ia = MEAL_ORDER.indexOf(a), ib = MEAL_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
+  const parts = ordered.map(m => `${m} ${(now[m] ?? 0).toLocaleString('en-SG')}`);
+  const other = total - ordered.reduce((n, m) => n + (now[m] ?? 0), 0);
+  if (other > 0) parts.push(`other ${other.toLocaleString('en-SG')}`);
+  return parts.join(', ');
+}
+
 function figuresText(l: ReportLine, priorLabel: string): string {
   if (l.now.net_sales === null) return 'no trade';
   const bits = [`${money(l.now.net_sales)}`];
@@ -247,7 +281,8 @@ function figuresText(l: ReportLine, priorLabel: string): string {
   bits[0] += s ? ` (${s} vs ${priorLabel})` : ` (nothing to compare with ${priorLabel})`;
   if (l.now.covers !== null) {
     const c = pct(l.covers_change_pct);
-    bits.push(`${l.now.covers.toLocaleString('en-SG')} covers${c ? ` (${c})` : ''}`);
+    const split = mealSplit(l.now.covers, l.now.covers_by_meal, l.then.covers_by_meal);
+    bits.push(`${l.now.covers.toLocaleString('en-SG')} covers${c ? ` (${c})` : ''}${split ? `: ${split}` : ''}`);
   }
   if (l.now.spend_per_head !== null && l.days === 1) bits.push(`${money(l.now.spend_per_head)} per head`);
   return bits.join(' · ');
@@ -293,9 +328,13 @@ export function reportText(r: Omit<VenueDailyReport, 'text'>): string {
     }
   }
 
-  if (r.tonight.closed) out.push('*Tonight*: closed');
-  else if (r.tonight.booked === null) out.push('*Tonight*: no SevenRooms data');
-  else out.push(`*Tonight*: ${r.tonight.booked.toLocaleString('en-SG')} covers booked`);
+  // "Today", not "Tonight", now that the book is split by meal: lunch is today too.
+  if (r.tonight.closed) out.push('*Today*: closed');
+  else if (r.tonight.booked === null) out.push('*Today*: no SevenRooms data');
+  else {
+    const split = mealSplit(r.tonight.booked, r.tonight.booked_by_meal);
+    out.push(`*Today*: ${r.tonight.booked.toLocaleString('en-SG')} covers booked${split ? `: ${split}` : ''}`);
+  }
 
   out.push('_Sales are net: after discounts, with service charge, before GST._');
   return out.join('\n');

@@ -8,7 +8,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  reportWindows, reportDay, spanFigures, composeVenueReport, dayLabel, spanLabel, calendarNote, type SalesDay,
+  reportWindows, reportDay, spanFigures, composeVenueReport, dayLabel, spanLabel, calendarNote, mealSplit, type SalesDay,
 } from './daily-report.js';
 import { periodWindow } from './dashboard-window.js';
 import type { CoversSummary } from './covers.js';
@@ -126,7 +126,7 @@ describe('the composed report', () => {
     assert.match(r.text, /\*Yesterday\* \(Sat 10 Oct\): \$1,100 \(\+10% vs Sat 3 Oct\) · 30 covers \(\+20%\)/);
     assert.match(r.text, /\*Week to date\* \(5–10 Oct\): \$2,200 \(−29% vs 28 Sep–3 Oct\)/);
     assert.match(r.text, /\*Month to date\* \(1–10 Oct\): \$4,300 \(\+330% vs 1–10 Sep\) · 55 covers\n_Month to date has 3 weekend days against 2/);
-    assert.match(r.text, /\*Tonight\*: 118 covers booked/);
+    assert.match(r.text, /\*Today\*: 118 covers booked/);
   });
 
   test('a one-day week is not printed twice', () => {
@@ -145,7 +145,7 @@ describe('the composed report', () => {
     assert.equal(r.status, 'closed');
     assert.equal(r.tonight.closed, true);
     assert.match(r.text, /\*Yesterday\* \(Sun 11 Oct\): closed/);
-    assert.match(r.text, /\*Tonight\*: closed/);
+    assert.match(r.text, /\*Today\*: closed/);
   });
 
   test('a late file is named in the message', () => {
@@ -154,7 +154,7 @@ describe('the composed report', () => {
     });
     assert.equal(r.status, 'late');
     assert.match(r.text, /Revel's file for Sat 10 Oct has not arrived\. Figures run to Mon 5 Oct\./);
-    assert.match(r.text, /\*Tonight\*: no SevenRooms data/);
+    assert.match(r.text, /\*Today\*: no SevenRooms data/);
   });
 });
 
@@ -162,4 +162,32 @@ test('labels', () => {
   assert.equal(dayLabel('2026-10-10'), 'Sat 10 Oct');
   assert.equal(spanLabel({ start: '2026-10-05', end: '2026-10-10' }), '5–10 Oct');
   assert.equal(spanLabel({ start: '2026-09-28', end: '2026-10-03' }), '28 Sep–3 Oct');
+});
+
+test('covers are split by meal beside the total, and the parts add up', () => {
+  /**
+   * Khai, 13 Oct 2026: "the daily should split also lunch and dinner covers
+   * with the total too". Every meal served in either span is listed, so a
+   * lunch venue shows "lunch 0" on a day without lunch; a dinner-only venue
+   * gets the total alone; anything the meals do not explain is named.
+   */
+  assert.equal(mealSplit(21, { lunch: 8, dinner: 13 }), 'lunch 8, dinner 13');
+  assert.equal(mealSplit(21, { dinner: 21 }), null, 'one meal: the total already says it');
+  assert.equal(mealSplit(13, { dinner: 13 }, { lunch: 5, dinner: 10 }), 'lunch 0, dinner 13', 'no lunch this time, but there usually is');
+  assert.equal(mealSplit(60, { dinner: 20, brunch: 30, lunch: 5 }), 'brunch 30, lunch 5, dinner 20, other 5', 'in the order of the day, nothing dropped');
+  assert.equal(mealSplit(10, null), null);
+
+  const covers = new Map<string, CoversSummary>([
+    ['2026-10-12', { business_date: '2026-10-12', covers: 21, booked_covers: 21, walk_in_covers: 0, cancelled_covers: 0, no_show_covers: 0,
+      by_shift: { lunch: 8, dinner: 13 }, bookings: 9, expected_covers: 21, expected_by_shift: { lunch: 8, dinner: 13 }, expected_bookings: 9 }],
+    ['2026-10-13', { business_date: '2026-10-13', covers: 0, booked_covers: 40, walk_in_covers: 0, cancelled_covers: 0, no_show_covers: 0,
+      by_shift: {}, bookings: 12, expected_covers: 40, expected_by_shift: { lunch: 12, dinner: 28 }, expected_bookings: 12 }],
+  ]);
+  const r = composeVenueReport({
+    venue: { id: 'v', name: 'Fat Prince', slug: 'fat-prince' }, today: '2026-10-13', closedWeekdays: [],
+    rows: [{ business_date: '2026-10-12', gross_sales: 2752, net_sales: 2944.7, item_discounts: 75, order_discounts: 0, total_transactions: 12 }],
+    covers, lastDataDate: '2026-10-12',
+  });
+  assert.match(r.text, /21 covers[^\n]*: lunch 8, dinner 13/);
+  assert.match(r.text, /\*Today\*: 40 covers booked: lunch 12, dinner 28/);
 });
