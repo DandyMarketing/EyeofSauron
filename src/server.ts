@@ -3759,7 +3759,9 @@ app.use('/*', async (c, next) => {
    * is not worth either a hashed filename or hand-rolled 304 handling here; it
    * is written down so nobody reasons from the 304 that does not arrive.
    */
-  if (c.req.path.startsWith('/vendor/')) {
+  // /brand/ (the eye, its tower loop, the icons) changes as rarely, and for the
+  // same reason has no hash in its names, so it gets the same day.
+  if (c.req.path.startsWith('/vendor/') || c.req.path.startsWith('/brand/')) {
     c.res = new Response(c.res.body, c.res);
     c.res.headers.set('Cache-Control', 'public, max-age=86400');
     return;

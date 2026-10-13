@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 62 migrations, 25 query tools, 11 ingest sources, 1,586 tests.
+started.** 62 migrations, 25 query tools, 11 ingest sources, 1,587 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1091,6 +1091,41 @@ values, and the only option, because the SVG is all that was kept. The series
 palette keeps each slot's hue (orange, blue, green, purple, gold, red), each
 darkened to hold 3:1 on white.
 
+### The mark: the Eye, and its tower, settled 13 Oct 2026
+
+Khai: "since I called it Sauron I would love the logo to be the eye of Sauron."
+Generated with **Higgsfield** and chosen by Khai: the logo is a flame eye
+(Recraft V4.1, vector), the welcome is a painted tower whose eye sweeps a beam
+like a searchlight (GPT Image 2.5 for the still, Kling 3.0 for the motion).
+Everything is in `public/brand/` and served from us, never from Higgsfield.
+
+- **`sauron-eye.svg`** replaces every orange circle -- each page's header
+  `.logo`, the chat's assistant avatar, and the tab icon (`icon-32.png` and
+  `apple-touch-icon.png` beside it for browsers that will not take an SVG). Its
+  generated cream square was removed and the view cropped to the eye; the
+  shapes are untouched. The white of the eye had been that background showing
+  through, so a cream ellipse puts it back inside the eye only -- without it
+  the eye goes hollow on anything dark.
+- **`sauron-watch.webm/.mp4`** play on the sign-in page and on the chat and
+  planner before the first question (`.sauron-watch` in `theme.css`). 10
+  seconds: the beam swings left to right, and the second half is the first
+  reversed, so it ends where it starts and loops without a jump. 118 KB WebM,
+  216 KB MP4, cached a day like `/vendor/`. Phones autoplay it only because it
+  is **muted and playsinline**; reduced motion shows the still
+  (`sauron-watch.jpg`) instead. Safari plays video only from a server that
+  answers byte-range requests -- ours does (206 measured), and that is worth
+  re-checking if static serving ever changes.
+
+**The first animation did not move.** Given the same picture as first and
+last frame, the model held still for five seconds. Giving it the two ENDS of
+the swing -- beam left, beam right -- forced the sweep; the loop is made by
+reversing, not asked of the model.
+
+**Before Sauron is sold (Phase 4), check the name and the Eye.** Both come
+from Tolkien, whose estate and the film studios defend them. Fine for an
+internal tool; a product carrying them needs advice first. The mark was drawn
+as its own design rather than the film's, which helps and does not settle it.
+
 ### Report an issue: built 13 Oct 2026
 
 With Sauron live with the team, Khai: "a button, report this issue, that sends
@@ -1172,7 +1207,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,586 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,587 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

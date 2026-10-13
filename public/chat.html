@@ -26,6 +26,9 @@
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
+<link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -63,9 +66,7 @@
   .logo {
     width: 36px;
     height: 36px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 70%, #5a2f12 100%);
-    box-shadow: 0 0 20px rgba(176,96,42,0.3);
+    background: url(/brand/sauron-eye.svg) center / contain no-repeat;
     flex-shrink: 0;
   }
 
@@ -118,9 +119,10 @@
     order: 2;
   }
 
+  /* Sauron's eye, on white so it reads beside the person's coloured initial. */
   .message.assistant .avatar {
-    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 100%);
-    box-shadow: 0 0 8px rgba(176,96,42,0.2);
+    background: var(--surface) url(/brand/sauron-eye.svg) center / 78% no-repeat;
+    border: 1px solid var(--border);
   }
 
   .bubble {
@@ -679,14 +681,6 @@
     padding: 40px 20px;
   }
 
-  .welcome .logo-big {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 60%, #5a2f12 100%);
-    box-shadow: 0 0 40px rgba(176,96,42,0.25);
-    margin: 0 auto 20px;
-  }
 
   .welcome h2 {
     font-size: 23px;
@@ -766,7 +760,7 @@
 
   <div id="chat">
     <div class="welcome" id="welcome">
-      <div class="logo-big"></div>
+      <div class="sauron-watch" aria-hidden="true"><video autoplay muted loop playsinline preload="auto" poster="/brand/sauron-watch.jpg"><source src="/brand/sauron-watch.webm" type="video/webm"><source src="/brand/sauron-watch.mp4" type="video/mp4"></video></div>
       <h2>Ask Sauron</h2>
       <p>I can answer questions about your venue performance, product mix, revenue trends, and more. All answers come from your real operational data.</p>
       <!--

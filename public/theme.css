@@ -105,3 +105,27 @@ select:focus { outline: none; border-color: var(--accent); }
   header { flex-wrap: wrap; row-gap: 8px; }
   header nav { flex-wrap: wrap; column-gap: 14px; row-gap: 4px; }
 }
+
+/*
+ * The Eye on its tower (Khai, 13 Oct 2026): the sign-in page, and the chat and
+ * planner before the first question. A 10-second silent loop, generated with
+ * Higgsfield: the beam swings left to right and the second half is the first
+ * played backwards, so it ends where it begins. 118 KB as WebM, 216 KB as MP4.
+ *
+ * Muted and playsinline are what let a phone autoplay it at all; iOS refuses
+ * otherwise. The still behind it is the first frame, so nothing jumps while the
+ * video loads, and it is all that shows for anyone whose phone asks for
+ * reduced motion. The round mask fades its edges into the page.
+ */
+.sauron-watch {
+  width: min(220px, 62vw);
+  aspect-ratio: 1;
+  margin: 0 auto 14px;
+  background: url(/brand/sauron-watch.jpg) center / cover no-repeat;
+  -webkit-mask-image: radial-gradient(circle, #000 58%, transparent 71%);
+  mask-image: radial-gradient(circle, #000 58%, transparent 71%);
+}
+.sauron-watch video { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (prefers-reduced-motion: reduce) {
+  .sauron-watch video { display: none; }
+}

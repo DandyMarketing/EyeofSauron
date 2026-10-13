@@ -23,6 +23,9 @@
 <!--SAURON_CONFIG-->
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
+<link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -47,14 +50,6 @@
     text-align: center;
   }
 
-  .logo {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent) 0%, #8a4a1f 60%, #5a2f12 100%);
-    box-shadow: 0 0 40px rgba(176,96,42,0.25);
-    margin: 0 auto 20px;
-  }
 
   h1 {
     font-size: 24px;
@@ -139,7 +134,7 @@
 </head>
 <body>
   <div class="login-card">
-    <div class="logo"></div>
+    <div class="sauron-watch" aria-hidden="true"><video autoplay muted loop playsinline preload="auto" poster="/brand/sauron-watch.jpg"><source src="/brand/sauron-watch.webm" type="video/webm"><source src="/brand/sauron-watch.mp4" type="video/mp4"></video></div>
     <h1>Sauron</h1>
     <div class="subtitle">The Dandy Collection</div>
 

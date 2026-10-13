@@ -1303,3 +1303,35 @@ test('every page wears the shared look, and none brings back its own palette', (
     }
   }
 });
+
+test('the Eye is the mark everywhere, and the tower plays where it should', () => {
+  /**
+   * Khai, 13 Oct 2026: the logo is the eye (logo A, Recraft through
+   * Higgsfield), and the tower loop greets people on the sign-in page and on
+   * the chat and planner before the first question.
+   *
+   * A phone only autoplays a video that is MUTED and PLAYSINLINE -- iOS
+   * refuses anything else and shows a frozen frame with a play button, which
+   * would look broken rather than quiet. The still behind it must exist too:
+   * it is what shows while the video loads and for anyone asking for reduced
+   * motion.
+   */
+  for (const f of ['sauron-eye.svg', 'icon-32.png', 'apple-touch-icon.png', 'sauron-watch.mp4', 'sauron-watch.webm', 'sauron-watch.jpg']) {
+    assert.ok(readFileSync(`public/brand/${f}`).length > 0, `public/brand/${f} is missing`);
+  }
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<link rel="icon" href="\/brand\/sauron-eye\.svg"/, `${page} has no tab icon`);
+    assert.doesNotMatch(html, /\.logo[^{]*\{[^}]*radial-gradient/, `${page} still draws the old orange circle`);
+  }
+  for (const page of ['login.html', 'chat.html', 'plan.html']) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    const video = html.match(/<div class="sauron-watch"[^>]*><video([^>]*)>/);
+    assert.ok(video, `${page} does not show the tower`);
+    for (const attr of ['autoplay', 'muted', 'loop', 'playsinline']) {
+      assert.match(video![1], new RegExp(`\\b${attr}\\b`), `${page}: the tower video needs ${attr}`);
+    }
+  }
+  const theme = readFileSync('public/theme.css', 'utf8');
+  assert.match(theme, /prefers-reduced-motion: reduce\)\s*\{\s*\.sauron-watch video \{ display: none; \}/, 'reduced motion must stop the tower');
+});

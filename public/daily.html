@@ -17,6 +17,9 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
+<link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -33,8 +36,8 @@
     background: var(--surface); position: sticky; top: 0; z-index: 10;
   }
   .logo {
-    width: 30px; height: 30px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, var(--accent), var(--accent-dim));
+    width: 30px; height: 30px;
+    background: url(/brand/sauron-eye.svg) center / contain no-repeat;
     flex-shrink: 0;
   }
   header h1 { font-size: 17px; font-weight: 600; }
