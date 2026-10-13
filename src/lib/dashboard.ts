@@ -186,8 +186,9 @@ export interface DashboardPayload {
    */
   retention: Record<string, RetentionBlock> | null;
   /**
-   * Forecast covers for the nights on the service strip after today, with the
-   * backtest that says how far to trust it. Null when it could not be computed
+   * Forecast covers for every night on the service strip -- ahead, the
+   * forecast; today and before, what came in against the day-before forecast
+   * -- with the backtest that says how far to trust it. Null when it could not be computed
    * -- most likely migration 051 not yet applied -- and the page then simply
    * has no forecast panel, rather than no page.
    */
@@ -624,7 +625,12 @@ async function loadForecastInputs(ids: string[], today: string, clockHour: strin
     p_pickup_from: addDays(today, -(BACKTEST_DAYS + TRAINING_WEEKS * 7 + longestLead + 7)),
     // Served covers reach a year further, for last year's method and its level.
     p_final_from: addDays(today, -(BACKTEST_DAYS + 364 + TRAINING_WEEKS * 7 + longestLead + 14)),
-    p_to: addDays(today, -1),
+    /**
+     * THROUGH TODAY, for today's own day-before forecast: its book as it stood
+     * yesterday. Today's SERVED covers are not final, so they are dropped below
+     * -- a half-served night must never be learned from or scored.
+     */
+    p_to: today,
     p_leads: leads,
     // The cutoff is taken at this Singapore hour; see migration 051.
     p_clock: `${clockHour}:00`,
@@ -636,6 +642,7 @@ async function loadForecastInputs(ids: string[], today: string, clockHour: strin
     );
   }
   const data = parsePickup(raw);
+  for (const served of data.served.values()) served.delete(today);
   return { data, records: new Map(ids.map(id => [id, backtest(data, id, today, leads)] as const)) };
 }
 
@@ -663,9 +670,15 @@ function assembleForecast(
      * forecast built on 61 under a cell saying 62 is a discrepancy somebody
      * will spend ten minutes on.
      */
-    const days = out[i].service
-      .filter(d => d.basis === 'book')
-      .map(d => ({ date: d.date, booked: d.covers, closed: d.closed }));
+    /**
+     * EVERY DAY ON THE STRIP, not only the ones ahead (Khai, 13 Oct 2026: "keep
+     * all days there and measure the current against the forecast"). A past
+     * night and today carry the strip's own number as what came in, so the two
+     * panels can never disagree about a night.
+     */
+    const days = out[i].service.map(d => d.basis === 'book'
+      ? { date: d.date, booked: d.covers, closed: d.closed }
+      : { date: d.date, booked: 0, closed: d.closed, actual: d.covers });
     const f = venueForecast(data, v.id, today, days, leads, holidays, records.get(v.id) ?? []);
     result[v.slug] = f;
     perVenue.push(f);

@@ -449,9 +449,21 @@ export function seasonalLift(series: Map<string, number>, today: string, horizon
 
 export interface ForecastDay {
   date: string;
+  /** Days from today: negative for a night already served, 0 for today. */
   lead: number;
+  /**
+   * The book the forecast started from. For a coming night, the book now; for
+   * today and a past night, the book as it stood at the same hour the day
+   * before -- the one the day-before forecast was built on.
+   */
   booked: number;
   closed: boolean;
+  /**
+   * What the night actually came to, on the service strip's own basis: covers
+   * served for a past night, the whole day so far (eaten, in the room, still to
+   * come) for today. Null for a night still ahead.
+   */
+  actual: number | null;
   /** Null when there are too few comparable nights to say anything. */
   mid: number | null;
   lo: number | null;
@@ -475,7 +487,30 @@ export interface CoverForecast {
   note: string;
 }
 
-export interface ForecastDayInput { date: string; booked: number; closed: boolean }
+export interface ForecastDayInput {
+  date: string;
+  booked: number;
+  closed: boolean;
+  /** Today and past nights: the service strip's own number for the night. */
+  actual?: number | null;
+}
+
+/**
+ * The forecast as it stood the day before a night, for measuring the night
+ * against it.
+ *
+ * Khai, 13 Oct 2026: "keep all days there and measure the current against the
+ * forecast", choosing THE DAY BEFORE -- the last number staff and prep were
+ * planned on. Rebuilt rather than remembered (no forecast is stored), and by
+ * the backtest's own rule: the book as it stood a day earlier at this hour, and
+ * only nights served before then. So it is exactly what the panel would have
+ * shown, and the same kind of number the accuracy table scores.
+ */
+export function dayBeforeForecast(data: PickupData, venueId: string, date: string): PickupForecast | null {
+  const bookedThen = data.booked.get(venueId)?.get(date)?.get(1);
+  if (bookedThen === undefined) return null;
+  return pickupForecast(data, venueId, date, 1, bookedThen, addDays(date, -1));
+}
 
 export function venueForecast(
   data: PickupData, venueId: string, today: string, days: ForecastDayInput[],
@@ -485,9 +520,27 @@ export function venueForecast(
 ): CoverForecast {
   const out: ForecastDay[] = days.map(d => {
     const lead = daysBetween(today, d.date);
-    const base = { date: d.date, lead, booked: d.booked, closed: d.closed, holiday: holidays.get(d.date) ?? null };
-    if (d.closed || lead < 1) {
+    const base = {
+      date: d.date, lead, booked: d.booked, closed: d.closed,
+      actual: lead < 1 && !d.closed ? (d.actual ?? null) : null,
+      holiday: holidays.get(d.date) ?? null,
+    };
+    if (d.closed) {
       return { ...base, mid: null, lo: null, hi: null, n: 0, last_year: null, beyond_history: false };
+    }
+    if (lead < 1) {
+      /**
+       * TODAY AND PAST NIGHTS: the day-before forecast, beside what happened.
+       * Today is never forecast LIVE -- the pickup from the same day has never
+       * been backtested -- but yesterday's forecast for it was, at one day out.
+       */
+      const p = dayBeforeForecast(data, venueId, d.date);
+      return {
+        ...base,
+        booked: data.booked.get(venueId)?.get(d.date)?.get(1) ?? d.booked,
+        mid: p?.mid ?? null, lo: p?.lo ?? null, hi: p?.hi ?? null, n: p?.n ?? 0,
+        last_year: null, beyond_history: false,
+      };
     }
     const p = pickupForecast(data, venueId, d.date, lead, d.booked, today);
     return {
@@ -499,7 +552,8 @@ export function venueForecast(
   });
 
   const accuracy = scoreBacktest(records, leads);
-  const lift = seasonalLift(data.served.get(venueId) ?? new Map(), today, days.length);
+  // The lift looks FORWARD, so it counts only the nights still ahead.
+  const lift = seasonalLift(data.served.get(venueId) ?? new Map(), today, out.filter(d => d.lead >= 1).length);
   return { days: out, accuracy, seasonal_lift_pct: lift, note: forecastNote(out, accuracy, lift) };
 }
 
@@ -519,13 +573,14 @@ export function groupForecast(
   const days: ForecastDay[] = dates.map((date, i) => {
     const parts = perVenue.map(f => f.days[i]).filter(Boolean);
     const open = parts.filter(p => !p.closed);
-    const all = <K extends 'mid' | 'lo' | 'hi' | 'last_year'>(k: K) =>
+    const all = <K extends 'mid' | 'lo' | 'hi' | 'last_year' | 'actual'>(k: K) =>
       open.length > 0 && open.every(p => p[k] !== null) ? open.reduce((n, p) => n + (p[k] as number), 0) : null;
     return {
       date,
       lead: parts[0].lead,
       booked: parts.reduce((n, p) => n + p.booked, 0),
       closed: open.length === 0,
+      actual: all('actual'),
       mid: all('mid'), lo: all('lo'), hi: all('hi'),
       n: open.length ? Math.min(...open.map(p => p.n)) : 0,
       last_year: all('last_year'),
@@ -548,6 +603,12 @@ export function forecastNote(days: ForecastDay[], accuracy: Accuracy[], lift: nu
     `walk-ins and late bookings, less cancellations and no-shows — measured over the last ${TRAINING_WEEKS} weeks. ` +
     `The range is where the middle 60% of those weeks landed.`,
   ];
+  if (days.some(d => d.lead < 1 && d.mid !== null)) {
+    parts.push(
+      'For today and the nights before it, the bar is what came in and the range is what was forecast the day before, ' +
+      'rebuilt from the book as it stood then.',
+    );
+  }
 
   /**
    * ONE HEADLINE ACCURACY, the middle of the horizon, because a sentence of
@@ -582,7 +643,8 @@ export function forecastNote(days: ForecastDay[], accuracy: Accuracy[], lift: nu
     );
   }
 
-  const hol = days.filter(d => d.holiday && !d.closed);
+  // Only nights still ahead: "falls in this window" is a warning about a forecast.
+  const hol = days.filter(d => d.holiday && !d.closed && d.lead >= 1);
   if (hol.length) {
     parts.push(
       `${hol.map(d => d.holiday).join(', ')} ${hol.length === 1 ? 'falls' : 'fall'} in this window. ` +

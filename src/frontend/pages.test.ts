@@ -1082,16 +1082,33 @@ test('the forecast carries its track record on the panel', () => {
 test('the forecast draws the book as a fact and the rest as an estimate', () => {
   const home = readFileSync('public/index.html', 'utf8');
   const fn = home.slice(home.indexOf('function forecastPanel('), home.indexOf('function periodCostPanel('));
-  // The booked number is ALWAYS on the bar — inside when it fits, above when not.
-  const booked = fn.match(/num\(d\.booked\)/g) ?? [];
-  assert.ok(booked.length >= 2, 'a short bar loses its booked number');
-  // A forecast below the book is a line across it, never a shorter bar: the
+  // The booked number is ALWAYS printed for a night ahead, in ordinary text.
+  assert.match(fn, /num\(d\.booked\) \+ ' booked/, 'a night ahead loses its booked number');
+  // A forecast below the book is a tick across it, never a shorter bar: the
   // book is a fact and must not be drawn smaller than it is.
   assert.match(fn, /d\.mid < d\.booked/);
   // Last year's method, night by night, not only in the table.
   assert.match(fn, /d\.last_year !== null/);
   // A closed night says so in words.
-  assert.match(fn, /closed<\/text>/);
+  assert.match(fn, />closed</);
+});
+
+test('the forecast keeps every night on the strip, dated, and measures the past against it', () => {
+  /**
+   * Khai, 13 Oct 2026: "put the date and keep all days there and measure the
+   * current against the forecast". Each row carries its date; a night gone and
+   * today show what came in beside the forecast made the day before.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  const fn = home.slice(home.indexOf('function forecastPanel('), home.indexOf('function periodCostPanel('));
+  assert.match(fn, /day: 'numeric', month: 'short'/, 'a night without its date');
+  assert.match(fn, /d\.actual - d\.mid/, 'what came in is not measured against the forecast');
+  assert.match(fn, /'forecast ' \+ num\(d\.mid\)/);
+  // Only a finished night is judged: today's count is still moving.
+  assert.match(fn, /d\.lead === 0 \? '' : held/);
+  const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
+  assert.match(lib, /for \(const served of data\.served\.values\(\)\) served\.delete\(today\)/,
+    "today's half-served night would be learned from");
 });
 
 test('the forecast starts from the same book the strip above prints', () => {
@@ -1101,7 +1118,8 @@ test('the forecast starts from the same book the strip above prints', () => {
    * will spend ten minutes on.
    */
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
-  assert.match(lib, /out\[i\]\.service\s*\n?\s*\.filter\(d => d\.basis === 'book'\)/, 'the forecast reads its own book');
+  assert.match(lib, /out\[i\]\.service\.map\(d => d\.basis === 'book'\s*\n?\s*\? \{ date: d\.date, booked: d\.covers/, 'the forecast reads its own book');
+  assert.match(lib, /actual: d\.covers/, "what came in is not the strip's own number");
 });
 
 test('a failed forecast costs the panel, never the page, and names the likely cause', () => {

@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,599 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,605 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -816,6 +816,19 @@ it — the failure mode is not being wrong, it is being untrusted.
 of Neon Pigeon and never appear in a book. Holidays are flagged, not modelled.
 Seasonal lift is reported, not applied, until a backtest shows applying it helps
 — and it compares each night with ITS OWN weekday (BUILD_LOG 3.5).
+
+**Every night on the strip, dated, and the past measured** (Khai, 13 Oct
+2026: "put the date and keep all days there and measure the current against
+the forecast"). The panel shows the strip's own eight nights -- two back,
+today, five ahead -- one ROW per night (day, date, bar, numbers), because
+eight columns on a phone shrank every label below readable. Today and past
+nights are measured against the forecast made **the day before** (Khai's
+choice: the last number staff and prep were planned on), rebuilt by the
+backtest's own rule from the book as it stood a day earlier at this hour --
+nothing is stored. `cover_pickup` now runs through TODAY so today's book a
+day out exists, and today's half-served covers are dropped before anything
+learns from them. The difference is coloured only once a night is over:
+green inside the range, amber outside; today's stays grey.
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 
 ### Deferred: read-only SQL query tool
@@ -1323,7 +1336,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,599 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,605 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

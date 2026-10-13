@@ -12,7 +12,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   quantile, parsePickup, pickupForecast, lastYearForecast, backtest, scoreBacktest,
-  combineBacktests, seasonalLift, venueForecast, groupForecast, forecastNote, addDays,
+  combineBacktests, seasonalLift, venueForecast, groupForecast, forecastNote, addDays, dayBeforeForecast,
   MIN_OBSERVATIONS, type PickupData, type BacktestRecord,
 } from './forecast.js';
 
@@ -369,15 +369,55 @@ describe('the forecast for the coming days', () => {
     assert.match(f.note, /flagged, not modelled/);
   });
 
-  test('today is never forecast — it is live', () => {
-    const f = venueForecast(data, V, TODAY, [{ date: TODAY, booked: 40, closed: false }], [1], new Map());
+  test('today is never forecast live — it carries the day-before forecast and its own count', () => {
+    // History through today, so today's book as it stood yesterday exists; today's
+    // served covers are not final and are not in it.
+    const withToday = synthetic({ to: TODAY, served: d => (d === TODAY ? null : (new Date(`${d}T00:00:00Z`).getUTCDay() === 6 ? 120 : 60)) });
+    const f = venueForecast(withToday, V, TODAY, [{ date: TODAY, booked: 0, closed: false, actual: 47 }], [1], new Map());
+    assert.equal(f.days[0].actual, 47);
+    assert.equal(f.days[0].booked, 0, "the book at yesterday's cutoff");
+    // Pickup one day out is exactly 10 on this venue, so yesterday said 0 + 10.
+    assert.equal(f.days[0].mid, 10);
+    assert.equal(f.days[0].last_year, null, 'last year is a forward comparison only');
+  });
+
+  test('a past night is measured against the forecast made the day before it', () => {
+    // Friday 2 Oct served 60; the book a day out was 50 and the pickup is 10.
+    const f = venueForecast(data, V, TODAY, [{ date: '2026-10-02', booked: 0, closed: false, actual: 64 }], [1], new Map());
+    assert.equal(f.days[0].lead, -2);
+    assert.equal(f.days[0].actual, 64, "the strip's number, not a second read");
+    assert.equal(f.days[0].booked, 50);
+    assert.equal(f.days[0].mid, 60);
+    assert.match(f.note, /forecast the day before/);
+  });
+
+  test('the day-before forecast learns only from nights before it', () => {
+    /**
+     * The no-look-ahead rule again. A venue that doubled from 2 Oct onward: the
+     * forecast for 2 Oct made on 1 Oct cannot know, so it must still say 60.
+     */
+    const jump = synthetic({ served: d => (d >= '2026-10-02' ? 120 : 60), booked: () => 50 });
+    // Pickup was 10 on every night before 1 Oct and 70 from 2 Oct: seeing 2 Oct
+    // itself, or anything after, would lift this above 60.
+    assert.equal(dayBeforeForecast(jump, V, '2026-10-02')?.mid, 60);
+  });
+
+  test('a closed past night is closed, with no actual and no forecast', () => {
+    const f = venueForecast(data, V, TODAY, [{ date: '2026-10-02', booked: 0, closed: true, actual: 0 }], [1], new Map());
+    assert.equal(f.days[0].actual, null);
     assert.equal(f.days[0].mid, null);
+  });
+
+  test('a holiday already past is not announced as falling in the window', () => {
+    const f = venueForecast(data, V, TODAY, [{ date: '2026-10-02', booked: 0, closed: false, actual: 60 }], [1],
+      new Map([['2026-10-02', 'Some Day']]));
+    assert.ok(!/falls in this window/.test(f.note), f.note);
   });
 });
 
 describe('the group forecast', () => {
   const day = (over: Record<string, unknown>) => ({
-    date: '2026-10-05', lead: 1, booked: 50, closed: false, mid: 60, lo: 50, hi: 70, n: 12,
+    date: '2026-10-05', lead: 1, booked: 50, closed: false, actual: null, mid: 60, lo: 50, hi: 70, n: 12,
     last_year: 55, beyond_history: false, holiday: null, ...over,
   });
   const fc = (d: Record<string, unknown>) => ({ days: [day(d)] as any, accuracy: [], seasonal_lift_pct: null, note: '' });
@@ -391,6 +431,13 @@ describe('the group forecast', () => {
   test('no group number when an OPEN venue has none', () => {
     const g = groupForecast([fc({}), fc({ mid: null, lo: null, hi: null })], [], null);
     assert.equal(g.days[0].mid, null);
+  });
+
+  test('a past group night sums what came in, and has none when a venue is missing its count', () => {
+    const past = { lead: -1 };
+    const g = groupForecast([fc({ ...past, actual: 70 }), fc({ ...past, actual: 45 }), fc({ ...past, closed: true, actual: null })], [], null);
+    assert.equal(g.days[0].actual, 115);
+    assert.equal(groupForecast([fc({ ...past, actual: 70 }), fc({ ...past, actual: null })], [], null).days[0].actual, null);
   });
 
   test('says its range is wider than the truth', () => {
