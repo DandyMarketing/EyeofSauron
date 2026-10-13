@@ -29,6 +29,7 @@ import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { countUnresolved } from './ingest/resolved.js';
 import { askSauron } from './ai/engine.js';
 import { relightCharts } from './ai/chart-svg.js';
+import { unseenCount } from './lib/brief-unseen.js';
 import { noteVenueAllowed, knowledgeHealth } from './ai/knowledge.js';
 import { effectiveRole, mayRead, sensitivityOf, describeAllRoles } from './ai/data-domains.js';
 import { queryTools } from './ai/tools.js';
@@ -2387,19 +2388,17 @@ app.get('/api/dashboard/export', async (c) => {
   }
 });
 
-app.get('/api/recommendations', async (c) => {
-  const user = await requireAuth(c);
-  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
-
-  // A briefing is the densest commercial document this app produces — margins,
-  // wage lines, supplier names. If anything is behind the terms, this is.
-  const gated = requireTerms(c, user);
-  if (gated) return gated;
-
+/**
+ * The recommendations this reader may see: their venues, then their role's
+ * sensitivity filter. ONE function for the brief page and the menu badge, so
+ * the badge can never count an item the page would withhold. Throws on a
+ * failed read.
+ */
+async function visibleRecommendations(user: SessionUser): Promise<{ permitted: any[]; withheld: number }> {
   const venueIds = user.isOwner ? null : user.venues.map(v => v.venue_id);
   // An empty list must mean NO venues, never "no restriction" — the same
   // trap the system prompt's venue paragraph had to be written around.
-  if (venueIds && venueIds.length === 0) return c.json({ recommendations: [] });
+  if (venueIds && venueIds.length === 0) return { permitted: [], withheld: 0 };
 
   /**
    * CACHED IN TEN-MINUTE STEPS, keyed by WHICH VENUES -- never by person.
@@ -2417,9 +2416,7 @@ app.get('/api/recommendations', async (c) => {
    * the step is ten minutes and not an hour: a new briefing appears within
    * about ten minutes of being written.
    */
-  let data: any[];
-  try {
-    data = await recommendationsCache.get(
+  const data: any[] = await recommendationsCache.get(
       venueIds ? [...venueIds].sort().join(',') : 'all',
       new Date().toISOString().slice(0, 15),          // YYYY-MM-DDTHH:M -- a ten-minute step
       async () => {
@@ -2435,9 +2432,6 @@ app.get('/api/recommendations', async (c) => {
         return rows ?? [];
       },
     ).value;
-  } catch (e: any) {
-    return c.json({ error: e?.message ?? 'Could not read recommendations' }, 400);
-  }
 
   /**
    * The WHAT dimension applied to advice.
@@ -2451,6 +2445,62 @@ app.get('/api/recommendations', async (c) => {
   const role = effectiveRole(user);
   const permitted = data.filter((r: any) => mayRead(role, sensitivityOf(r)));
   const withheld = data.length - permitted.length;
+  return { permitted, withheld };
+}
+
+/**
+ * The number on the "Weekly brief" menu link: items in the latest week this
+ * person may see and has not opened since they were written (Khai, 13 Oct
+ * 2026: "no one actually knows it's there"). Same filter as the brief page.
+ *
+ * A badge is a nicety, so every failure here answers 0 rather than an error:
+ * a broken count must never put a red message in every page's menu. A
+ * missing brief_seen_at column (migration 063 not run) counts as never
+ * opened, and says so in the log.
+ */
+app.get('/api/brief/unseen', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ count: 0 });
+  if (requireTerms(c, user)) return c.json({ count: 0 });
+  try {
+    const { permitted } = await visibleRecommendations(user);
+    // row-cap: one profile, by id.
+    const { data: prof, error } = await supabaseAdmin.from('profiles').select('brief_seen_at').eq('id', user.id).maybeSingle();
+    if (error) console.warn(`[brief] cannot read brief_seen_at (migration 063?): ${error.message}`);
+    return c.json({ count: unseenCount(permitted, error ? null : prof?.brief_seen_at ?? null) });
+  } catch (e: any) {
+    console.warn(`[brief] unseen count failed: ${e?.message ?? e}`);
+    return c.json({ count: 0 });
+  }
+});
+
+/** Opening the brief page clears the badge, on every device this person uses. */
+app.post('/api/brief/seen', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const { error } = await supabaseAdmin.from('profiles').update({ brief_seen_at: new Date().toISOString() }).eq('id', user.id);
+  if (error) {
+    console.warn(`[brief] cannot stamp brief_seen_at (migration 063?): ${error.message}`);
+    return c.json({ ok: false });
+  }
+  return c.json({ ok: true });
+});
+
+app.get('/api/recommendations', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+
+  // A briefing is the densest commercial document this app produces — margins,
+  // wage lines, supplier names. If anything is behind the terms, this is.
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  let permitted: any[], withheld: number;
+  try {
+    ({ permitted, withheld } = await visibleRecommendations(user));
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? 'Could not read recommendations' }, 400);
+  }
 
   return c.json({
     withheld_for_role: withheld > 0 ? withheld : undefined,

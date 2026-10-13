@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 62 migrations, 25 query tools, 11 ingest sources, 1,589 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,591 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1177,6 +1177,24 @@ description under three characters is refused by the page and the server.
 gives the whole thing as one block of text (`reportMarkdown()`), to paste into
 a session for review.
 
+### The weekly brief is in every menu, 13 Oct 2026
+
+Khai: "no one actually knows it's there." No menu linked to it -- the only way
+in was a link inside a collapsed card on the dashboard. Every menu now has
+**Weekly brief** with a badge: how many items in the latest week this person
+may see and has not opened since they were written (`/api/brief/unseen`,
+`src/lib/brief-unseen.ts`). Opening the brief stamps `profiles.brief_seen_at`
+(migration 063), so it clears on every device. The count goes through
+`visibleRecommendations()` -- the SAME venue and role filter as the brief page,
+moved into one function so the badge cannot count what the page withholds. A
+failed count answers 0, never an error in the menu. Considered and not built
+(Khai chose the menu alone): the dashboard card open by default, a once-a-week
+pop-up, the headlines on the Query screen.
+
+**Bigger targets on computers** (same day): menu links 40 px tall with a hover
+background, buttons a 40 px floor, in `theme.css` under
+`(hover: hover) and (pointer: fine)` so phones are untouched.
+
 ### Menu names, 13 Oct 2026
 
 Khai: the chat is **Query** (asking is the point of it) and the planner is
@@ -1230,7 +1248,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,589 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,591 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

@@ -24,6 +24,7 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="modulepreload" href="/brief-badge.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -288,7 +289,7 @@
     <nav>
       <a href="/">Dashboard</a>
       <a href="/chat.html">Query</a>
-      <a href="/briefing.html" class="active">Briefing</a>
+      <a href="/briefing.html" class="active" data-brief-link>Weekly brief</a>
       <a href="/plan.html">Plan your event</a>
       <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
       <a href="#" id="logout-link">Logout</a>
@@ -330,6 +331,8 @@ let myVenues = [];
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
+  // Opening the brief clears the menu badge, on every device.
+  import('/brief-badge.js').then(m => m.markBriefSeen(token));
 
   /**
    * THE BRIEFING ITSELF STARTS NOW, not after the terms check and /api/me.

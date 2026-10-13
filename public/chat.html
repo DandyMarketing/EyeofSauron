@@ -26,6 +26,7 @@
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="modulepreload" href="/brief-badge.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -740,6 +741,7 @@
     </div>
     <nav id="nav" style="margin-left:auto;display:flex;gap:16px;font-size:15px">
       <a href="/" style="color:var(--text-muted);text-decoration:none">Dashboard</a>
+      <a href="/briefing.html" data-brief-link style="color:var(--text-muted);text-decoration:none">Weekly brief</a>
       <a href="/chat.html" style="color:var(--accent);text-decoration:none">Query</a>
       <a href="/plan.html" style="color:var(--text-muted);text-decoration:none">Plan your event</a>
       <a href="/admin.html" id="admin-link" style="color:var(--text-muted);text-decoration:none;display:none">Admin</a>
@@ -929,6 +931,8 @@ let myVenues = [];
   }
 
   authToken = session.access_token;
+  // How much of this week's brief is new to this person (menu badge).
+  import('/brief-badge.js').then(m => m.briefBadge(authToken));
   sidebar = window.ConvSidebar.mount({
     aside: document.getElementById('conv-sidebar'),
     header: document.querySelector('header'),

@@ -17,6 +17,7 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="modulepreload" href="/brief-badge.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -74,6 +75,7 @@
     </div>
     <nav id="nav">
       <a href="/">Dashboard</a>
+      <a href="/briefing.html" data-brief-link>Weekly brief</a>
       <a href="/daily.html" class="active">Daily</a>
       <a href="/chat.html">Query</a>
       <a href="/plan.html">Plan your event</a>
@@ -103,6 +105,8 @@ let token = null;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
+  // How much of this week's brief is new to this person (menu badge).
+  import('/brief-badge.js').then(m => m.briefBadge(token));
 
   // All three need only the token, so all three start now.
   const gate = import('/terms-gate.js');

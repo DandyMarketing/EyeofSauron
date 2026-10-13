@@ -17,6 +17,7 @@
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="modulepreload" href="/brief-badge.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -416,6 +417,7 @@
     </div>
     <nav>
       <a href="/" class="active">Dashboard</a>
+      <a href="/briefing.html" data-brief-link>Weekly brief</a>
       <a href="/daily.html" id="daily-link" style="display:none">Daily</a>
       <a href="/chat.html">Query</a>
       <a href="/plan.html">Plan your event</a>
@@ -456,6 +458,8 @@ let period = null;   // null until the server tells us what it opened on
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) { window.location.href = '/login.html'; return; }
   token = session.access_token;
+  // How much of this week's brief is new to this person (menu badge).
+  import('/brief-badge.js').then(m => m.briefBadge(token));
 
   /**
    * THE DATA STARTS NOW, not after the terms check and /api/me.

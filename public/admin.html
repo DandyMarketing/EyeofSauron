@@ -23,6 +23,7 @@
 <!--SAURON_CONFIG-->
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
+<link rel="modulepreload" href="/brief-badge.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -867,6 +868,7 @@
     </div>
     <nav>
       <a href="/">Dashboard</a>
+      <a href="/briefing.html" data-brief-link>Weekly brief</a>
       <a href="/chat.html">Query</a>
       <a href="/plan.html">Plan your event</a>
       <a href="/admin.html" class="active">Admin</a>
@@ -906,6 +908,8 @@ let currentUserId = null;
   }
 
   token = session.access_token;
+  // How much of this week's brief is new to this person (menu badge).
+  import('/brief-badge.js').then(m => m.briefBadge(token));
 
   /**
    * The default tab's data starts NOW, alongside /api/me.

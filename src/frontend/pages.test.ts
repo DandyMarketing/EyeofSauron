@@ -1254,14 +1254,17 @@ test('the briefing list is cached by venue scope, and a rating clears it', () =>
    * — appears within about ten minutes.
    */
   const server = readFileSync('src/server.ts', 'utf8');
-  const route = server.slice(server.indexOf("app.get('/api/recommendations'"), server.indexOf("app.post('/api/recommendations/:id/rate'"));
+  // The read and both filters live in visibleRecommendations() since 13 Oct
+  // 2026, shared by the brief page and the menu badge.
+  const route = server.slice(server.indexOf('async function visibleRecommendations('), server.indexOf("app.post('/api/recommendations/:id/rate'"));
+  assert.match(server.slice(server.indexOf("app.get('/api/recommendations'")), /await visibleRecommendations\(user\)/, 'the brief page no longer uses the shared filter');
   assert.match(route, /recommendationsCache\.get\(/);
   assert.match(route, /venueIds \? \[\.\.\.venueIds\]\.sort\(\)\.join\(','\) : 'all'/, 'the cache is keyed by something other than venue scope');
   assert.match(route, /\.slice\(0, 15\)/, 'the refresh step is no longer ten minutes');
   // The role filter runs on the cached rows, every request.
   assert.match(route, /data\.filter\(\(r: any\) => mayRead\(role, sensitivityOf\(r\)\)\)/);
   // An empty venue list is still NO venues, never all of them.
-  assert.match(route, /if \(venueIds && venueIds\.length === 0\) return c\.json\(\{ recommendations: \[\] \}\)/);
+  assert.match(route, /if \(venueIds && venueIds\.length === 0\) return \{ permitted: \[\], withheld: 0 \}/);
 
   const rate = server.slice(server.indexOf("app.post('/api/recommendations/:id/rate'"), server.indexOf("app.post('/api/recommendations/:id/rate'") + 3000);
   assert.match(rate, /recommendationsCache\.clear\(\)/, 'a rating will not show until the cache refreshes');
@@ -1351,4 +1354,21 @@ test('a page that shows the working Eye loads it', () => {
   const css = readFileSync('public/theme.css', 'utf8');
   assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.eye-busy \.eb-pupil, \.eye-busy \.eb-lids \{ animation: none; \}/, 'reduced motion must still the working eye');
   assert.match(readFileSync('public/eye-busy.js', 'utf8'), /class="eb-pupil"/, 'the pupil has to be its own shape to move');
+});
+
+test('every menu links the weekly brief, and its badge uses the brief\'s own filter', () => {
+  /**
+   * Khai, 13 Oct 2026: "no one actually knows it's there" -- no menu linked to
+   * it. Every page with a menu now carries the link, and the badge counts
+   * through visibleRecommendations(), so it never counts an item the brief
+   * itself would withhold from this reader.
+   */
+  for (const page of ['index.html', 'chat.html', 'plan.html', 'daily.html', 'admin.html', 'briefing.html']) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    assert.match(html, /<a href="\/briefing\.html"[^>]*data-brief-link[^>]*>Weekly brief<\/a>/, `${page} has no Weekly brief link`);
+    assert.match(html, /<link rel="modulepreload" href="\/brief-badge\.js">/, `${page} imports /brief-badge.js without preloading it`);
+  }
+  const server = readFileSync('src/server.ts', 'utf8');
+  const unseen = server.slice(server.indexOf("app.get('/api/brief/unseen'"), server.indexOf("app.post('/api/brief/seen'"));
+  assert.match(unseen, /await visibleRecommendations\(user\)/, 'the badge must count through the brief\'s own filter');
 });

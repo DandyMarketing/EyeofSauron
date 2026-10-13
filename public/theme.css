@@ -182,3 +182,19 @@ select:focus { outline: none; border-color: var(--accent); }
      raising it to 40 px swelled every venue tag on the users list. */
   :where(.vx, .fremove, .ask-close, #chart-modal-close) { min-height: 0; }
 }
+
+/* The count on the "Weekly brief" menu link (/brief-badge.js). */
+.nav-badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  vertical-align: 1px;
+}
