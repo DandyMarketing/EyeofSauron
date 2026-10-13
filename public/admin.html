@@ -631,6 +631,10 @@
     width: 20px; height: 20px; border-radius: 50%; padding: 0;
   }
   .vx:hover { background: rgba(232, 64, 64, 0.15); color: var(--error); }
+  .vpill[style] { font-weight: 600; }
+  .vpill[style] .vx { color: inherit; opacity: .75; }
+  .vpill[style] .vx:hover { opacity: 1; background: rgba(0,0,0,.2); color: inherit; }
+  .vdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .u-status { font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
   .u-terms .ok { color: var(--success); }
   .u-terms .warn { color: var(--accent); }
@@ -1629,6 +1633,32 @@ async function refreshUsers() {
  * button that opens the grant form, password reset and delete for that row.
  */
 const ROLE_ORDER = ['owner', 'finance', 'manager', 'staff'];
+
+/**
+ * Each venue in its own brand colour, so a list of names reads at a glance
+ * (Khai, 13 Oct 2026: "brand colour Neon Pigeon etc. ... people are visual").
+ * Neon Pigeon's is Khai's exact code; Firangi's "maroon" and Fat Prince's
+ * "khaki" are the standard web shades until brand codes replace them. The text
+ * colour is chosen for contrast on each: light on pink and maroon, dark on khaki.
+ */
+const VENUE_COLOURS = {
+  'neon-pigeon':   { bg: '#E5007E', fg: '#ffffff' },
+  'super-firangi': { bg: '#800000', fg: '#ffffff' },
+  'fat-prince':    { bg: '#F0E68C', fg: '#1a1a1a' },
+};
+const VENUE_BY_NAME = { 'neon pigeon': 'neon-pigeon', 'firangi superstar': 'super-firangi', 'fat prince': 'fat-prince' };
+function venueColour(slugOrName) {
+  const key = String(slugOrName || '').toLowerCase();
+  return VENUE_COLOURS[key] || VENUE_COLOURS[VENUE_BY_NAME[key]] || null;
+}
+function venuePillStyle(slugOrName) {
+  const c = venueColour(slugOrName);
+  return c ? ` style="background:${c.bg};color:${c.fg};border-color:${c.bg}"` : '';
+}
+function venueDot(slugOrName) {
+  const c = venueColour(slugOrName);
+  return c ? `<span class="vdot" style="background:${c.bg}"></span>` : '';
+}
 const openManage = new Set();
 
 function fillUsers(usersSection, users) {
@@ -1656,9 +1686,11 @@ function fillUsers(usersSection, users) {
     // Access grouped by role: "Owner · Neon Pigeon · Fat Prince", x inside each venue.
     const byRole = {};
     for (const r of user.roles || []) (byRole[r.role] = byRole[r.role] || []).push(r);
+    // Same venue order on every row, so the colours line up down the page.
+    for (const list of Object.values(byRole)) list.sort((a, b) => String(a.venue_name).localeCompare(String(b.venue_name)));
     const access = ROLE_ORDER.filter(role => byRole[role]).map(role =>
       `<div class="acc-line"><span class="role-badge role-${role}">${esc(role[0].toUpperCase() + role.slice(1))}</span>` +
-      byRole[role].map(r => `<span class="vpill">${esc(r.venue_name)}<button class="vx" title="Remove ${esc(role)} at ${esc(r.venue_name)}" data-role="${r.id}" data-label="${esc(role)} at ${esc(r.venue_name)} for ${esc(user.full_name || user.email)}" onclick="confirmRemoveRole(this)">×</button></span>`).join('') +
+      byRole[role].map(r => `<span class="vpill"${venuePillStyle(r.venue_slug || r.venue_name)}>${esc(r.venue_name)}<button class="vx" title="Remove ${esc(role)} at ${esc(r.venue_name)}" data-role="${r.id}" data-label="${esc(role)} at ${esc(r.venue_name)} for ${esc(user.full_name || user.email)}" onclick="confirmRemoveRole(this)">×</button></span>`).join('') +
       '</div>').join('') || '<span class="muted">No access yet</span>';
 
     /**
@@ -1668,7 +1700,7 @@ function fillUsers(usersSection, users) {
      * role there, which is a thing somebody legitimately wants to do.
      */
     const venueChips = venues.map(v =>
-      `<label class="venue-chip"><input type="checkbox" class="venue-pick" data-user="${user.id}" value="${v.id}" data-name="${esc(v.name)}"><span>${esc(v.name)}</span></label>`
+      `<label class="venue-chip"><input type="checkbox" class="venue-pick" data-user="${user.id}" value="${v.id}" data-name="${esc(v.name)}">${venueDot(v.slug || v.name)}<span>${esc(v.name)}</span></label>`
     ).join('');
 
     html += `<div class="urow">
