@@ -639,6 +639,8 @@
   .u-manage { grid-column: 1 / -1; border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px; }
   .u-manage[hidden] { display: none; }
   .u-manage .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .u-manage .m-name input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px; }
   .u-manage .m-account { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
   @media (max-width: 720px) {
     .urow { grid-template-columns: 1fr auto; }
@@ -1562,7 +1564,13 @@ function fillUsers(usersSection, users) {
       </div>
       <div class="u-act"><button class="btn btn-small btn-outline" onclick="toggleManage('${user.id}')">${openManage.has(user.id) ? 'Close' : 'Manage'}</button></div>
       <div class="u-manage" id="manage-${user.id}"${openManage.has(user.id) ? '' : ' hidden'}>
-        <div class="m-label">Give access</div>
+        <div class="m-label">Name</div>
+        <div class="role-actions m-name">
+          <input type="text" id="name-${user.id}" value="${esc(user.full_name || '')}" maxlength="120" placeholder="Full name"
+            onkeydown="if(event.key==='Enter')saveName('${user.id}')">
+          <button class="btn btn-small" id="save-name-${user.id}" onclick="saveName('${user.id}')">Save name</button>
+        </div>
+        <div class="m-label" style="margin-top:12px">Give access</div>
         <div class="venue-picker">${venueChips}</div>
         <div class="role-actions">
           <select id="role-${user.id}" onchange="showRoleAccess('${user.id}')">
@@ -1596,6 +1604,23 @@ function toggleManage(userId) {
   if (opening) openManage.add(userId); else openManage.delete(userId);
   const btn = panel.parentElement.querySelector('.u-act button');
   if (btn) btn.textContent = opening ? 'Close' : 'Manage';
+}
+
+// Correct a name typed wrong when the person was added.
+async function saveName(userId) {
+  const input = document.getElementById('name-' + userId);
+  const btn = document.getElementById('save-name-' + userId);
+  const name = (input?.value || '').trim();
+  if (!name) { toast('error', 'A name is required.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const res = await api('PATCH', '/admin/api/users/' + userId, { full_name: name });
+  if (res.error) {
+    toast('error', res.error);
+    if (btn) { btn.disabled = false; btn.textContent = 'Save name'; }
+    return;
+  }
+  toast('success', 'Name changed to ' + res.full_name);
+  await refreshUsers();
 }
 
 // The x is small, so a slip of the thumb asks before it takes access away.

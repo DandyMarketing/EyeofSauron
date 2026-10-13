@@ -310,6 +310,27 @@ export async function listUsers() {
  * from PUBLIC_APP_URL so a preview deploy invites into itself rather than into
  * production.
  */
+/**
+ * Correct a person's name (Khai, 13 Oct 2026: "allow to edit the name if put
+ * in, to adjust if error"). The name lives on `profiles`, which is where the
+ * app reads it -- the greeting, "the person planning" in the event brief, the
+ * Monday owner match. The invitation's metadata copy is updated too, so the
+ * two never disagree. Their cached session is dropped so it shows at once.
+ */
+export async function renameUser(userId: string, raw: unknown): Promise<string> {
+  const name = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  if (!name) throw new Error('A name is required.');
+  if (name.length > 120) throw new Error('That name is too long.');
+  // row-cap: one profile by id.
+  const { data, error } = await supabaseAdmin.from('profiles').update({ full_name: name }).eq('id', userId).select('id');
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) throw new Error('That user was not found.');
+  // Best effort: the profile is what the app reads.
+  await supabaseAdmin.auth.admin.updateUserById(userId, { user_metadata: { full_name: name } }).catch(() => {});
+  forgetSessions(userId);
+  return name;
+}
+
 export async function inviteUser(email: string, fullName: string) {
   const base = (process.env.PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
   if (!base) {

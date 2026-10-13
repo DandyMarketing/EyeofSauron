@@ -61,7 +61,7 @@ import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
 import { fetchSections } from './lib/staffany-client.js';
-import { validateSession, listUsers, inviteUser, assignRole, removeRole, deleteUser, resetUserPassword, acceptTerms, supabaseAdmin } from './auth/session.js';
+import { validateSession, listUsers, inviteUser, renameUser, assignRole, removeRole, deleteUser, resetUserPassword, acceptTerms, supabaseAdmin } from './auth/session.js';
 import { TERMS_VERSION, TERMS_TITLE, TERMS_BODY } from './auth/terms.js';
 import type { ChatMessage } from './ai/engine.js';
 import type { SessionUser } from './auth/session.js';
@@ -1888,6 +1888,19 @@ app.delete('/admin/api/roles/:roleId', async (c) => {
   try {
     await removeRole(c.req.param('roleId'));
     return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+app.patch('/admin/api/users/:userId', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    const name = await renameUser(c.req.param('userId'), body?.full_name);
+    console.log(`[admin] ${user.email ?? user.id} renamed ${c.req.param('userId')} to "${name}"`);
+    return c.json({ ok: true, full_name: name });
   } catch (e: any) {
     return c.json({ error: e.message }, 400);
   }
