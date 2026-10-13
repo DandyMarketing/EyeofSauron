@@ -1257,7 +1257,7 @@ a session for review.
 
 Khai: "no one actually knows it's there." No menu linked to it -- the only way
 in was a link inside a collapsed card on the dashboard. Every menu now has
-**Weekly brief** with a badge: how many items in the latest week this person
+**Weekly Recommends** (called "Weekly brief" until Khai renamed it the same day; the page is still `/briefing.html`) with a badge: how many items in the latest week this person
 may see and has not opened since they were written (`/api/brief/unseen`,
 `src/lib/brief-unseen.ts`). Opening the brief stamps `profiles.brief_seen_at`
 (migration 063), so it clears on every device. The count goes through
@@ -1282,7 +1282,7 @@ shuffling"). Each page had carried its own -- Query before Weekly brief on one,
 Daily on two of six, 14 px here and 15 px there -- and the owner links, Logout
 and the brief badge appeared only after sign-in, pushing a right-aligned menu
 sideways. Now every page has the same `<nav class="site-nav">` (order:
-Dashboard, Weekly brief, Query, Plan, Daily, Settings (a cog, renamed from
+Dashboard, Weekly Recommends, Query, Plan, Daily, Settings (a cog, renamed from
 Admin on 13 Oct 2026), the light/dark switch, Logout), styled
 only in `theme.css` with the header around it, and `pages.test.ts` fails if
 any page's menu differs. Owner links and the badge are painted at first paint

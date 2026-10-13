@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Briefing - Sauron</title>
+<title>Weekly Recommends - Sauron</title>
 <!--
   Start the auth client downloading while the HTML is still being parsed.
 
@@ -314,12 +314,12 @@
   <header class="site-header">
     <div class="logo"></div>
     <div>
-      <h1>Weekly Briefing</h1>
+      <h1>Weekly Recommends</h1>
       <div class="subtitle">The Dandy Collection</div>
     </div>
     <nav class="site-nav">
       <a href="/">Dashboard</a>
-      <a href="/briefing.html" class="active" data-brief-link>Weekly brief</a>
+      <a href="/briefing.html" class="active" data-brief-link>Weekly Recommends</a>
       <a href="/chat.html">Query</a>
       <a href="/plan.html">Plan</a>
       <a href="/daily.html" id="daily-link" hidden>Daily</a>
@@ -531,7 +531,7 @@ function renderPeriod(key, rows, withheld, isLatest) {
    */
   let html =
     '<div class="print-title">' +
-      '<strong>Weekly Briefing</strong> · The Dandy Collection<br>' +
+      '<strong>Weekly Recommends</strong> · The Dandy Collection<br>' +
       escapeHtml(venues.join(', ')) + ' · ' + escapeHtml(start) + ' to ' + escapeHtml(end) +
     '</div>' +
     '<div class="run-head"><h2>' + escapeHtml(start) + ' to ' + escapeHtml(end) + '</h2>' +

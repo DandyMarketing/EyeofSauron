@@ -1385,7 +1385,7 @@ test('every menu links the weekly brief, and its badge uses the brief\'s own fil
    */
   for (const page of ['index.html', 'chat.html', 'plan.html', 'daily.html', 'admin.html', 'briefing.html']) {
     const html = readFileSync(`public/${page}`, 'utf8');
-    assert.match(html, /<a href="\/briefing\.html"[^>]*data-brief-link[^>]*>Weekly brief<\/a>/, `${page} has no Weekly brief link`);
+    assert.match(html, /<a href="\/briefing\.html"[^>]*data-brief-link[^>]*>Weekly Recommends<\/a>/, `${page} has no Weekly Recommends link`);
     assert.match(html, /<link rel="modulepreload" href="\/brief-badge\.js">/, `${page} imports /brief-badge.js without preloading it`);
   }
   const server = readFileSync('src/server.ts', 'utf8');
@@ -1408,7 +1408,7 @@ test('every page carries the same menu, in the same order', () => {
     return [page, nav![1].replace(/ class="active"/g, '').replace(/ active(?=")/g, '').replace(/ hidden(?=[ >])/g, '').replace(/\s+/g, ' ').trim()] as const;
   });
   for (const [page, menu] of menus) assert.equal(menu, menus[0][1], `${page}'s menu differs from the dashboard's`);
-  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan.*Daily.*aria-label="Settings".*Logout/);
+  assert.match(menus[0][1], /Dashboard.*Weekly Recommends.*Query.*Plan.*Daily.*aria-label="Settings".*Logout/);
   // Settings is a cog, not a word (Khai, 13 Oct 2026), and still named for a screen reader.
   assert.ok(!/>Admin</.test(menus[0][1]), 'the menu still says Admin');
 });

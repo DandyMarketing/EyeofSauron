@@ -235,7 +235,7 @@ select:focus { outline: none; border-color: var(--accent); }
   :where(.vx, .fremove, .ask-close, #chart-modal-close) { min-height: 0; }
 }
 
-/* The count on the "Weekly brief" menu link (/brief-badge.js). */
+/* The count on the "Weekly Recommends" menu link (/brief-badge.js). */
 .nav-badge {
   display: inline-block;
   min-width: 18px;

@@ -1,5 +1,5 @@
 /**
- * The "Weekly brief" menu link and its badge (Khai, 13 Oct 2026: the weekly
+ * The "Weekly Recommends" menu link (called "Weekly brief" until 13 Oct 2026) and its badge (Khai, 13 Oct 2026: the weekly
  * brief "needs to live better ... no one actually knows it's there").
  *
  * Every page's menu carries the link; this fills in how many items in the
@@ -17,7 +17,7 @@ export async function briefBadge(token) {
     // The menu's own helper (in every page's menu): draws or clears the badge
     // and remembers it, so the next page paints it before it asks.
     if (window.setNavBrief) window.setNavBrief(count);
-    if (count > 0) link.title = count + (count === 1 ? ' new item' : ' new items') + ' in this week\'s brief';
+    if (count > 0) link.title = count + (count === 1 ? ' new item' : ' new items') + ' in this week\'s recommendations';
   } catch { /* a badge is a nicety: say nothing */ }
 }
 
