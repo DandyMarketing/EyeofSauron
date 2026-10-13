@@ -1549,3 +1549,19 @@ test('every page that draws a chart can open it full screen', () => {
   assert.match(js, /size\(natural > fit \? natural : fit\)/);
   assert.match(js, /ZOOMABLE = '\.chart-card, \.chart, \.ask-chart, \.zoom-chart'/);
 });
+
+test('the dashboard folds its explanations behind "How to read this"', () => {
+  /**
+   * Khai, 13 Oct 2026: the definitions under every panel buried the figures --
+   * "a drop down expand to understand the figures ... so it tidies up the
+   * words shown". Warnings that change how a number reads TODAY stay out.
+   */
+  const home = readFileSync('public/index.html', 'utf8');
+  assert.match(home, /function explain\(\.\.\.parts\)/);
+  assert.match(home, /<details class="explain"><summary>How to read this<\/summary>/);
+  assert.match(home, /explain\(esc\(f\.note\)\)/, "the forecast's method is printed in full again");
+  assert.match(home, /serviceNoteHtml\(v\.service_note\)/, "the service note's caveats are printed in full again");
+  // The provisional and still-open warnings are NOT folded.
+  assert.match(home, /'<p class="figure-note provisional">' \+ text/);
+  assert.match(home, /'<p class="figure-note provisional">' \+ esc\(c\.month\.label\) \+ ' is still open in Xero/);
+});

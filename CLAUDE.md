@@ -931,6 +931,15 @@ cuts the windows to the last day there is, and the message says so.
 pass through Meta's servers, so they are not end-to-end encrypted to us -- the
 same reason as Telegram.
 
+**The dashboard's explanations fold away** (Khai, 13 Oct 2026: "a drop down
+expand to understand the figures ... so it tidies up the words shown"). Every
+panel's definitions and method notes sit behind **How to read this**
+(`explain()` in `index.html`), closed by default. What changes how a number
+reads TODAY stays in view: provisional and still-open-month warnings, the
+accounts excluded from the cost percentages, the chart's one-line story, the
+service note's as-of line (its caveats fold), and errors. The forecast's
+accuracy table stays out too -- its track record belongs beside it.
+
 ### Event P&L in Excel: built 12 Oct 2026
 
 The planner's brief downloads as a workbook in the group's own template shape

@@ -205,6 +205,25 @@
   }
   /* A figure that will still move. Amber, not red: nothing is wrong with it. */
   .figure-note.provisional { color: var(--warn); padding-top: 0; }
+  /*
+   * "How to read this" (Khai, 13 Oct 2026: the definitions under every panel
+   * buried the figures -- "a drop down ... so it tidies up the words shown").
+   * Folded by default. What changes how you read a number TODAY stays out:
+   * provisional and still-open warnings, exclusions, the live as-of line.
+   */
+  details.explain { padding: 2px 14px 10px; }
+  details.explain > summary {
+    list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted); padding: 6px 0; user-select: none;
+  }
+  details.explain > summary::-webkit-details-marker { display: none; }
+  details.explain > summary::before {
+    content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg); transition: transform .15s; margin-right: 2px;
+  }
+  details.explain[open] > summary::before { transform: rotate(45deg); }
+  details.explain > summary:hover { color: var(--text); }
+  details.explain .figure-note { padding: 2px 0 0; }
 
   /* --- forward book ------------------------------------------------------ */
   .book { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; }
@@ -652,6 +671,22 @@ const money2 = n => (n === null || n === undefined)
 const pct = n => (n === null || n === undefined) ? '—' : Number(n).toFixed(1) + '%';
 const num = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('en-SG');
 
+/**
+ * The explanation under a panel, folded behind "How to read this" (Khai, 13 Oct
+ * 2026). Pass HTML that is already escaped; each piece is its own paragraph.
+ */
+function explain(...parts) {
+  const body = parts.filter(Boolean).map(p => '<p class="figure-note">' + p + '</p>').join('');
+  return body ? '<details class="explain"><summary>How to read this</summary>' + body + '</details>' : '';
+}
+
+/** The live as-of line stays in view; how it was counted folds away. */
+function serviceNoteHtml(note) {
+  const m = String(note || '').match(/^(.+?[.!?])\s+([\s\S]+)$/);
+  if (!m) return note ? '<p class="figure-note">' + esc(note) + '</p>' : '';
+  return '<p class="figure-note" style="padding-bottom:0">' + esc(m[1]) + '</p>' + explain(esc(m[2]));
+}
+
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s == null ? '' : String(s);
@@ -774,7 +809,7 @@ function draw(recData) {
     '<div class="panel"><h2>' + esc(w.label) + '</h2><table><tbody>' +
     rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
     '</tbody></table>' +
-    '<p class="figure-note">Food &amp; beverage sales = food + beverage before discounts, service charge excluded. ' +
+    explain('Food &amp; beverage sales = food + beverage before discounts, service charge excluded. ' +
     'Monday\'s weekly reports call food + beverage + service charge (+ delivery) "Gross Sales", about 10% more; ' +
     'net sales is the same in both · ' +
     'Net sales = food &amp; beverage less discounts plus the 10% service charge, so it sits above it · ' +
@@ -782,7 +817,7 @@ function draw(recData) {
     // The two per-unit figures are on DIFFERENT bases and the note says so:
     // spend per head leaves service charge out, average check keeps it in.
     'Spend per head = food &amp; beverage ÷ covers, no service charge · ' +
-    'Average check = net sales ÷ bills, so it includes service charge and is after discounts; it is per bill, not per person</p></div>';
+    'Average check = net sales ÷ bills, so it includes service charge and is after discounts; it is per bill, not per person') + '</div>';
 
   document.getElementById('app').innerHTML =
     adviceLine(recData, v, w.today) + periodChips() + chips + windowLine + tiles + chartPanel(v) +
@@ -1142,9 +1177,9 @@ function chartPanel(v) {
 
   return '<div class="chart"><h2>Sales by day, food and beverage</h2>' + legend +
          '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Food and beverage sales by day">' + svg + '</svg>' +
-         '<p class="figure-note" style="padding:6px 0 0">' + story +
-         ' Bars are food + beverage, before discounts and excluding service charge \u2014 the basis the mix is measured on. ' +
-         'Net sales in the tiles above is a different figure: it carries the service charge and is net of discounts.</p>' +
+         (story ? '<p class="figure-note" style="padding:6px 0 0">' + story + '</p>' : '') +
+         explain('Bars are food + beverage, before discounts and excluding service charge \u2014 the basis the mix is measured on. ' +
+         'Net sales in the tiles above is a different figure: it carries the service charge and is net of discounts.') +
          '</div>';
 }
 
@@ -1223,7 +1258,7 @@ function servicePanel(v, w) {
   return '<div class="panel"><h2>Service' + age + '</h2>' +
          split +
          '<div style="padding:10px 14px 12px"><div class="book">' + cells + '</div></div>' +
-         '<p class="figure-note">' + esc(v.service_note || '') + '</p></div>';
+         serviceNoteHtml(v.service_note) + '</div>';
 }
 
 /**
@@ -1404,7 +1439,7 @@ function forecastPanel(payload, v) {
   return '<div class="panel"><h2>Forecast covers</h2>' +
     '<div class="fc" role="img" aria-label="Forecast covers by night">' + rows + '</div>' +
     legend + table +
-    '<p class="figure-note">' + esc(f.note) + '</p></div>';
+    explain(esc(f.note)) + '</div>';
 }
 
 // Invoices reach Xero up to a week after their date, so a period that has just
@@ -1443,8 +1478,8 @@ function sushiWeekPanel(payload, v, w) {
       '<tr><td style="white-space:nowrap">Sushi sales</td>' + sales + '</tr>' +
       '<tr><td style="white-space:nowrap">Sushi cost</td><td>' + money(s.cogs) + share + ' ' + cov(s.cost_coverage_pct) + '</td></tr>' +
     '</tbody></table>' +
-    '<p class="figure-note">Not included in Food &amp; beverage sales or the food % above. Sales from sushi invoices in Xero, cost from supplier bills, both dated in this period. ' +
-    'Coverage is what the ledger says they explain, measured on the last complete month. Sushi delivery is not included.</p>' +
+    explain('Not included in Food &amp; beverage sales or the food % above. Sales from sushi invoices in Xero, cost from supplier bills, both dated in this period. ' +
+    'Coverage is what the ledger says they explain, measured on the last complete month. Sushi delivery is not included.') +
     '</div>';
 }
 
@@ -1471,10 +1506,12 @@ function periodCostPanel(payload, v, w) {
   return '<div class="panel"><h2>Flash COGS · ' + esc(w.label.toLowerCase()) + '</h2>' +
     settlementNote(c.settlement) +
     '<table><tbody>' + row('Food', c.food) + row('Beverage', c.beverage) + '</tbody></table>' +
-    '<p class="figure-note">Purchases in this period from supplier bills, with no stock count: what was BOUGHT, not what was used. ' +
+    explain('Purchases in this period from supplier bills, with no stock count: what was BOUGHT, not what was used. ' +
     'Stock is counted at month end, so the monthly cost of sales below is the cost of what was used. One large delivery lands in the week it was invoiced, so read the direction over several weeks, not the level of one. ' +
-    '"Covered" compares last month\'s bills with the ledger\'s cost for that month. The gap includes the month-end stock change, so read it as "are the bills all there", not as an exact figure: well under 100% usually means costs paid by card or bank transfer that never reach a bill.</p>' +
-    (c.caveats.length ? '<p class="figure-note">' + c.caveats.map(x => esc(x)).join('<br><br>') + '</p>' : '') +
+    '"Covered" compares last month\'s bills with the ledger\'s cost for that month. The gap includes the month-end stock change, so read it as "are the bills all there", not as an exact figure: well under 100% usually means costs paid by card or bank transfer that never reach a bill.',
+      // This period's own cautions fold in with it; the row above already says
+      // when a figure is unusable ("only 0% on bills").
+      ...c.caveats.map(x => esc(x))) +
     '</div>';
 }
 
@@ -1542,8 +1579,8 @@ function costPanel(payload, v) {
         r.unclassified.map(u => esc(u.account) + ' ' + money(u.amount)).join(' · ') +
         '. Packaging and delivery commission belong here; an unmapped account does not. Check them before quoting these as the full cost of sales.</p>'
       : '') +
-    '<p class="figure-note">Cost from the Xero P&amp;L, sales from Revel, measured against food &amp; beverage sales before discounts. ' +
-    'A cost-of-sales line is PURCHASES in the month, not consumption, unless a stock movement is posted \u2014 so a late delivery lands against sales it has not produced yet. Read the trend over a quarter before acting on one month.</p>' +
+    explain('Cost from the Xero P&amp;L, sales from Revel, measured against food &amp; beverage sales before discounts. ' +
+    'A cost-of-sales line is PURCHASES in the month, not consumption, unless a stock movement is posted \u2014 so a late delivery lands against sales it has not produced yet. Read the trend over a quarter before acting on one month.') +
     '</div>';
 }
 
@@ -1580,9 +1617,9 @@ function sushiPanel(payload, v) {
       '<tr><td style="white-space:nowrap">Sushi cost</td><td>' + money(s.cogs) +
         (s.pct === null ? ' \u2014 no sushi sales' : ' \u2014 ' + pct(s.pct) + ' of sushi sales') + '</td></tr>' +
     '</tbody></table>' +
-    '<p class="figure-note">Not included in Food &amp; beverage sales or the food % above: sushi is sold wholesale and invoiced in Xero, not rung through Revel. ' +
+    explain('Not included in Food &amp; beverage sales or the food % above: sushi is sold wholesale and invoiced in Xero, not rung through Revel. ' +
     'Both figures are from the Xero P&amp;L' + (s.accounts.length ? ' (cost: ' + s.accounts.map(esc).join(', ') + ')' : '') +
-    '. Sushi delivery is not included.</p>' +
+    '. Sushi delivery is not included.') +
     '</div>';
 }
 
@@ -1673,8 +1710,6 @@ function retentionPanel(payload, v) {
     : 'Ever, not just the last year \u2014 any guest we have a record of.';
 
   return '<div class="panel"><h2>Guests</h2>' +
-    '<p class="figure-note" style="padding-bottom:4px">' + since +
-    ' Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.</p>' +
     '<div class="pie-row">' +
       '<svg viewBox="0 0 104 104" class="pie" role="img" aria-label="Guest mix">' + wedges + '</svg>' +
       '<div class="pie-key">' +
@@ -1682,9 +1717,10 @@ function retentionPanel(payload, v) {
       '</div>' +
     '</div>' +
     '<table><tbody><tr><td>Walk-ins</td><td>' + num(r.counts.walk_in_guests) + '</td></tr></tbody></table>' +
-    '<p class="figure-note">Walk-ins carry no booking so they cannot be matched to a guest, and are not part of the mix above. ' +
-    esc(r.plain) +
-    ' Repeat share falls when a venue wins a lot of new guests, so read it next to the booked-guest count rather than on its own.</p>' +
+    explain(esc(r.plain),
+      since + ' Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.',
+      'Walk-ins carry no booking so they cannot be matched to a guest, and are not part of the mix above. ' +
+      'Repeat share falls when a venue wins a lot of new guests, so read it next to the booked-guest count rather than on its own.') +
     '</div>';
 }
 
