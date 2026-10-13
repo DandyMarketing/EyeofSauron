@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,592 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,593 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1087,6 +1087,19 @@ that skips it or defines its own `--bg`. Inter is vendored in
 `public/vendor/fonts` -- never a font CDN. Text colours were measured against
 white (WCAG): body 14.3, muted 5.5, accent 4.6.
 
+**Dark mode** (Khai, same day): the same warm family at night, in `theme.css`
+under `:root[data-theme="dark"]`. It follows each device's light/dark
+setting, and the moon/sun button in the menu overrides it per browser
+(`sauron.theme`); choosing what the device already says goes back to
+following the device. A script at the top of every page sets `data-theme`
+BEFORE the stylesheet loads, so nothing flashes light first -- which is also
+why there is one selector, not a media-query copy of every rule. Measured on
+the dark surface: text 12.7, muted 6.0, accent 6.5. The accent is lighter in
+the dark, so text on it turns dark (`--on-accent`). Stored charts carry their
+colours written in, so CSS repaints exactly the renderer's ink, axis and grid
+values in dark (CSS outranks an SVG's own colour attributes); the shareable PNG
+stays light on purpose. A test fails on a page without the theme script.
+
 **Charts are stored as SVG**, inside recommendations and saved chats, so the
 ones drawn for the old dark look carried near-white text that vanishes on
 cream. `relightChart()` (`src/ai/chart-svg.ts`) repaints them colour for colour
@@ -1260,7 +1273,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,592 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,593 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

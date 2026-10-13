@@ -4,6 +4,28 @@
 <meta charset="UTF-8">
 <meta http-equiv="refresh" content="0;url=/admin.html">
 <title>Redirecting...</title>
+<script>
+/* Light or dark, decided before anything draws so there is no flash: this
+   browser's choice from the menu switch if it made one, else the device's own
+   setting, followed live. theme.css holds both palettes. */
+(function () {
+  var d = document.documentElement, chosen = null, m = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  try { chosen = localStorage.getItem('sauron.theme'); } catch (e) {}
+  function system() { return m && m.matches ? 'dark' : 'light'; }
+  function apply() { d.setAttribute('data-theme', chosen || system()); }
+  apply();
+  if (m && m.addEventListener) m.addEventListener('change', function () { if (!chosen) apply(); });
+  window.sauronTheme = {
+    current: function () { return d.getAttribute('data-theme'); },
+    toggle: function () {
+      var next = d.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      chosen = next === system() ? null : next;   // matching the device again means "follow the device"
+      try { chosen ? localStorage.setItem('sauron.theme', chosen) : localStorage.removeItem('sauron.theme'); } catch (e) {}
+      apply();
+    },
+  };
+})();
+</script>
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">

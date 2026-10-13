@@ -51,6 +51,7 @@
   --warn-soft: rgba(138, 97, 0, 0.10);
   --info: #3b6fc4;
   --info-soft: rgba(59, 111, 196, 0.10);
+  --teal-ink: #1f6f68;      /* a number beside a teal bar, on the page */
 
   /* Chat */
   --user-bg: #f3e6d9;       /* the person's own message: a warm tint */
@@ -68,6 +69,61 @@
 
   color-scheme: light;
 }
+
+/*
+ * DARK, the same warm family at night (Khai, 13 Oct 2026: "you should have a
+ * dark mode"). It follows each device's own light/dark setting, and the moon
+ * button in the menu overrides it per browser (sauron.theme). The small script
+ * at the top of every page sets data-theme before anything draws, so there is
+ * never a flash of the wrong one -- and why there is ONE selector here, not a
+ * media query copy of every rule.
+ *
+ * Measured against the dark surface (WCAG): text 12.7, muted 6.0, accent 6.5,
+ * error 6.4, success 7.5; chart series at least 3:1. The accent is lighter in
+ * the dark, so text ON it turns dark (--on-accent), not white.
+ */
+:root[data-theme="dark"] {
+  --bg: #1c1916;
+  --surface: #262220;
+  --surface-hover: #312c28;
+  --border: #3e3732;
+  --text: #ece6dd;
+  --text-muted: #a89f94;
+  --accent: #e5925a;
+  --accent-dim: #c9783f;
+  --accent-soft: rgba(229, 146, 90, 0.14);
+  --on-accent: #1c1916;
+  --error: #f2877c;
+  --error-soft: rgba(242, 135, 124, 0.12);
+  --success: #74c48d;
+  --success-soft: rgba(116, 196, 141, 0.12);
+  --warn: #e3b45a;
+  --warn-soft: rgba(227, 180, 90, 0.12);
+  --info: #86adf0;
+  --info-soft: rgba(134, 173, 240, 0.12);
+  --teal-ink: #6cc3b8;
+  --user-bg: #3a2c22;
+  --assistant-bg: #262220;
+  --bubble: #22302a;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --shade: rgba(255, 255, 255, 0.04);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+/*
+ * Charts are stored as drawings with their colours written in (chart-svg.ts),
+ * so on a dark page their text and lines would vanish. CSS outranks an SVG's
+ * own colour attributes, so these repaint exactly the renderer's ink, axis and
+ * grid colours -- old stored charts included, since relightChart() maps them
+ * to the same values. The series colours read on both.
+ */
+:root[data-theme="dark"] svg [fill="#2e2a25"] { fill: var(--text); }
+:root[data-theme="dark"] svg [fill="#6f685f"] { fill: var(--text-muted); }
+:root[data-theme="dark"] svg [stroke="#6f685f"] { stroke: var(--text-muted); }
+:root[data-theme="dark"] svg [stroke="#e5ddd1"] { stroke: var(--border); }
+:root[data-theme="dark"] svg [fill="#8a6100"] { fill: var(--warn); }
 
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -232,3 +288,18 @@ header.site-header .logo { width: 32px; height: 32px; flex-shrink: 0; margin: 0;
 header.site-header h1 { font-size: 17px; font-weight: 600; line-height: 1.25; margin: 0; }
 header.site-header .subtitle { font-size: 13px; line-height: 1.35; color: var(--text-muted); margin: 1px 0 0; }
 @media (max-width: 600px) { header.site-header { padding: 12px 16px; } }
+
+/* The light/dark switch in the menu: a moon in the light, a sun in the dark. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; min-height: 0; padding: 0; margin-left: 2px;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.theme-toggle svg { width: 18px; height: 18px; }
+.theme-toggle .sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .moon { display: none; }
+/* The tower is painted on cream; at night it sits a little quieter. */
+:root[data-theme="dark"] .sauron-watch { filter: brightness(0.88); }

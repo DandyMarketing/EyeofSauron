@@ -15,6 +15,28 @@
 <link rel="modulepreload" href="/vendor/supabase.js">
 <!--SAURON_CONFIG-->
 <link rel="modulepreload" href="/terms-gate.js">
+<script>
+/* Light or dark, decided before anything draws so there is no flash: this
+   browser's choice from the menu switch if it made one, else the device's own
+   setting, followed live. theme.css holds both palettes. */
+(function () {
+  var d = document.documentElement, chosen = null, m = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  try { chosen = localStorage.getItem('sauron.theme'); } catch (e) {}
+  function system() { return m && m.matches ? 'dark' : 'light'; }
+  function apply() { d.setAttribute('data-theme', chosen || system()); }
+  apply();
+  if (m && m.addEventListener) m.addEventListener('change', function () { if (!chosen) apply(); });
+  window.sauronTheme = {
+    current: function () { return d.getAttribute('data-theme'); },
+    toggle: function () {
+      var next = d.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      chosen = next === system() ? null : next;   // matching the device again means "follow the device"
+      try { chosen ? localStorage.setItem('sauron.theme', chosen) : localStorage.removeItem('sauron.theme'); } catch (e) {}
+      apply();
+    },
+  };
+})();
+</script>
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css">
 <link rel="modulepreload" href="/brief-badge.js">
@@ -80,6 +102,7 @@
       <a href="/plan.html">Plan your event</a>
       <a href="/daily.html" class="active" id="daily-link">Daily</a>
       <a href="/admin.html" id="admin-link" hidden>Admin</a>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch between light and dark" title="Light or dark"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
       <a href="#" id="logout-link">Logout</a>
     </nav>
     <script>
@@ -112,6 +135,8 @@
         } else if (b) b.remove();
         state.brief = count; save();
       };
+      var t = document.getElementById('theme-toggle');
+      if (t && window.sauronTheme) t.addEventListener('click', window.sauronTheme.toggle);
       if (state.owner) window.setNavOwner(true);
       if (state.brief > 0) window.setNavBrief(state.brief);
     })();

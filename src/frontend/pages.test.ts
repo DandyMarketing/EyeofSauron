@@ -1392,3 +1392,22 @@ test('every page carries the same menu, in the same order', () => {
   for (const [page, menu] of menus) assert.equal(menu, menus[0][1], `${page}'s menu differs from the dashboard's`);
   assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan your event.*Daily.*Admin.*Logout/);
 });
+
+test('every page picks light or dark before it draws', () => {
+  /**
+   * Dark mode (Khai, 13 Oct 2026) follows the device and a menu switch. The
+   * choice is applied by a script in each page's head, BEFORE theme.css, so a
+   * page never flashes light first; a page without it would ignore the switch
+   * and the device both. Pages with the menu must also carry the switch.
+   */
+  for (const page of pages) {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    const script = html.indexOf("localStorage.getItem('sauron.theme')");
+    assert.ok(script > 0, `${page} does not choose light or dark`);
+    assert.ok(script < html.indexOf('<link rel="stylesheet" href="/theme.css">'), `${page} chooses its theme after the stylesheet, so it flashes`);
+    if (html.includes('<nav class="site-nav">')) assert.match(html, /id="theme-toggle"/, `${page} has the menu but no light/dark switch`);
+  }
+  const theme = readFileSync('public/theme.css', 'utf8');
+  assert.match(theme, /:root\[data-theme="dark"\] \{[^}]*--bg:/, 'theme.css has no dark palette');
+  assert.match(theme, /:root\[data-theme="dark"\] svg \[fill="#2e2a25"\]/, 'stored charts would keep dark ink on a dark page');
+});
