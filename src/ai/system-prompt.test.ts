@@ -204,3 +204,10 @@ test('a suggested number is labelled, and a market claim needs a source', () => 
   assert.match(SYSTEM_PROMPT_BASE, /going rate without a source/);
   assert.match(SYSTEM_PROMPT_BASE, /Your training is not a source/);
 });
+
+test('every answer is written in plain words and short sentences', () => {
+  // Khai, 13 Oct 2026. Shared by the chat, the planner and the weekly briefing.
+  assert.match(SYSTEM_PROMPT_BASE, /PLAIN WORDS, SHORT SENTENCES/);
+  assert.match(SYSTEM_PROMPT_BASE, /about fifteen words at most/);
+  assert.match(SYSTEM_PROMPT_BASE, /No figures of speech/);
+});
