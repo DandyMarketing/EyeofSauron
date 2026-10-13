@@ -138,6 +138,18 @@ export function progressTool() {
             required: ['item'],
           },
         },
+        reopened: {
+          type: 'array',
+          description: 'Only when there is a PREVIOUS READING: decisions it counted as settled that the conversation has since genuinely reopened -- the person changed it, or new facts broke it. Missing it on this read is NOT a reason. Each needs the reason in the conversation\'s words.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: KEYS },
+              why: { type: 'string', description: 'What reopened it, at most fifteen words: "late door changed from $80 to $60".' },
+            },
+            required: ['key', 'why'],
+          },
+        },
         next: { type: 'string', enum: KEYS, description: 'The one unsettled decision the conversation is on now, or should be.' },
       },
       required: ['settled', 'not_applicable', 'waiting_on'],
@@ -154,6 +166,59 @@ export interface PlanProgress {
   /** Settled out of the decisions that apply. */
   counts: { settled: number; applicable: number };
   stages: Array<{ stage: Stage; label: string; settled: number; applicable: number }>;
+  /** Settled on the previous reading, reopened by the conversation since, with why. */
+  reopened: Array<{ key: string; label: string; why: string }>;
+}
+
+export interface PreviousReading {
+  settled: Array<{ key: string; summary: string }>;
+  not_applicable: string[];
+}
+
+/**
+ * The previous reading, as it came back from the browser, checked. Unknown
+ * keys are dropped and summaries trimmed; anything malformed is no previous
+ * reading at all, which only means this read starts fresh.
+ */
+export function cleanPrevious(raw: unknown, rows: PlaybookRow[] = PLAYBOOK): PreviousReading | null {
+  const r = raw as any;
+  if (!r || typeof r !== 'object') return null;
+  const known = new Set(rows.map(x => x.key));
+  const settled = (Array.isArray(r.settled) ? r.settled : [])
+    .filter((x: any) => x && known.has(x.key))
+    .map((x: any) => ({ key: String(x.key), summary: String(x.summary ?? '').slice(0, 200) }));
+  const na = (Array.isArray(r.not_applicable) ? r.not_applicable : []).filter((k: any) => typeof k === 'string' && known.has(k));
+  return settled.length || na.length ? { settled, not_applicable: na } : null;
+}
+
+/**
+ * Carry the previous reading forward.
+ *
+ * Khai, 13 Oct 2026: "progress kept fluctuating 20/20 then after one response
+ * went to this". Every reading started from nothing, so two reads of the same
+ * long conversation disagreed -- and the planner said "hit Create" on one read
+ * while the next blocked the draft. A decision settled once now STAYS settled
+ * (keeping its summary unless the new read has a fresher one) and a decision
+ * judged not to apply stays that way, unless the reader names it as reopened
+ * with a reason. So the count moves only when the plan does, and when it goes
+ * down the board says why.
+ */
+export function withPrevious(raw: unknown, previous: PreviousReading | null): unknown {
+  if (!previous) return raw;
+  const r = { ...((raw ?? {}) as any) };
+  const reopened = new Set<string>((Array.isArray(r.reopened) ? r.reopened : [])
+    .filter((x: any) => x && typeof x.key === 'string' && String(x.why ?? '').trim())
+    .map((x: any) => x.key));
+  const settled: Array<{ key: string; summary: string }> = Array.isArray(r.settled) ? [...r.settled] : [];
+  const has = new Set(settled.map(x => x?.key));
+  for (const p of previous.settled) {
+    if (!has.has(p.key) && !reopened.has(p.key)) { settled.push(p); has.add(p.key); }
+  }
+  const na = new Set<string>(Array.isArray(r.not_applicable) ? r.not_applicable : []);
+  for (const k of previous.not_applicable) if (!has.has(k) && !reopened.has(k)) na.add(k);
+  r.settled = settled;
+  r.not_applicable = [...na];
+  return r;
 }
 
 /**
@@ -208,7 +273,12 @@ export function summariseProgress(raw: unknown, rows: PlaybookRow[] = PLAYBOOK):
     .slice(0, 6)
     .map((w: any) => ({ item: w.item.trim(), who: typeof w.who === 'string' && w.who.trim() ? w.who.trim() : null }));
 
+  const reopened = (Array.isArray(r.reopened) ? r.reopened : [])
+    .filter((x: any) => x && byKey.has(x.key) && !settledMap.has(x.key) && String(x.why ?? '').trim())
+    .map((x: any) => ({ key: x.key, label: label(x.key), why: String(x.why).trim().slice(0, 200) }));
+
   return {
+    reopened,
     settled, open, not_applicable: [...na], waiting_on: waiting,
     next: nextKey ? { key: nextKey, label: label(nextKey) } : null,
     counts: { settled: settled.length, applicable: settled.length + open.length },
@@ -243,10 +313,19 @@ export function planTranscript(history: Array<{ role: string; content: string }>
  */
 export function boardNote(openKeys: unknown, rows: PlaybookRow[] = PLAYBOOK): string {
   const byKey = new Map(rows.map(r => [r.key, r]));
-  const keys = (Array.isArray(openKeys) ? openKeys : [])
-    .filter((k): k is string => typeof k === 'string' && byKey.has(k) && byKey.get(k)!.blocking);
+  // Each entry is a key, or { key, missing } when the board knows what is
+  // missing -- then the planner asks for exactly that.
+  const missing = new Map<string, string>();
+  const keys: string[] = [];
+  for (const e of Array.isArray(openKeys) ? openKeys : []) {
+    const k = typeof e === 'string' ? e : (e && typeof (e as any).key === 'string' ? (e as any).key : null);
+    if (!k || !byKey.has(k) || !byKey.get(k)!.blocking) continue;
+    keys.push(k);
+    const m = typeof e === 'object' && e ? String((e as any).missing ?? '').trim().slice(0, 200) : '';
+    if (m && !missing.has(k)) missing.set(k, m);
+  }
   const unique = [...new Set(keys)].slice(0, 20);
   if (unique.length === 0) return '';
-  const lines = unique.map(k => `- ${DECISION_LABELS[k] ?? k}: ${byKey.get(k)!.decision}`);
+  const lines = unique.map(k => `- ${DECISION_LABELS[k] ?? k}: ${byKey.get(k)!.decision}${missing.has(k) ? ` MISSING: ${missing.get(k)}` : ''}`);
   return `\n\n[PROGRESS BOARD -- read from this conversation by a second pass, shown to the person. Still open and blocking:\n${lines.join('\n')}\nWhile anything is listed here, do not call the plan ready, complete, locked or confirmed, and do not say every blocking decision is closed. Answer the message above first, then take the next of these.]`;
 }

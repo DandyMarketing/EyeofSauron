@@ -500,7 +500,7 @@ async function send() {
       body: JSON.stringify({
         message, history, conversation_id: conversationId,
         board_open: lastProgress && lastProgressKey === progressKey()
-          ? (lastProgress.open || []).filter(o => o.blocking).map(o => o.key) : [],
+          ? (lastProgress.open || []).filter(o => o.blocking).map(o => o.partial ? { key: o.key, missing: o.partial.missing } : o.key) : [],
       }),
     });
     const data = await res.json();
@@ -945,7 +945,13 @@ async function prepareDraft(force) {
       const el = addMessage('Planner', 'agent',
         '<div class="not-ready"><p><strong>The brief is not ready yet.</strong> ' +
         p.counts.settled + ' of ' + p.counts.applicable + ' decided; these still need settling:</p>' +
-        '<ul>' + blocking.map(o => '<li>' + escapeHtml(o.label) + '</li>').join('') + '</ul>' +
+        // What is missing, not just which decision -- so a wrong reading can be
+        // seen to be wrong, and a right one says exactly what to do.
+        '<ul>' + blocking.map(o => {
+          const re = (p.reopened || []).find(r => r.key === o.key);
+          const why = o.partial ? 'missing ' + o.partial.missing : re ? 'reopened: ' + re.why : o.hint;
+          return '<li><strong>' + escapeHtml(o.label) + '</strong>' + (why ? ' — ' + escapeHtml(why) : '') + '</li>';
+        }).join('') + '</ul>' +
         (p.next ? '<p>Next: <strong>' + escapeHtml(p.next.label) + '</strong>.</p>' : '') +
         '<button class="secondary anyway">Prepare a draft anyway</button></div>');
       el.querySelector('.anyway').addEventListener('click', (e) => { e.target.disabled = true; prepareDraft(true); });
@@ -1055,7 +1061,15 @@ async function refreshProgress() {
     const res = await fetch('/api/plan/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ history }),
+      // The last reading of THIS plan, so the board builds on it instead of
+      // re-deciding everything (Khai, 13 Oct 2026: "kept fluctuating").
+      body: JSON.stringify({
+        history,
+        previous: lastProgress ? {
+          settled: (lastProgress.settled || []).map(d => ({ key: d.key, summary: d.summary })),
+          not_applicable: lastProgress.not_applicable || [],
+        } : null,
+      }),
     });
     const p = await res.json();
     if (seq !== progressSeq) return null;
@@ -1103,6 +1117,8 @@ function renderProgress(p) {
       '<div class="pg-stages">' + (p.stages || []).map(s => '<span>' + escapeHtml(s.label) + '</span>').join('') + '</div>' +
     '</summary><div class="pg-body">' +
       (done.length ? '<h4>Decided</h4>' + done.map(d => row('done', '✓', d.label, d.summary)).join('') : '') +
+      // A decision only goes back to open with a reason, and the reason shows.
+      ((p.reopened || []).length ? '<h4>Reopened</h4>' + p.reopened.map(r => row('wait', '↺', r.label, r.why)).join('') : '') +
       (wait.length ? '<h4>Waiting on someone</h4>' + wait.map(w => row('wait', '◷', w.item, w.who)).join('') : '') +
       // A decision touched but not settled says what is agreed and the one
       // thing missing, so a gap reads as a gap rather than as a fault.
@@ -1150,6 +1166,9 @@ async function openPlan(id) {
   }
 
   conversationId = id;
+  // A different plan: its board starts from its own first reading, and a
+  // slow reading of the plan just left is dropped rather than carried over.
+  lastProgress = null; lastProgressKey = ''; progressSeq++;
   history = [];
   openQ = null; showPending(null);
   thread.innerHTML = '';

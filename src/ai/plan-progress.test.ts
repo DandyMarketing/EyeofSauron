@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide, boardNote } from './plan-progress.js';
+import { summariseProgress, planTranscript, DECISION_LABELS, DECISION_HINTS, progressTool, decisionGuide, boardNote, cleanPrevious, withPrevious } from './plan-progress.js';
 import { PLAYBOOK } from './event-playbook.js';
 
 test('every playbook decision has a short label, and the tool offers exactly the playbook keys', () => {
@@ -95,4 +95,37 @@ test('the board note tells the planner what is open, and is empty when nothing b
 test('a pending fee does not hold a made choice open', () => {
   const settled = progressTool().input_schema.properties.settled as any;
   assert.match(settled.description, /CHOICE THAT IS MADE IS SETTLED even if its fee, quote or signature is still pending/);
+});
+
+test('a settled decision stays settled unless the conversation reopens it, with a reason', () => {
+  // Khai, 13 Oct 2026: "progress kept fluctuating 20/20 then ... went to this".
+  const previous = cleanPrevious({
+    settled: [{ key: 'owners_and_deadlines', summary: 'Fairuz, Corbin/Josh, you' }, { key: 'price_and_basis', summary: '$80 late door' }, { key: 'bogus', summary: 'x' }],
+    not_applicable: ['scope'],
+  })!;
+  assert.equal(previous.settled.length, 2, 'an unknown key is dropped');
+
+  // This read missed both settled decisions and forgot scope -- nothing moves.
+  const kept = summariseProgress(withPrevious({ settled: [], not_applicable: [], waiting_on: [] }, previous));
+  assert.ok(kept.settled.some(d => d.key === 'owners_and_deadlines'));
+  assert.ok(kept.settled.some(d => d.key === 'price_and_basis'));
+  assert.ok(kept.not_applicable.includes('scope'));
+  assert.deepEqual(kept.reopened, []);
+
+  // A genuine change reopens one, and the board says why.
+  const moved = summariseProgress(withPrevious({
+    settled: [], not_applicable: [], waiting_on: [],
+    reopened: [{ key: 'price_and_basis', why: 'late door changed from $80 to $60' }, { key: 'owners_and_deadlines', why: '' }],
+  }, previous));
+  assert.equal(moved.settled.some(d => d.key === 'price_and_basis'), false);
+  assert.deepEqual(moved.reopened, [{ key: 'price_and_basis', label: 'Price', why: 'late door changed from $80 to $60' }]);
+  assert.ok(moved.settled.some(d => d.key === 'owners_and_deadlines'), 'a reopen with no reason is ignored');
+
+  assert.equal(cleanPrevious(null), null);
+  assert.equal(cleanPrevious({ settled: 'x' }), null);
+});
+
+test('the board note carries what is missing, so the planner asks for exactly that', () => {
+  const note = boardNote([{ key: 'owners_and_deadlines', missing: 'owners for the nine posts' }]);
+  assert.match(note, /Owners & deadlines: .* MISSING: owners for the nine posts/);
 });

@@ -928,6 +928,17 @@ planner is told the mark. A check nobody acts on is a second opinion, not a
 control. The note is still a hint -- the real control is that nothing is written
 without a person pressing Create.
 
+**Then the board itself turned out to have no memory.** Same day: "progress
+kept fluctuating 20/20 then after one response went to this" -- 18 of 19, with
+Owners & deadlines open although every task in the planner's table had an owner
+and a date. Every reading re-decided the whole conversation from nothing, so two
+reads of one long plan disagreed; the planner said "hit Create" on a 20/20 read
+and the next read blocked the draft. Each reading now starts from the last one
+(`withPrevious()`): a settled decision stays settled and a not-applicable one
+stays not applicable unless the reader names it REOPENED with the reason, which
+the board shows. The "not ready" message now says what is missing for each
+item, not just its name, so a wrong reading can be seen to be wrong.
+
 ---
 
 ## 4. Security

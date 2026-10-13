@@ -37,7 +37,7 @@ import {
   isConversationKind, type ConversationKind,
 } from './ai/conversations.js';
 import { EVENT_AGENT_PROMPT, eventDraftTool } from './ai/event-agent.js';
-import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote } from './ai/plan-progress.js';
+import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
@@ -843,9 +843,15 @@ app.post('/api/plan/progress', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ history?: ChatMessage[] }>();
+  const body = await c.req.json<{ history?: ChatMessage[]; previous?: unknown }>();
   const history = body.history ?? [];
   if (history.length === 0) return c.json(summariseProgress(null));
+  // The last reading of this conversation, carried forward so the board does
+  // not re-decide everything from scratch on every answer.
+  const previous = cleanPrevious(body.previous);
+  const previousText = previous
+    ? `\n\nPREVIOUS READING of this same conversation. Treat it as settled unless the conversation has since GENUINELY reopened something -- then list it in reopened with the reason. Missing it on this read is not a reason. Settled: ${previous.settled.map(p => `${p.key} (${p.summary})`).join('; ') || 'none'}. Not applicable: ${previous.not_applicable.join(', ') || 'none'}.`
+    : '';
 
   try {
     const res = await anthropic.messages.create({
@@ -858,10 +864,10 @@ app.post('/api/plan/progress', async (c) => {
       }],
       tools: [progressTool() as any],
       tool_choice: { type: 'tool', name: 'record_plan_progress' },
-      messages: [{ role: 'user', content: `The planning conversation:\n\n${planTranscript(history)}` }],
+      messages: [{ role: 'user', content: `The planning conversation:\n\n${planTranscript(history)}${previousText}` }],
     });
     const call = res.content.find((b: any) => b.type === 'tool_use') as any;
-    return c.json(summariseProgress(call?.input));
+    return c.json(summariseProgress(withPrevious(call?.input, previous)));
   } catch (e: any) {
     console.error(`[plan/progress] failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
