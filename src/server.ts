@@ -766,8 +766,12 @@ app.post('/api/plan', async (c) => {
     // The board's open blocking decisions ride along with the message so the
     // planner cannot call the plan finished while the board says otherwise.
     // Sent to the model only; the saved conversation keeps what was typed.
+    // Which venues are ours, so a rented or partner space is recognised as
+    // not ours from the moment it comes up. Names only -- no figures.
+    const ours = await venuesInScope({ isOwner: true, venues: [] });
+    const venuesNote = ours.length ? `\n\n[OUR VENUES: ${ours.map(v => v.name).join(', ')}. Any other space is not ours.]` : '';
     const result = await askSauron(
-      body.message + boardNote(body.board_open), body.history ?? [], venueFilter, 'chat',
+      body.message + boardNote(body.board_open) + venuesNote, body.history ?? [], venueFilter, 'chat',
       effectiveRole(user), undefined, undefined, EVENT_AGENT_PROMPT,
     );
     // Saved like a chat, listed apart from them. Saving never fails the answer.
@@ -822,7 +826,7 @@ app.post('/api/plan/draft', async (c) => {
         text: 'You are turning a finished planning conversation into a structured brief. Everything must already be in the transcript: do not add a decision, do not invent a figure, and do not fill a field that was never settled — leave it out. Numbers appear only where the conversation quoted them from a query tool.',
         cache_control: { type: 'ephemeral' },
       }],
-      tools: [eventDraftTool() as any],
+      tools: [eventDraftTool(scoped.map(v => v.slug)) as any],
       tool_choice: { type: 'tool', name: 'record_event_draft' },
       messages: [{ role: 'user', content: `${facts}The planning conversation:\n\n${transcript}` }],
     });
@@ -1114,10 +1118,17 @@ app.post('/api/events', async (c) => {
     status: 'brief_issued',
     created_by: user.id,
   };
-  const withBrief = { ...eventRow, brief: typeof d.brief === 'string' ? d.brief.slice(0, 100_000) : null, pnl: d.pnl ?? null };
+  const spaces = Array.isArray(d.other_spaces)
+    ? d.other_spaces.filter((x: any) => x && typeof x.name === 'string' && x.name.trim()).slice(0, 10) : [];
+  const withBrief = {
+    ...eventRow,
+    brief: typeof d.brief === 'string' ? d.brief.slice(0, 100_000) : null,
+    pnl: d.pnl ?? null,
+    other_spaces: spaces.length ? spaces : null,
+  };
   let { data: created, error } = await supabaseAdmin.from('events').insert(withBrief).select('id').single();
-  if (error && /\b(brief|pnl)\b/.test(error.message)) {
-    console.error(`[events] brief/pnl not stored (is migration 056 applied?): ${error.message}`);
+  if (error && /\b(brief|pnl|other_spaces)\b/.test(error.message)) {
+    console.error(`[events] brief/pnl/other spaces not stored (are migrations 056 and 057 applied?): ${error.message}`);
     ({ data: created, error } = await supabaseAdmin.from('events').insert(eventRow).select('id').single());
   }
 

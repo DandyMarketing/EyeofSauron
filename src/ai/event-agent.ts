@@ -213,6 +213,18 @@ package on each ticket.
   strongest thing the closest rival cannot offer, not the most impressive thing
   on the list. Whether an edge is worth its price is your read; mark it as one.
 
+OUR VENUES, AND SPACES WE DO NOT CONTROL. Each message ends with a note
+naming our venues. Any other room in the plan -- a rooftop being rented, a
+partner's bar, a street or a car park -- is NOT ours, and it is a different
+kind of risk: someone else's licence, staff, door and diary. Khai, 13 Oct
+2026: the Barter rooftop was treated as one of our venues and the event could
+not be saved. So from the moment such a space comes up, call it what it is
+("the Barter rooftop, which we'd be renting") and settle, in the same
+proposing style as everything else: how we get it (rented, a partner running
+it, or public with a permit), the cost, the capacity, what happens there,
+who owns the deal, and what we do if they pull out. It goes in the brief as
+an other space, never as a venue.
+
 PLAIN WORDS, SHORT SENTENCES. Khai, 13 Oct 2026, on a reply full of
 "Mandala-orbit", "the view is the sellable asset", "sightline" and "guests buy
 the roof, journalists buy the story": "you are going to need to simplify the
@@ -448,7 +460,12 @@ you need for each. Do not call record_event_draft.`;
  * WHAT IT DOES NOT DO IS WRITE. It returns a draft. The app renders it, a person
  * confirms, and the app posts it. See the header.
  */
-export function eventDraftTool() {
+/**
+ * venueSlugs: OUR venues, as a fixed choice. Given, the AI picks from them and
+ * cannot write a rented rooftop in as a venue (Khai, 13 Oct 2026: Barter);
+ * anything else goes in other_spaces.
+ */
+export function eventDraftTool(venueSlugs?: string[]) {
   return {
     name: 'record_event_draft',
     description:
@@ -463,8 +480,26 @@ export function eventDraftTool() {
         end_date: { type: 'string', description: 'Last day, YYYY-MM-DD. Same as start_date for one night.' },
         venue_slugs: {
           type: 'array',
-          items: { type: 'string' },
-          description: 'OUR venues this runs at, as slugs from the list you are given -- never a space being rented or a partner\'s venue (that goes in the concept). MORE THAN ONE ONLY IF THE MECHANIC BREAKS WITHOUT THEM — a shared occasion across three venues is three events, not one.',
+          items: venueSlugs?.length ? { type: 'string', enum: venueSlugs } : { type: 'string' },
+          description: 'OUR venues this runs at, as slugs from the list you are given -- never a space being rented or a partner\'s venue (those go in other_spaces). MORE THAN ONE ONLY IF THE MECHANIC BREAKS WITHOUT THEM — a shared occasion across three venues is three events, not one.',
+        },
+        other_spaces: {
+          type: 'array',
+          description: 'Every space the event uses that is NOT one of our venues: a rooftop or room being rented, a partner\'s venue, a street or public space. One entry each, only as settled or proposed in the conversation; leave out what was never said.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '"Barter rooftop", "Dragon Chamber".' },
+              access: { type: 'string', enum: ['rented', 'partner', 'public'], description: 'How we get it: hired for the night, a partner running their own room, or a public/street space needing a permit.' },
+              cost: { type: 'number', description: 'Hire cost, only if the conversation gave one.' },
+              capacity: { type: 'number' },
+              use: { type: 'string', description: 'What happens there and when: "boiler room, after midnight".' },
+              owner_name: { type: 'string', description: 'The person who owns the deal with that space.' },
+              status: { type: 'string', description: '"confirmed", "quoted", "out unless the landlord answers".' },
+              risks: { type: 'string', description: 'What we do not control there: whose licence, staff, door, what if they pull out.' },
+            },
+            required: ['name', 'access'],
+          },
         },
         occasion: { type: 'string', description: 'The calendar day, if any: "Valentine\'s Day", "Deepavali", "CNY". Spell it the way previous events spelled it — query_events shows what is already in use — or the year-on-year comparison will never match.' },
         concept_type: { type: 'string', description: '"guest-chef collab", "tasting", "brunch", "party", "launch".' },

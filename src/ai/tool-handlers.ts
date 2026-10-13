@@ -2467,11 +2467,17 @@ async function queryEvents(input: Record<string, any>): Promise<string> {
   const slugOf = new Map(allVenues.map(v => [v.id, v.slug as string]));
   const nameOf = new Map(allVenues.map(v => [v.id, v.name as string]));
 
-  const { data: rows, error } = await supabase
+  const EVENT_COLUMNS = 'id, name, start_date, end_date, occasion, concept_type, partner, format, demographic, status, price, target_net_sales, target_covers, baseline_net_sales, baseline_covers, baseline_basis, cost_total, break_even_covers, ad_budget, outcome_basis, covers_actual, net_sales_actual, outcome_notes, concept, usp, event_venues(venue_id)';
+  const readEvents = (cols: string) => supabase
     .from('events')
-    .select('id, name, start_date, end_date, occasion, concept_type, partner, format, demographic, status, price, target_net_sales, target_covers, baseline_net_sales, baseline_covers, baseline_basis, cost_total, break_even_covers, ad_budget, outcome_basis, covers_actual, net_sales_actual, outcome_notes, concept, usp, event_venues(venue_id)')
+    .select(cols)
     .order('start_date', { ascending: false })
     .limit(500);
+  // Spaces that were not ours (migration 057), so next year's planner sees
+  // "Barter rooftop, rented, $1,800, held 100". Before 057 is applied the
+  // column is missing; read without it rather than fail.
+  let { data: rows, error } = await readEvents(`${EVENT_COLUMNS}, other_spaces`);
+  if (error && /other_spaces/.test(error.message)) ({ data: rows, error } = await readEvents(EVENT_COLUMNS));
 
   if (error) {
     return JSON.stringify({
@@ -2559,6 +2565,7 @@ async function queryEvents(input: Record<string, any>): Promise<string> {
       },
       concept: r.concept ?? undefined,
       usp: r.usp ?? undefined,
+      other_spaces: Array.isArray(r.other_spaces) && r.other_spaces.length ? r.other_spaces : undefined,
       plan: {
         price: r.price, target_net_sales: r.target_net_sales, target_covers: r.target_covers,
         baseline_net_sales: r.baseline_net_sales, baseline_covers: r.baseline_covers,

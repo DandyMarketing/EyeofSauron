@@ -396,3 +396,14 @@ test('the draft lists only our venues, and owners are people, not "Planner"', ()
   assert.match(props.venue_slugs.description, /never a space being rented or a partner's venue/);
   assert.match(props.tasks.items.properties.owner_name.description, /neither is "Planner" or "You"/);
 });
+
+test('our venues are a fixed choice, and other spaces have their own place', () => {
+  // Khai, 13 Oct 2026: the Barter rooftop, rented, was written in as a venue.
+  const fixed = (eventDraftTool(['neon-pigeon', 'fat-prince']).input_schema.properties as any).venue_slugs.items;
+  assert.deepEqual(fixed.enum, ['neon-pigeon', 'fat-prince']);
+  assert.equal((eventDraftTool().input_schema.properties as any).venue_slugs.items.enum, undefined);
+  const spaces = (eventDraftTool().input_schema.properties as any).other_spaces;
+  assert.deepEqual(spaces.items.properties.access.enum, ['rented', 'partner', 'public']);
+  assert.match(EVENT_AGENT_PROMPT, /OUR VENUES, AND SPACES WE DO NOT CONTROL/);
+  assert.match(EVENT_AGENT_PROMPT, /never as a venue/);
+});

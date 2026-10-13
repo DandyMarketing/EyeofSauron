@@ -154,6 +154,9 @@
   .draft th, .draft td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
   .draft th { background: var(--bg); }
   .draft .missing { color: var(--error); font-size: 13px; margin-bottom: 12px; }
+  .draft .draft-sub { font-size: 13px; margin: 6px 0 6px; color: var(--text-muted); font-weight: 600; }
+  .draft .space-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+  .draft .space-card .note { margin: 0; display: inline; }
   .draft .confirm-row { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
   .draft .excel-msg { margin: 8px 0 0; text-align: right; }
   .saved { color: var(--success); font-size: 14px; }
@@ -588,6 +591,21 @@ function renderDraft(d) {
       '</tbody></table>'
     : '<div class="missing">No schedule in this draft. A post without a date is an intention, not a plan — go back and settle the content and outreach dates.</div>';
 
+  // Spaces that are not ours -- a rented rooftop, a partner's room -- shown as
+  // what they are, with the things we do not control (Khai, 13 Oct 2026).
+  const spaces = (d.other_spaces || []);
+  const accessWord = { rented: 'Rented', partner: 'Partner runs it', public: 'Public space' };
+  // One short block per space, not a seven-column table: it is read on a phone.
+  const spacesTable = spaces.length
+    ? '<h3 class="draft-sub">Other spaces (not our venues)</h3>' + spaces.map(x => {
+        const head = [accessWord[x.access] || x.access, money(x.cost), x.capacity ? 'holds ' + x.capacity : null, x.status]
+          .filter(Boolean).map(v => escapeHtml(String(v))).join(' · ');
+        const line = (k, v) => v ? '<div><span class="note">' + k + ':</span> ' + escapeHtml(v) + '</div>' : '';
+        return '<div class="space-card"><strong>' + escapeHtml(x.name || '') + '</strong>' + (head ? ' — ' + head : '') +
+          line('Use', x.use) + line('Owner', x.owner_name) + line('Watch', x.risks) + '</div>';
+      }).join('')
+    : '';
+
   const el = document.createElement('div');
   el.className = 'draft';
   el.innerHTML =
@@ -596,6 +614,7 @@ function renderDraft(d) {
     '<dl>' + dl + '</dl>' +
     (d.concept ? '<p>' + escapeHtml(d.concept) + '</p>' : '') +
     taskTable +
+    spacesTable +
     // Each piece downloads on its own (Khai, 12 Oct 2026), before or after the
     // event is created -- the same files Send to Monday attaches.
     '<div class="confirm-row download-row">' +

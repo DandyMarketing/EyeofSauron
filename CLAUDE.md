@@ -769,7 +769,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 56 migrations, 25 query tools, 11 ingest sources, 1,545 tests.
+started.** 57 migrations, 25 query tools, 11 ingest sources, 1,548 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -978,6 +978,15 @@ planner's progress board is saved on its conversation (`conversations.progress`)
 a reopened plan starts from its last reading on any device, and a decision the
 person marks "Decided" by hand beats the model's reading and only they can undo.
 
+**A space that is not our venue has its own place** (13 Oct 2026, the Barter
+rooftop rented for New Year's Eve). An event's VENUES are ours only -- they
+decide who can see it, whose trade measures it, next year's look-back, the
+Monday board and the P&L rates -- so the brief picks them from a fixed list.
+A rented rooftop, a partner's room or a public space goes in `other_spaces`
+(migration 057): how we get it, cost, capacity, use, owner, and what we do not
+control there. The planner is told which venues are ours with every message,
+and `query_events` returns the spaces so next year starts from them.
+
 **Not built:** reading Done / Stuck back into the brief.
 
 ## Later: parked features (recorded 11 Oct 2026)
@@ -1027,7 +1036,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,545 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,548 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
