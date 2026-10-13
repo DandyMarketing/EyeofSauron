@@ -129,3 +129,8 @@ test('the board note carries what is missing, so the planner asks for exactly th
   const note = boardNote([{ key: 'owners_and_deadlines', missing: 'owners for the nine posts' }]);
   assert.match(note, /Owners & deadlines: .* MISSING: owners for the nine posts/);
 });
+
+test('a parked task settles its decision rather than holding it open', () => {
+  const settled = progressTool().input_schema.properties.settled as any;
+  assert.match(settled.description, /PARKED as a task with an owner and a date[\s\S]*is SETTLED/);
+});

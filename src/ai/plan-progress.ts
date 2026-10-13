@@ -98,7 +98,7 @@ export function progressTool() {
       properties: {
         settled: {
           type: 'array',
-          description: 'Decisions the PERSON has actually settled -- said, or agreed to when the director proposed it. A question asked but not answered is NOT settled. A direction ("it is ticketed") settles what it settles and no more. A CHOICE THAT IS MADE IS SETTLED even if its fee, quote or signature is still pending -- the pending part goes in waiting_on, so one outstanding quote does not hold a decision open. A decision that came up only in passing inside another one (channels mentioned inside the ad budget) is NOT settled: it goes in partial.',
+          description: 'Decisions the PERSON has actually settled -- said, or agreed to when the director proposed it. A question asked but not answered is NOT settled. A direction ("it is ticketed") settles what it settles and no more. A CHOICE THAT IS MADE IS SETTLED even if its fee, quote or signature is still pending -- the pending part goes in waiting_on, so one outstanding quote does not hold a decision open. Likewise a decision whose only missing piece has been PARKED as a task with an owner and a date because nobody can supply it yet -- the DJ not yet booked, a landlord not yet reached -- is SETTLED, with the task in waiting_on. Never list a parked task as the thing missing in partial. A decision that came up only in passing inside another one (channels mentioned inside the ad budget) is NOT settled: it goes in partial.',
           items: {
             type: 'object',
             properties: {

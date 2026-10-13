@@ -358,7 +358,7 @@ test('the channels row walks every channel, Instagram plan and TikTok included',
 test('the planner is shown the board and may not claim the plan is done past it', () => {
   assert.match(EVENT_AGENT_PROMPT, /THE BOARD IS THE RECORD, NOT YOUR MEMORY/);
   assert.match(EVENT_AGENT_PROMPT, /\[PROGRESS BOARD\] note/);
-  assert.match(EVENT_AGENT_PROMPT, /never say CONFIRMED at all/);
+  assert.match(EVENT_AGENT_PROMPT, /never say CONFIRMED\s+at all/);
 });
 
 test('the planner writes plain words and short sentences', () => {
@@ -369,4 +369,14 @@ test('the planner writes plain words and short sentences', () => {
   assert.match(EVENT_AGENT_PROMPT, /BEFORE:[\s\S]*AFTER:/);
   const brief = (eventDraftTool().input_schema.properties as any).brief.description;
   assert.match(brief, /PLAIN WORDS AND SHORT SENTENCES/);
+});
+
+test('a parked task stays parked, and a reply asks at most one question', () => {
+  // Khai, 13 Oct 2026: asked for the DJ's name six times after "not yet".
+  assert.match(EVENT_AGENT_PROMPT, /A PARKED TASK STAYS PARKED/);
+  assert.match(EVENT_AGENT_PROMPT, /Do not ask for it again,\s+do not ask for a "provisional"\s+one/);
+  assert.match(EVENT_AGENT_PROMPT, /If nothing is\s+open, ask nothing/);
+  assert.doesNotMatch(EVENT_AGENT_PROMPT, /- ONE QUESTION, at the end/);
+  assert.match(EVENT_AGENT_PROMPT, /Parked tasks with an owner and a date\s+do NOT stop it being ready/);
+  assert.match(EVENT_AGENT_PROMPT, /"Prepare the\s+brief"[\s\S]*"Create this\s+event"/);
 });
