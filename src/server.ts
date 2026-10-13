@@ -46,7 +46,7 @@ import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
 import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, readInactiveNames, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
-import { modelFor } from './ai/model-policy.js';
+import { modelFor, isModelFeatureError } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
 import Anthropic from '@anthropic-ai/sdk';
@@ -806,6 +806,10 @@ async function draftRequest(user: SessionUser, history: ChatMessage[]) {
   return {
     model: modelFor('planning', process.env).model,
     max_tokens: 16384,
+    // Medium, not Opus 5's default high: turning a finished conversation into
+    // a document needs less reasoning than the conversation did, and the
+    // thinking before the answer is most of what effort changes (13 Oct 2026).
+    output_config: { effort: modelFor('planning', process.env).effort },
     system: [{
       type: 'text' as const,
       text: 'You are turning a finished planning conversation into a structured brief. Everything must already be in the transcript: do not add a decision, do not invent a figure, and do not fill a field that was never settled — leave it out. Numbers appear only where the conversation quoted them from a query tool.',
@@ -818,37 +822,67 @@ async function draftRequest(user: SessionUser, history: ChatMessage[]) {
 }
 
 /**
- * Finish a fresh draft: the P&L if the brief left it out, then every field
- * checked against its kind of cell. Shared by both draft routes.
- *
- * The P&L is the one large optional part the brief writer sometimes skips
- * (Khai, 13 Oct 2026: "sometimes the P&L doesn't appear"), so it gets its own
- * small pass when missing. If there is still none, the draft SAYS so rather
- * than the download button quietly not being there.
+ * A planning call with its effort, retried WITHOUT it if the API refuses the
+ * setting -- a refused optional feature costs the feature, never the brief
+ * (the same rule as isModelFeatureError everywhere else).
  */
-async function finishDraft(user: SessionUser, history: ChatMessage[], input: any, stopReason: string | null, onStage?: (label: string) => void) {
+async function withEffortFallback<T>(params: any, run: (p: any) => Promise<T>): Promise<T> {
+  try {
+    return await run(params);
+  } catch (e: any) {
+    if (!params.output_config || !isModelFeatureError(e)) throw e;
+    console.error(`[plan] the API refused output_config.effort, retrying without it: ${e?.message ?? e}`);
+    const { output_config: _drop, ...rest } = params;
+    return run(rest);
+  }
+}
+
+/**
+ * The P&L's own call, started at the SAME TIME as the brief (Khai, 13 Oct
+ * 2026: "is there a way to speed up the building of the brief"). It used to
+ * run only after the brief, when the brief had left it out, which doubled the
+ * wait. Never throws: a failed P&L is a note on the draft, not a lost brief.
+ */
+async function pnlPass(user: SessionUser, history: ChatMessage[]): Promise<{ pnl: any | null; ms: number }> {
+  const t0 = Date.now();
+  try {
+    const base = await draftRequest(user, history);
+    const r = await withEffortFallback({
+      ...base,
+      tools: [eventPnlTool() as any],
+      tool_choice: { type: 'tool' as const, name: 'record_event_pnl' },
+    }, p => anthropic.messages.create(p));
+    const call = r.content.find((b: any) => b.type === 'tool_use') as any;
+    return { pnl: call?.input?.pnl ?? null, ms: Date.now() - t0 };
+  } catch (e: any) {
+    console.error(`[plan/draft] P&L pass failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
+    return { pnl: null, ms: Date.now() - t0 };
+  }
+}
+
+/**
+ * Finish a fresh draft: the P&L from its own pass, then every field checked
+ * against its kind of cell. Shared by both draft routes. If there is no P&L,
+ * the draft SAYS so rather than the download button quietly not being there.
+ */
+async function finishDraft(
+  user: SessionUser, input: any, stopReason: string | null,
+  pnl: Promise<{ pnl: any | null; ms: number }>, onStage?: (label: string) => void,
+  timing?: { started: number; briefMs: number },
+) {
   const notes: string[] = [];
   if (stopReason === 'max_tokens') {
     notes.push('The brief writer ran out of room, so the end of the brief may be cut short. Press "Prepare the brief" again if anything is missing.');
   }
-  let d = input;
+  onStage?.('Finishing the P&L');
+  const p = await pnl;
+  let d = { ...input, ...(p.pnl ? { pnl: p.pnl } : {}) };
   if (!hasPnl(d)) {
-    onStage?.('Laying out the P&L on its own');
-    try {
-      const base = await draftRequest(user, history);
-      const r = await anthropic.messages.create({
-        ...base, max_tokens: 8192,
-        tools: [eventPnlTool() as any],
-        tool_choice: { type: 'tool' as const, name: 'record_event_pnl' },
-      });
-      const call = r.content.find((b: any) => b.type === 'tool_use') as any;
-      if (call?.input?.pnl) d = { ...d, pnl: call.input.pnl };
-    } catch (e: any) {
-      console.error(`[plan/draft] P&L pass failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
-    }
-    if (!hasPnl(d)) {
-      notes.push('No P&L in this draft: the conversation never set out the revenue lines (rooms, times, covers and prices). Settle them with the planner, then prepare the brief again.');
-    }
+    notes.push('No P&L in this draft: the conversation never set out the revenue lines (rooms, times, covers and prices). Settle them with the planner, then prepare the brief again.');
+  }
+  // How long each half took, so "faster" is measured rather than felt.
+  if (timing) {
+    console.log(`[plan/draft] ${user.email ?? user.id}: brief ${(timing.briefMs / 1000).toFixed(1)}s, P&L ${(p.ms / 1000).toFixed(1)}s (in parallel), total ${((Date.now() - timing.started) / 1000).toFixed(1)}s, effort ${modelFor('planning', process.env).effort}`);
   }
   const checked = cleanDraft(d);
   return { ...checked.draft, _notes: [...notes, ...checked.notes] };
@@ -873,10 +907,13 @@ app.post('/api/plan/draft', async (c) => {
   if (history.length === 0) return c.json({ error: 'Nothing to draft yet.' }, 400);
 
   try {
-    const structured = await anthropic.messages.create(await draftRequest(user, history));
+    const started = Date.now();
+    const pnl = pnlPass(user, history);
+    const structured = await withEffortFallback(await draftRequest(user, history), p => anthropic.messages.create(p));
+    const briefMs = Date.now() - started;
     const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
     if (!call?.input) return c.json({ error: 'Could not build a draft from this conversation.' }, 422);
-    return c.json({ draft: await finishDraft(user, history, call.input, structured.stop_reason ?? null) });
+    return c.json({ draft: await finishDraft(user, call.input, structured.stop_reason ?? null, pnl, undefined, { started, briefMs }) });
   } catch (e: any) {
     console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
@@ -913,20 +950,26 @@ app.post('/api/plan/draft-stream', async (c) => {
 
     try {
       push({ kind: 'stage', label: 'Reading the conversation' });
-      const s = anthropic.messages.stream(await draftRequest(user, history));
+      // The P&L starts now, beside the brief, not after it.
+      const started = Date.now();
+      const pnl = pnlPass(user, history);
       let last = '';
-      s.on('inputJson', (_partial: string, snapshot: unknown) => {
-        const st = draftStage(snapshot);
-        if (st && st.label !== last) { last = st.label; push({ kind: 'stage', label: st.label }); }
+      const msg = await withEffortFallback(await draftRequest(user, history), p => {
+        const s = anthropic.messages.stream(p);
+        s.on('inputJson', (_partial: string, snapshot: unknown) => {
+          const st = draftStage(snapshot);
+          if (st && st.label !== last) { last = st.label; push({ kind: 'stage', label: st.label }); }
+        });
+        return s.finalMessage();
       });
-      const msg = await s.finalMessage();
+      const briefMs = Date.now() - started;
       const call = msg.content.find((b: any) => b.type === 'tool_use') as any;
       if (!call?.input) push({ kind: 'error', error: 'Could not build a draft from this conversation.' });
       else {
-        // The P&L if it was left out, then every field checked against its
+        // The P&L from its own pass, then every field checked against its
         // kind of cell, before the person sees it.
-        const draft = await finishDraft(user, history, call.input, msg.stop_reason ?? null,
-          label => push({ kind: 'stage', label }));
+        const draft = await finishDraft(user, call.input, msg.stop_reason ?? null, pnl,
+          label => push({ kind: 'stage', label }), { started, briefMs });
         push({ kind: 'done', draft });
       }
     } catch (e: any) {

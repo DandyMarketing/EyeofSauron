@@ -289,3 +289,16 @@ test('the event planner runs on Opus in every pass (Khai, 13 Oct 2026: "always O
   assert.equal((src.match(/modelFor\('planning', process\.env\)\.model/g) ?? []).length, 5);
   assert.doesNotMatch(src, /modelFor\('lookup'/);
 });
+
+test('the brief and its P&L start together, at the planning effort (13 Oct 2026: "speed up the building of the brief")', () => {
+  const src = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  for (const route of ["app.post('/api/plan/draft',", "app.post('/api/plan/draft-stream',"]) {
+    const body = src.slice(src.indexOf(route), src.indexOf('\napp.', src.indexOf(route) + 10));
+    const pnlAt = body.indexOf('pnlPass(user, history)');
+    const briefAt = body.indexOf('await draftRequest(user, history)');
+    assert.ok(pnlAt > 0 && briefAt > pnlAt, `${route} must start the P&L before the brief, not after it`);
+    assert.doesNotMatch(body, /await pnlPass\(/, `${route} must not wait for the P&L before writing the brief`);
+  }
+  assert.match(src, /output_config: \{ effort: modelFor\('planning', process\.env\)\.effort \}/);
+  assert.equal(modelFor('planning', {}).effort, 'medium');
+});

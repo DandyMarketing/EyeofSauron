@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 60 migrations, 25 query tools, 11 ingest sources, 1,579 tests.
+started.** 60 migrations, 25 query tools, 11 ingest sources, 1,580 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1002,7 +1002,12 @@ listed under "Checked before saving" on the draft, never guessed ("$30,000" is
 a number, "about 200" is not). The brief is written over a STREAM
 (`/api/plan/draft-stream`), and the page shows what is being written as it is
 written -- "Listing the tasks (12 so far)" -- with a clock, because a silent
-minute looked like a hang.
+minute looked like a hang. **The P&L is its own call, started at the same moment
+as the brief** (13 Oct 2026, "speed up the building of the brief"): the brief
+no longer carries one, so the wait is the longer of the two rather than their
+sum, and both run at the planning effort (`medium`, set explicitly -- Opus 5
+defaults to `high`; a refusal retries without it). Each draft logs how long
+the brief and the P&L took.
 
 **Sending again FINISHES a group, never duplicates it** (13 Oct 2026: the
 first real send made 7 of 39 items on the NP board, then stopped at "unable to
@@ -1113,7 +1118,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,579 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,580 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 

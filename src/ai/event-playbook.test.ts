@@ -408,12 +408,11 @@ test('our venues are a fixed choice, and other spaces have their own place', () 
   assert.match(EVENT_AGENT_PROMPT, /never as a venue/);
 });
 
-test('the P&L has its own pass, with the same shape as the brief\'s', () => {
-  // Khai, 13 Oct 2026: "sometimes the P&L doesn't appear".
-  const own = eventPnlTool().input_schema.properties.pnl;
-  const inBrief = (eventDraftTool().input_schema.properties as any).pnl;
-  assert.deepEqual(own, inBrief);
+test('the P&L is its own pass, run beside the brief, and the brief no longer carries one', () => {
+  // Khai, 13 Oct 2026: "sometimes the P&L doesn't appear", then "speed up the building of the brief".
+  assert.ok(eventPnlTool().input_schema.properties.pnl);
   assert.deepEqual(eventPnlTool().input_schema.required, ['pnl']);
+  assert.equal((eventDraftTool().input_schema.properties as any).pnl, undefined);
 });
 
 test('running the night: staffing, photography and both menus are decisions, the rest are tasks', () => {

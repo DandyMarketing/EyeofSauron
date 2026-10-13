@@ -509,12 +509,14 @@ const PNL_SCHEMA = {
         };
 
 /**
- * The P&L on its own, for when the brief left it out.
+ * The P&L, ALWAYS its own call, run at the same time as the brief.
  *
- * Khai, 13 Oct 2026: "sometimes the P&L doesn't appear". It is one optional
- * part of a very large forced-tool call, and the model sometimes skips it -- the
- * download button then simply was not there. A second, small call that has
- * nothing else to do is far more reliable than asking the big one again.
+ * Khai, 13 Oct 2026: "sometimes the P&L doesn't appear" -- it was one optional
+ * part of a very large forced-tool call and the model sometimes skipped it, so
+ * a second call was added AFTER the brief, doubling the wait when it ran. Then
+ * "is there a way to speed up the building of the brief": the brief no longer
+ * carries a P&L at all, and this runs beside it, so the wait is the longer of
+ * the two rather than their sum, and each call writes less.
  */
 export function eventPnlTool() {
   return {
@@ -641,7 +643,6 @@ export function eventDraftTool(venueSlugs?: string[]) {
           },
         },
         abort_condition: { type: 'string', description: 'The book needed, the date it is checked, and what happens if it is not there.' },
-        pnl: PNL_SCHEMA,
         brief: { type: 'string', description: 'The brief itself, in markdown — what every stakeholder reads. PLAIN WORDS AND SHORT SENTENCES: everyday words, one idea per sentence, no jargon or figures of speech; table cells a few words each. Lead with what this is and what success looks like; put the schedule in a table. Include a "Running the night" section: extra staff per room and shift, photography (before and on the night), and the food and drink menus with their owners and sign-off dates -- as settled, or marked open. Include a "What to push hardest" table (Draw | Push: lead / support / do not market | Why): the draw the campaign leads with, the ones that support it, and why. Use the ranking agreed in the conversation; if none was agreed, rank from what was settled and head the table "Suggested — not yet agreed". Include, per ticket, the package comparison from the conversation -- ours against its closest rivals, with the verdict (we have the edge / level / they have the edge) and the edge and gap -- only if it was made in the conversation; never build one here, because rival details must come from a source read there.' },
       },
       required: ['name', 'start_date', 'end_date', 'venue_slugs', 'brief'],
