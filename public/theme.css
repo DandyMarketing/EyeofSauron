@@ -154,3 +154,31 @@ select:focus { outline: none; border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .eye-busy .eb-pupil, .eye-busy .eb-lids { animation: none; }
 }
+
+/*
+ * Bigger targets on a computer (Khai, 13 Oct 2026: "make the buttons bigger
+ * and easier to click"). Measured before: the menu links were 19-23 px tall
+ * with no padding, so a click had to land on the letters themselves.
+ *
+ * Only where there is a mouse -- (hover: hover) and (pointer: fine) -- so
+ * phones, which size their own touch targets, are untouched. :where() keeps
+ * these at zero specificity, so a page that sizes a particular button on
+ * purpose still wins; only the floor is raised. Buttons centre their text
+ * vertically by themselves, so a taller minimum never misaligns a label.
+ */
+@media (hover: hover) and (pointer: fine) {
+  header nav a {
+    padding: 9px 10px;
+    margin: 0 -4px;
+    border-radius: 8px;
+    transition: background-color .12s;
+  }
+  header nav a:hover { background: var(--surface-hover); }
+  :where(button, .btn, input[type=submit]) { min-height: 40px; }
+  :where(select) { min-height: 36px; }
+  :where(.btn-small, .teach-btn, .report-link, .report-btn, .chip, .export-chip) { min-height: 34px; }
+  :where(button, .btn, a, select, summary) { cursor: pointer; }
+  /* A × inside a tag or row is part of that tag, not a button of its own:
+     raising it to 40 px swelled every venue tag on the users list. */
+  :where(.vx, .fremove, .ask-close, #chart-modal-close) { min-height: 0; }
+}
