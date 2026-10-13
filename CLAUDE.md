@@ -1291,10 +1291,11 @@ a session for review.
 
 **Open and Resolved** (Khai, same day: resolved issues "need a place to go so
 it doesn't clutter that tab"). The Issues tab opens on Open (new, looking);
-Fixed and Will not fix move to Resolved on save. A long conversation is shown
-folded: the reported exchange marked, it and the three before it in full, and
-everything earlier under "Show earlier messages" -- because a 108-message plan
-"looked like it copied every session in the world". It is still ONE
+Fixed and Will not fix move to Resolved on save. A report shows ONLY the reported
+question and answer, with the data that answer looked up open beneath it;
+everything before and after folds ("Show earlier/later messages"). A
+108-message plan "looked like it copied every session in the world", and even
+four exchanges was "still too long -- the data you collect is more important". It is still ONE
 conversation, fetched by id and owner; nothing is dropped, and Copy for Claude
 carries all of it.
 

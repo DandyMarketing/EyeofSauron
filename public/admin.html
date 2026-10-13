@@ -1509,12 +1509,13 @@ async function loadReports(panel) {
 
 /**
  * A long conversation, readable (Khai, 13 Oct 2026: a 108-message plan "looks
- * like it copied every session in the world"). Nothing is dropped: the
- * reported exchange is marked, it and the three exchanges before it -- and
- * anything after -- are shown, and everything earlier folds under "Show
- * earlier messages". "Copy for Claude" still carries all of it.
+ * like it copied every session in the world"; then, still too long -- "the
+ * other stuff is more important, the data you collect"). Only the REPORTED
+ * question and answer are shown, with the data the answer looked up open
+ * beneath it; everything before and after folds. Nothing is dropped, and
+ * "Copy for Claude" still carries all of it.
  */
-const KEEP_EXCHANGES = 4;
+const KEEP_EXCHANGES = 1;
 function foldConversation(list, question, render) {
   const norm = x => String(x || '').trim();
   let at = -1;
@@ -1527,9 +1528,13 @@ function foldConversation(list, question, render) {
   for (let i = at; i >= 0; i--) if (list[i].role === 'user' && ++seen === KEEP_EXCHANGES) { from = i; break; }
   if (seen < KEEP_EXCHANGES) from = 0;
   const html = (m, i) => render(m, i === at || (i === at + 1 && list[i] && list[i].role !== 'user'));
+  // The kept part ends with the reported answer; what was said after it folds too.
+  const to = at < 0 ? list.length : (list[at + 1] && list[at + 1].role !== 'user' ? at + 2 : at + 1);
   const earlier = list.slice(0, from).map(html).join('');
-  const kept = list.slice(from).map((m, j) => html(m, from + j)).join('');
-  return (earlier ? '<details class="r-earlier"><summary>Show earlier messages (' + from + ')</summary>' + earlier + '</details>' : '') + kept;
+  const kept = list.slice(from, to).map((m, j) => html(m, from + j)).join('');
+  const later = list.slice(to).map((m, j) => html(m, to + j)).join('');
+  return (earlier ? '<details class="r-earlier"><summary>Show earlier messages (' + from + ')</summary>' + earlier + '</details>' : '') + kept +
+    (later ? '<details class="r-earlier"><summary>Show later messages (' + (list.length - to) + ')</summary>' + later + '</details>' : '');
 }
 
 async function toggleReport(row) {
@@ -1548,7 +1553,7 @@ async function toggleReport(row) {
         (m.run.calls && m.run.calls.length ? ' · ' + [...new Set(m.run.calls.map(c => c.model))].join(', ') : '') +
         (m.run.out_of_time ? ' · RAN OUT OF TIME' : '') + (m.run.rescued ? ' · rescued: ' + m.run.rescued : '') +
         (m.run.recovery_error ? ' · rescue failed: ' + m.run.recovery_error : '')) + '</div>' : '') +
-      ((m.tool_trace || []).length ? '<details class="r-trace"><summary>Data it looked up (' + m.tool_trace.length + ')</summary>' +
+      ((m.tool_trace || []).length ? '<details class="r-trace"' + (reported ? ' open' : '') + '><summary>Data it looked up (' + m.tool_trace.length + ')</summary>' +
         m.tool_trace.map(t => '<div class="r-tool"><strong>' + esc(t.name) + '</strong>' + (typeof t.ms === 'number' ? ' <span class="muted">' + t.ms + ' ms</span>' : '') +
           '<pre>' + esc(JSON.stringify(t.input || {}, null, 1)) + '</pre>' +
           (t.result ? '<div class="muted">Returned:</div><pre>' + esc(t.result) + '</pre>' : '') + '</div>').join('') +
