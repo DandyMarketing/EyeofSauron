@@ -549,8 +549,8 @@ app.delete('/api/conversations/:id', async (c) => {
  * survivable by construction.
  */
 /** An answer as the browser gets it: the tool trace stays on the server. */
-function forClient<T extends { trace?: unknown }>(result: T): Omit<T, 'trace'> {
-  const { trace: _trace, ...rest } = result;
+function forClient<T extends { trace?: unknown; run?: unknown }>(result: T): Omit<T, 'trace' | 'run'> {
+  const { trace: _trace, run: _run, ...rest } = result;
   return rest;
 }
 
@@ -558,14 +558,14 @@ async function saveTurn(
   user: SessionUser,
   conversationId: string | null | undefined,
   question: string,
-  result: { answer?: string; toolCalls?: any[]; charts?: any; trace?: any[] },
+  result: { answer?: string; toolCalls?: any[]; charts?: any; trace?: any[]; run?: any },
   kind: ConversationKind = 'chat',
 ): Promise<string | null> {
   try {
     const isNew = !conversationId;
     const id = conversationId || await createConversation(user.id, question, kind);
     if (!id) return null;
-    await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null, result.trace ?? []);
+    await appendTurn(id, question, result.answer ?? '', result.toolCalls ?? [], result.charts ?? null, result.trace ?? [], result.run ?? null);
 
     /**
      * NOT AWAITED. The row already has a usable title — the first sixty
@@ -1850,10 +1850,32 @@ app.post('/api/report', async (c) => {
         rows = await selectAll(() => supabaseAdmin.from('conversation_messages')
           .select('role, content, created_at').eq('conversation_id', convo.id).order('created_at', { ascending: true }));
       }
-      transcript = inTurnOrder((rows.data ?? []) as any[]).map((m: any) => ({
-        role: m.role, content: m.content, at: m.created_at, tool_trace: m.tool_trace ?? null,
-      }));
+      transcript = inTurnOrder((rows.data ?? []) as any[]).map((m: any) => {
+        // tool_trace is { tools, run } -- what the data tools returned, and how the answer ran.
+        const t = m.tool_trace;
+        return {
+          role: m.role, content: m.content, at: m.created_at,
+          tool_trace: Array.isArray(t) ? t : t?.tools ?? null,
+          run: Array.isArray(t) ? null : t?.run ?? null,
+        };
+      });
     }
+  }
+
+  /**
+   * What the server knows that the page does not, for whoever debugs it: the
+   * reporter's access (the tools filter by it), which build answered, and for a
+   * plan the progress board as it stood.
+   */
+  const serverContext: Record<string, unknown> = {
+    role: user.isOwner ? 'owner' : [...new Set(user.venues.map(v => v.role))].join(', ') || 'none',
+    venues: user.isOwner ? 'all' : user.venues.map(v => `${v.slug} (${v.role})`).join(', '),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA ?? 'unknown',
+    region: process.env.RAILWAY_REPLICA_REGION ?? 'unknown',
+  };
+  if (input.page === 'plan' && conversationId) {
+    const progress = await getPlanProgress(user.id, conversationId).catch(() => null);
+    if (progress) serverContext.plan_progress = progress;
   }
   // An exchange that failed was never saved: carry it from the page.
   if (input.error && input.question && !transcript.some(m => m.role === 'user' && m.content === input.question)) {
@@ -1872,7 +1894,7 @@ app.post('/api/report', async (c) => {
     answer: input.answer,
     error: input.error,
     transcript,
-    context: input.context,
+    context: { ...input.context, ...serverContext },
   }).select('id').single();
   if (error) {
     console.error(`[report] could not save a report from ${user.email ?? user.id}: ${error.message}`);

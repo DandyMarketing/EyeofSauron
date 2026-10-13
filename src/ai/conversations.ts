@@ -94,6 +94,8 @@ export async function appendTurn(
   charts: unknown,
   /** What each tool returned (migration 061), kept so an issue report can show it. */
   trace: unknown[] = [],
+  /** How the answer was produced: models, stop reasons, tokens, time, rescue. */
+  run: unknown = null,
 ): Promise<void> {
   const scope = scopeOfTurn(toolCalls ?? []);
 
@@ -126,7 +128,8 @@ export async function appendTurn(
       charts: charts ?? null,
       venue_slugs: scope.venue_slugs,
       domains: scope.domains,
-      tool_trace: trace.length ? trace : null,
+      // One column for both: what the tools returned, and how the answer ran.
+      tool_trace: trace.length || run ? { tools: trace, run } : null,
     },
   ] as Array<Record<string, unknown>>;
   let { error } = await supabaseAdmin.from('conversation_messages').insert(rows);

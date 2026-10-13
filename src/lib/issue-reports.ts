@@ -68,6 +68,12 @@ export interface TranscriptEntry {
   content: string;
   at?: string | null;
   tool_trace?: Array<{ name: string; input?: unknown; result?: string; ms?: number }> | null;
+  /** How the answer ran: models, stop reasons, tokens, time, rounds, rescue. */
+  run?: {
+    purpose?: string; model_chosen?: string; rounds?: number; ms?: number; out_of_time?: boolean;
+    rescued?: string | null; recovery_error?: string | null; web_searches?: number; charts?: string[];
+    calls?: Array<{ model: string; effort?: string; stop_reason: string | null; input_tokens: number | null; output_tokens: number | null; cache_read?: number | null; ms: number; rescue?: boolean }>;
+  } | null;
 }
 
 export interface StoredReport {
@@ -105,7 +111,10 @@ export function reportMarkdown(r: StoredReport): string {
   lines.push(`- **Where:** ${r.page === 'plan' ? 'Event planner' : 'Chat'}`);
   lines.push(`- **Status:** ${r.status}`);
   const ctx = r.context ?? {};
-  for (const [k, v] of Object.entries(ctx)) lines.push(`- **${k}:** ${String(v)}`);
+  for (const [k, v] of Object.entries(ctx)) {
+    if (k === 'plan_progress') continue;
+    lines.push(`- **${k}:** ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+  }
   if (r.comment) { lines.push('', '## What they said', '', r.comment); }
   if (r.error) { lines.push('', '## Error shown', '', '```', r.error, '```'); }
   if (r.question) { lines.push('', '## The question reported', '', r.question); }
@@ -114,12 +123,24 @@ export function reportMarkdown(r: StoredReport): string {
     lines.push('', `## Whole conversation (${r.transcript.length} messages)`);
     r.transcript.forEach((m, i) => {
       lines.push('', `### ${i + 1}. ${m.role === 'user' ? 'Question' : 'Sauron'}${m.at ? ` — ${m.at}` : ''}`, '', m.content || '(empty)');
+      if (m.run) {
+        const rn = m.run;
+        lines.push('', `- How it ran: ${rn.rounds ?? 0} tool round(s), ${((rn.ms ?? 0) / 1000).toFixed(1)}s, purpose ${rn.purpose ?? '—'}` +
+          `${rn.out_of_time ? ', RAN OUT OF TIME' : ''}${rn.rescued ? `, rescued (${rn.rescued})` : ''}${rn.recovery_error ? `, rescue failed: ${rn.recovery_error}` : ''}` +
+          `${rn.web_searches ? `, ${rn.web_searches} web search(es)` : ''}${rn.charts?.length ? `, charts: ${rn.charts.join('; ')}` : ''}`);
+        for (const c of rn.calls ?? []) {
+          lines.push(`  - call: ${c.model}${c.effort ? ` (${c.effort})` : ''}, stop ${c.stop_reason ?? '—'}, in ${c.input_tokens ?? '—'} / out ${c.output_tokens ?? '—'} tokens${c.cache_read ? `, cache read ${c.cache_read}` : ''}, ${c.ms} ms${c.rescue ? ', RESCUE' : ''}`);
+        }
+      }
       for (const t of m.tool_trace ?? []) {
         lines.push('', `- Tool \`${t.name}\`${typeof t.ms === 'number' ? ` (${t.ms} ms)` : ''}`);
         lines.push(`  - input: \`${JSON.stringify(t.input ?? {})}\``);
         if (t.result) lines.push('  - returned:', '', '```json', t.result, '```');
       }
     });
+  }
+  if (ctx && (ctx as any).plan_progress) {
+    lines.push('', '## Plan progress board at the time', '', '```json', JSON.stringify((ctx as any).plan_progress, null, 1).slice(0, 12000), '```');
   }
   if (r.admin_notes) { lines.push('', '## Admin notes', '', r.admin_notes); }
   return lines.join('\n');

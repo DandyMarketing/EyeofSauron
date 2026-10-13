@@ -64,12 +64,36 @@ export interface QueryResult {
    * the QUERIES, not the rows.
    */
   trace?: ToolTrace[];
+  /** How it was produced. Saved with the answer, never sent to the browser. */
+  run?: RunMeta;
 }
 
 export interface ToolTrace { name: string; input: Record<string, any>; result: string; ms: number }
 
+/**
+ * How an answer was produced, for the issue report (Khai, 13 Oct 2026: "it
+ * should include the entire chat log and whatever you need to debug"): the
+ * model that actually served each call, why it stopped, tokens and time, the
+ * number of tool rounds, and whether it ran out of time and was rescued.
+ */
+export interface RunMeta {
+  purpose: string;
+  model_chosen: string;
+  calls: Array<{ model: string; effort: string; stop_reason: string | null; input_tokens: number | null; output_tokens: number | null; cache_read: number | null; cache_write: number | null; ms: number; rescue: boolean }>;
+  rounds: number;
+  pauses: number;
+  out_of_time: boolean;
+  rescued: string | null;
+  recovery_error: string | null;
+  web_searches: number;
+  web_search_disabled?: boolean;
+  features_refused?: boolean;
+  charts?: string[];
+  ms: number;
+}
+
 /** A tool's result as kept for a report: no chart markup, at most this long. */
-const TRACE_RESULT_CHARS = 4000;
+const TRACE_RESULT_CHARS = 12000;
 export function traceExcerpt(raw: string): string {
   let text = raw;
   try {
@@ -255,6 +279,8 @@ export async function askSauron(
   const choice = modelFor(purpose, process.env, chosenModel);
   const toolCalls: QueryResult['toolCalls'] = [];
   const trace: ToolTrace[] = [];
+  const run: RunMeta = { purpose, model_chosen: choice.model, calls: [], rounds: 0, pauses: 0, out_of_time: false, rescued: null, recovery_error: null, web_searches: 0, ms: 0 };
+  const runStarted = Date.now();
   const charts: QueryResult['charts'] = [];
 
   const today = getSingaporeDate();
@@ -366,6 +392,7 @@ export async function askSauron(
     } = {},
   ): Promise<Anthropic.Message> => {
     const active = opts.choice ?? choice;
+    const callStarted = Date.now();
 
     const build = (withTools: Anthropic.Messages.ToolUnion[]) => {
       const params: any = {
@@ -558,6 +585,19 @@ export async function askSauron(
     // Logged on every call, because a cache that silently stopped working
     // shows up as a bill months later and nothing else.
     console.log(usageLine(active.model, r.usage));
+    // For the issue report: which model actually answered each call, why it
+    // stopped, what it cost and how long it took.
+    run.calls.push({
+      model: (r as any).model ?? active.model,
+      effort: featuresDisabled ? 'refused' : active.effort,
+      stop_reason: r.stop_reason ?? null,
+      input_tokens: r.usage?.input_tokens ?? null,
+      output_tokens: r.usage?.output_tokens ?? null,
+      cache_read: (r.usage as any)?.cache_read_input_tokens ?? null,
+      cache_write: (r.usage as any)?.cache_creation_input_tokens ?? null,
+      ms: Date.now() - callStarted,
+      rescue: !!opts.choice,
+    });
 
     /**
      * Hitting the ceiling is a TRUNCATED answer, and it looks like a finished
@@ -784,6 +824,7 @@ export async function askSauron(
           ? 'You have run enough queries.'
           : 'No reply was produced.';
 
+    run.rescued = reason;
     try {
       /**
        * Query tools are withheld so the model must answer in prose rather than
@@ -880,5 +921,10 @@ export async function askSauron(
 
   // Folded across the whole turn: `extractSources` groups within one response,
   // and the same page is commonly cited in several of them.
-  return { answer, toolCalls, charts, sources: mergeSources(sources), trace };
+  Object.assign(run, {
+    rounds, pauses, out_of_time: outOfTime, recovery_error: recoveryError, web_searches: searches,
+    web_search_disabled: searchDisabled, features_refused: featuresDisabled,
+    charts: charts.map(c => c.title), ms: Date.now() - runStarted,
+  });
+  return { answer, toolCalls, charts, sources: mergeSources(sources), trace, run };
 }

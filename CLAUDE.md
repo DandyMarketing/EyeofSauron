@@ -1088,8 +1088,14 @@ each data tool's input, an excerpt of what it RETURNED, and how long it took --
 where a wrong answer usually comes from, and what a saved chat never had. Kept
 out of `toolCalls`, which the weekly recommendations store as evidence and
 which deliberately holds the queries, not the rows; never sent to the browser
-(`forClient()`). **"Copy for Claude"** on a report gives the whole thing as one
-block of text (`reportMarkdown()`), to paste into a session for review.
+(`forClient()`). Beside it, how the answer RAN (`RunMeta`): the model that
+actually served each call, effort, stop reason, tokens, cache reads, time,
+tool rounds, and whether it ran out of time and was rescued -- stored as
+`tool_trace = {tools, run}`. A report adds what only the server knows: the
+reporter's role and venues (the tools filter by them), the commit that
+answered, and for a plan its progress board. **"Copy for Claude"** on a report
+gives the whole thing as one block of text (`reportMarkdown()`), to paste into
+a session for review.
 
 ## Later: parked features (recorded 11 Oct 2026)
 

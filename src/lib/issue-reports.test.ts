@@ -26,7 +26,9 @@ test('the copied report carries the conversation and every tool\'s input and res
       { role: 'user', content: 'Brunch bookings 10 Oct?' },
       { role: 'assistant', content: '41 bookings', tool_trace: [
         { name: 'query_booking_lead_time', input: { venue_slug: 'super-firangi', business_date: '2026-10-10' }, result: '{"bookings":41}', ms: 812 },
-      ] },
+      ], run: { purpose: 'chat', rounds: 2, ms: 41200, out_of_time: false, rescued: null, calls: [
+        { model: 'claude-opus-5', effort: 'high', stop_reason: 'tool_use', input_tokens: 12000, output_tokens: 800, cache_read: 9000, ms: 9100 },
+      ] } },
     ],
   };
   const md = reportMarkdown(r);
@@ -36,4 +38,6 @@ test('the copied report carries the conversation and every tool\'s input and res
   assert.match(md, /"business_date":"2026-10-10"/);
   assert.match(md, /\{"bookings":41\}/);
   assert.match(md, /## What they said\n\nBrunch was 55/);
+  assert.match(md, /How it ran: 2 tool round\(s\), 41\.2s, purpose chat/);
+  assert.match(md, /call: claude-opus-5 \(high\), stop tool_use, in 12000 \/ out 800 tokens, cache read 9000, 9100 ms/);
 });

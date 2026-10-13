@@ -660,6 +660,7 @@
   .r-msg.r-a { border-left-color: var(--accent); }
   .r-who { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
   .r-text { white-space: pre-wrap; }
+  .r-run { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .r-trace summary { cursor: pointer; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
   .r-tool { margin: 8px 0; font-size: 12px; }
   .r-detail .m-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
@@ -1410,13 +1411,20 @@ async function toggleReport(row) {
   const transcript = (r.transcript || []).map(m =>
     '<div class="r-msg r-' + (m.role === 'user' ? 'q' : 'a') + '"><div class="r-who">' + (m.role === 'user' ? 'Question' : 'Sauron') + '</div>' +
       '<div class="r-text">' + esc(m.content || '') + '</div>' +
+      (m.run ? '<div class="r-run">' + esc((m.run.rounds || 0) + ' tool round(s) · ' + ((m.run.ms || 0) / 1000).toFixed(1) + 's' +
+        (m.run.calls && m.run.calls.length ? ' · ' + [...new Set(m.run.calls.map(c => c.model))].join(', ') : '') +
+        (m.run.out_of_time ? ' · RAN OUT OF TIME' : '') + (m.run.rescued ? ' · rescued: ' + m.run.rescued : '') +
+        (m.run.recovery_error ? ' · rescue failed: ' + m.run.recovery_error : '')) + '</div>' : '') +
       ((m.tool_trace || []).length ? '<details class="r-trace"><summary>Data it looked up (' + m.tool_trace.length + ')</summary>' +
         m.tool_trace.map(t => '<div class="r-tool"><strong>' + esc(t.name) + '</strong>' + (typeof t.ms === 'number' ? ' <span class="muted">' + t.ms + ' ms</span>' : '') +
           '<pre>' + esc(JSON.stringify(t.input || {}, null, 1)) + '</pre>' +
           (t.result ? '<div class="muted">Returned:</div><pre>' + esc(t.result) + '</pre>' : '') + '</div>').join('') +
       '</details>' : '') +
     '</div>').join('');
+  const ctx = r.context || {};
+  const ctxLine = ['role', 'venues', 'model', 'commit'].filter(k => ctx[k]).map(k => k + ': ' + (k === 'commit' ? String(ctx[k]).slice(0, 7) : ctx[k])).join(' · ');
   box.innerHTML =
+    (ctxLine ? '<div class="r-block muted" style="font-size:12px">' + esc(ctxLine) + '</div>' : '') +
     (r.comment ? '<div class="r-block"><div class="m-label">What they said</div>' + esc(r.comment) + '</div>' : '') +
     (r.error ? '<div class="r-block"><div class="m-label">Error shown</div><pre>' + esc(r.error) + '</pre></div>' : '') +
     '<div class="r-block"><div class="m-label">Conversation</div>' + (transcript || '<div class="muted">No saved conversation. The question and answer reported:</div>' +
