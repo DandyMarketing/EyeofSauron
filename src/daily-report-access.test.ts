@@ -16,5 +16,5 @@ test('the daily report is for owners only, refused on the server', () => {
   assert.ok(guard > 0, 'the daily report must refuse anyone who is not an owner');
   assert.ok(guard < handler.indexOf('buildDailyReport('), 'the owner check must come before the report is built');
   const dash = readFileSync('public/index.html', 'utf8');
-  assert.match(dash, /<a href="\/daily\.html" id="daily-link" style="display:none">/, 'the Daily link starts hidden');
+  assert.match(dash, /<a href="\/daily\.html" id="daily-link" hidden>/, 'the Daily link starts hidden');
 });

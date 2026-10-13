@@ -280,20 +280,55 @@
 </style>
 </head>
 <body>
-  <header>
+  <header class="site-header">
     <div class="logo"></div>
     <div>
       <h1>Weekly Briefing</h1>
       <div class="subtitle">The Dandy Collection</div>
     </div>
-    <nav>
+    <nav class="site-nav">
       <a href="/">Dashboard</a>
-      <a href="/chat.html">Query</a>
       <a href="/briefing.html" class="active" data-brief-link>Weekly brief</a>
+      <a href="/chat.html">Query</a>
       <a href="/plan.html">Plan your event</a>
-      <a href="/admin.html" id="admin-link" style="display:none">Admin</a>
+      <a href="/daily.html" id="daily-link" hidden>Daily</a>
+      <a href="/admin.html" id="admin-link" hidden>Admin</a>
       <a href="#" id="logout-link">Logout</a>
     </nav>
+    <script>
+    /*
+     * ONE menu, the same on every page (Khai, 13 Oct 2026: "the menu buttons
+     * keep shuffling"). Each page used to carry its own -- different order,
+     * different links, different sizes -- and the owner links and the brief
+     * badge arrived after sign-in, pushing everything sideways. This paints
+     * them from this browser's last visit before anything else draws; the page
+     * corrects it once it knows (setNavOwner, /brief-badge.js).
+     */
+    (function () {
+      var state = {};
+      try { state = JSON.parse(localStorage.getItem('sauron.nav') || '{}'); } catch (e) {}
+      function save() { try { localStorage.setItem('sauron.nav', JSON.stringify(state)); } catch (e) {} }
+      window.setNavOwner = function (owner) {
+        ['daily-link', 'admin-link'].forEach(function (id) {
+          var a = document.getElementById(id);
+          if (a && !a.classList.contains('active')) a.hidden = !owner;
+        });
+        state.owner = !!owner; save();
+      };
+      window.setNavBrief = function (count) {
+        var a = document.querySelector('a[data-brief-link]');
+        if (!a) return;
+        var b = a.querySelector('.nav-badge');
+        if (count > 0) {
+          if (!b) { b = document.createElement('span'); b.className = 'nav-badge'; a.appendChild(b); }
+          b.textContent = String(count);
+        } else if (b) b.remove();
+        state.brief = count; save();
+      };
+      if (state.owner) window.setNavOwner(true);
+      if (state.brief > 0) window.setNavBrief(state.brief);
+    })();
+    </script>
   </header>
 
   <div class="container" id="app">
@@ -362,7 +397,7 @@ let myVenues = [];
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();
   myVenues = me.venues || [];
-  if (me.isOwner) document.getElementById('admin-link').style.display = '';
+  window.setNavOwner(!!me.isOwner);
 
   document.getElementById('logout-link').addEventListener('click', async (e) => {
     e.preventDefault();

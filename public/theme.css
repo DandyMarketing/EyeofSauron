@@ -77,6 +77,10 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
+/* hidden means hidden, whatever display rule an element also has. One rule
+   here for every page (pages.test.ts explains the bug it prevents). */
+[hidden] { display: none !important; }
+
 /* Form controls do not inherit the font by default. */
 button, input, select, textarea { font-family: inherit; }
 /*
@@ -167,13 +171,8 @@ select:focus { outline: none; border-color: var(--accent); }
  * vertically by themselves, so a taller minimum never misaligns a label.
  */
 @media (hover: hover) and (pointer: fine) {
-  header nav a {
-    padding: 9px 10px;
-    margin: 0 -4px;
-    border-radius: 8px;
-    transition: background-color .12s;
-  }
-  header nav a:hover { background: var(--surface-hover); }
+  .site-nav a { padding: 9px 10px; }
+  .site-nav a:hover { background: var(--surface-hover); color: var(--text); }
   :where(button, .btn, input[type=submit]) { min-height: 40px; }
   :where(select) { min-height: 36px; }
   :where(.btn-small, .teach-btn, .report-link, .report-btn, .chip, .export-chip) { min-height: 34px; }
@@ -198,3 +197,38 @@ select:focus { outline: none; border-color: var(--accent); }
   text-align: center;
   vertical-align: 1px;
 }
+
+/*
+ * The one menu (every page carries the same markup; pages.test.ts checks).
+ * Styled here so no page can size or space it differently -- the 14 px on
+ * one page and 15 px on the next was half of why it shuffled. Same weight for
+ * the active link, so moving between pages never changes a link's width.
+ */
+header nav.site-nav {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px 4px;
+  font-size: 15px;
+}
+header nav.site-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: background-color .12s;
+}
+header nav.site-nav a.active { color: var(--accent); }
+header nav.site-nav a[hidden] { display: none; }
+
+/* The header around the menu, the same on every page for the same reason:
+   different padding and logo sizes moved the menu a few pixels page to page. */
+header.site-header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; }
+header.site-header .logo { width: 32px; height: 32px; flex-shrink: 0; margin: 0; }
+header.site-header h1 { font-size: 17px; font-weight: 600; line-height: 1.25; margin: 0; }
+header.site-header .subtitle { font-size: 13px; line-height: 1.35; color: var(--text-muted); margin: 1px 0 0; }
+@media (max-width: 600px) { header.site-header { padding: 12px 16px; } }

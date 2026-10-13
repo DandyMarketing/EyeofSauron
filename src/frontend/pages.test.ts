@@ -254,8 +254,10 @@ test('a page using the hidden attribute also neutralises display rules', () => {
     // Only pages that actually use the attribute on an element.
     if (!/<[a-z-]+[^>]*\shidden(\s|>)/i.test(html)) continue;
 
+    // theme.css carries the reset for every page that loads it.
+    const theme = html.includes('<link rel="stylesheet" href="/theme.css">') ? readFileSync('public/theme.css', 'utf8') : '';
     assert.match(
-      html,
+      html + theme,
       /\[hidden\]\s*\{[^}]*display:\s*none/,
       `public/${page} uses the hidden attribute but has no "[hidden] { display: none }" reset — ` +
         `any element it hides that also has a display rule will stay on screen`,
@@ -1371,4 +1373,22 @@ test('every menu links the weekly brief, and its badge uses the brief\'s own fil
   const server = readFileSync('src/server.ts', 'utf8');
   const unseen = server.slice(server.indexOf("app.get('/api/brief/unseen'"), server.indexOf("app.post('/api/brief/seen'"));
   assert.match(unseen, /await visibleRecommendations\(user\)/, 'the badge must count through the brief\'s own filter');
+});
+
+test('every page carries the same menu, in the same order', () => {
+  /**
+   * Khai, 13 Oct 2026: "the menu buttons keep shuffling when I click one".
+   * Each page had its own menu -- Query before Weekly brief on one, Daily on
+   * two of six, 14 px on one and 15 px on the rest -- so the links jumped as
+   * you moved between pages. One markup now, styled once in theme.css; only
+   * which link is active may differ.
+   */
+  const menus = ['index.html', 'briefing.html', 'chat.html', 'plan.html', 'daily.html', 'admin.html'].map(page => {
+    const html = readFileSync(`public/${page}`, 'utf8');
+    const nav = html.match(/<nav class="site-nav">([\s\S]*?)<\/nav>/);
+    assert.ok(nav, `${page} does not use the shared menu`);
+    return [page, nav![1].replace(/ class="active"/g, '').replace(/ hidden(?=[ >])/g, '').replace(/\s+/g, ' ').trim()] as const;
+  });
+  for (const [page, menu] of menus) assert.equal(menu, menus[0][1], `${page}'s menu differs from the dashboard's`);
+  assert.match(menus[0][1], /Dashboard.*Weekly brief.*Query.*Plan your event.*Daily.*Admin.*Logout/);
 });

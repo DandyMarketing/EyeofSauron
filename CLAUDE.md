@@ -770,7 +770,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,591 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,592 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -1201,6 +1201,18 @@ Khai: the chat is **Query** (asking is the point of it) and the planner is
 **Plan your event**. Labels only -- the pages are still `/chat.html` and
 `/plan.html`, so links and bookmarks keep working.
 
+**One menu, identical on every page** (Khai, same day: "the menu buttons keep
+shuffling"). Each page had carried its own -- Query before Weekly brief on one,
+Daily on two of six, 14 px here and 15 px there -- and the owner links, Logout
+and the brief badge appeared only after sign-in, pushing a right-aligned menu
+sideways. Now every page has the same `<nav class="site-nav">` (order:
+Dashboard, Weekly brief, Query, Plan your event, Daily, Admin, Logout), styled
+only in `theme.css` with the header around it, and `pages.test.ts` fails if
+any page's menu differs. Owner links and the badge are painted at first paint
+from this browser's last visit (`localStorage` `sauron.nav`, a convenience),
+then corrected by `setNavOwner()` / `setNavBrief()` once the page knows.
+Measured: every link at the same pixel on all six pages, laptop and phone.
+
 ## Later: parked features (recorded 11 Oct 2026)
 
 Agreed as worth doing and deliberately not started. Each needs the decision or
@@ -1248,7 +1260,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,591 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,592 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
