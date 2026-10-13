@@ -302,6 +302,13 @@ header.site-header #cs-menu { width: 32px; height: 32px; min-height: 0; }
   header.site-header { flex-wrap: wrap; row-gap: 6px; padding: 12px 16px; }
   header.site-header .subtitle { display: none; }
   header.site-header nav.site-nav { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: -8px; }
+  /* The light/dark switch sits apart at the top right, level with the logo
+     (Khai, 13 Oct 2026: "move the dark and light theme on mobile to the top
+     right, separate away from logout"). Still in the nav's markup, so the menu
+     stays identical on every page; the title leaves room for it. */
+  header.site-header { position: relative; }
+  header.site-header > div:not(.logo) { padding-right: 44px; }
+  header.site-header .theme-toggle { position: absolute; top: 10px; right: 16px; margin: 0; }
 }
 
 /* Settings (the admin console), owners only: a cog beside the light/dark

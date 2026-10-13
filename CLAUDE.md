@@ -1289,6 +1289,9 @@ any page's menu differs. Owner links and the badge are painted at first paint
 from this browser's last visit (`localStorage` `sauron.nav`, a convenience),
 then corrected by `setNavOwner()` / `setNavBrief()` once the page knows.
 Measured: every link at the same pixel on all six pages, laptop and phone.
+On a phone the light/dark switch sits apart at the top right, level with the
+logo (Khai, 13 Oct 2026: "separate away from logout") -- moved by CSS only, so
+the markup stays the same on every page.
 
 ## Later: parked features (recorded 11 Oct 2026)
 
