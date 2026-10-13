@@ -93,10 +93,22 @@ export async function appendTurn(
 ): Promise<void> {
   const scope = scopeOfTurn(toolCalls ?? []);
 
+  /**
+   * EXPLICIT, DISTINCT TIMES. Both rows went in one statement and took the
+   * database's now() -- the same instant for both -- so a question and its
+   * answer tied on created_at, and the tie was broken by a random uuid. Half
+   * the time a saved plan reopened with the answer ABOVE the question (Khai,
+   * 13 Oct 2026: "there is a chat from me but the last response was from
+   * Sauron"), and the history sent back to the model was out of order with it.
+   * The answer is now a millisecond after its question. Older rows are put
+   * right on read by inTurnOrder().
+   */
+  const asked = Date.now();
   const { error } = await supabaseAdmin.from('conversation_messages').insert([
     {
       conversation_id: conversationId,
       role: 'user',
+      created_at: new Date(asked).toISOString(),
       content: question,
       // A question carries no figures; the scope that matters is on the answer.
       venue_slugs: [],
@@ -105,6 +117,7 @@ export async function appendTurn(
     {
       conversation_id: conversationId,
       role: 'assistant',
+      created_at: new Date(asked + 1).toISOString(),
       content: answer,
       charts: charts ?? null,
       venue_slugs: scope.venue_slugs,
@@ -256,7 +269,7 @@ export async function readConversation(
     return null;
   }
 
-  const { messages, withheld } = filterConversation((rows ?? []) as any[], reader);
+  const { messages, withheld } = filterConversation(inTurnOrder((rows ?? []) as any[]), reader);
 
   if (withheld > 0) {
     /**
@@ -293,4 +306,16 @@ export async function deleteConversation(userId: string, id: string): Promise<bo
 
   if (error) { console.error(`[conversations] delete failed: ${error.message}`); return false; }
   return true;
+}
+
+/**
+ * Messages in the order they were said. By time, and where a question and its
+ * answer share a timestamp -- every turn saved before 13 Oct 2026 does, see
+ * appendTurn -- the question first. Stable, so nothing else moves.
+ */
+export function inTurnOrder<T extends { role: string; created_at: string }>(rows: T[]): T[] {
+  return rows
+    .map((r, i) => ({ r, i, t: Date.parse(r.created_at) }))
+    .sort((a, b) => (a.t - b.t) || ((a.r.role === 'user' ? 0 : 1) - (b.r.role === 'user' ? 0 : 1)) || (a.i - b.i))
+    .map(x => x.r);
 }

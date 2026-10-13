@@ -1498,6 +1498,25 @@ at it.**
 
 ---
 
+### 5.14 A saved conversation reopened with answers above their questions
+**Symptom.** 13 Oct 2026: after a refresh, the NYE plan ended on Khai's "yes for
+now" with no reply under it -- the reply was there, one message ABOVE it.
+**Root cause.** `appendTurn()` inserts the question and the answer in one
+statement, so both take the database's `now()` -- the same instant. Reading
+ordered by `created_at`, and `selectAll()` breaks ties by `id`, which is a random
+uuid. So within every turn the order was a coin toss. It also scrambled the
+history sent back to the model and the transcript the progress board read on a
+reopened plan -- a quiet contributor to the board's fluctuation (3.6).
+**Fix.** The question is stamped with the server's time and the answer one
+millisecond later. Turns saved before the fix are put right on read by
+`inTurnOrder()`: by time, question before answer on a tie. No migration.
+**Recurs?** **Anywhere two rows are written in one statement and read back by
+time.** A transaction's `now()` is one value for every row in it, so a timestamp
+cannot order rows written together -- give them an explicit order, or sort on
+something that has one.
+
+---
+
 ## 6. Process failures
 
 ### 6.1 Documentation drifted from reality

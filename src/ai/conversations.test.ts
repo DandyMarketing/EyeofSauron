@@ -1,7 +1,7 @@
 import '../tests/env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { titleFromQuestion, cleanTitle, isConversationKind } from './conversations.js';
+import { titleFromQuestion, cleanTitle, isConversationKind, inTurnOrder } from './conversations.js';
 
 test('a title comes from the question, trimmed to something readable', () => {
   assert.equal(titleFromQuestion('How did Neon Pigeon do last week?'), 'How did Neon Pigeon do last week?');
@@ -58,4 +58,24 @@ test('only chat and plan are kinds, so a typo cannot list the other page\'s thre
   assert.equal(isConversationKind('chat'), true);
   assert.equal(isConversationKind('plan'), true);
   for (const bad of ['Plan', 'plans', '', undefined, null, 'chat ']) assert.equal(isConversationKind(bad), false);
+});
+
+test('a question comes before its answer even when they share a timestamp', () => {
+  // Khai, 13 Oct 2026: a saved plan reopened with the answer above the
+  // question, because both rows took the same now() and a random uuid broke
+  // the tie.
+  const t1 = '2026-10-13T08:00:00.000Z', t2 = '2026-10-13T08:05:00.000Z';
+  const rows = [
+    { role: 'assistant', content: 'table of owners', created_at: t2 },
+    { role: 'assistant', content: 'first answer', created_at: t1 },
+    { role: 'user', content: 'yes for now', created_at: t2 },
+    { role: 'user', content: 'first question', created_at: t1 },
+  ];
+  assert.deepEqual(inTurnOrder(rows).map(r => r.content), ['first question', 'first answer', 'yes for now', 'table of owners']);
+  // Rows saved with distinct times keep their times.
+  const later = [
+    { role: 'assistant', content: 'a', created_at: '2026-10-13T09:00:00.001Z' },
+    { role: 'user', content: 'q', created_at: '2026-10-13T09:00:00.000Z' },
+  ];
+  assert.deepEqual(inTurnOrder(later).map(r => r.content), ['q', 'a']);
 });
