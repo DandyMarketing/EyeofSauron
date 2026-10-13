@@ -1299,8 +1299,9 @@ function refreshPending() {
  * "the forecast held". Today's count is the strip's own -- eaten, in the room
  * and still to come -- so its difference is provisional and not coloured.
  *
- * LAST YEAR'S METHOD IS THE HOLLOW DOT, on nights ahead, so the two can be
- * compared night by night and not only in the accuracy table.
+ * LAST YEAR'S METHOD IS THE HOLLOW DOT, on every night -- ahead, and as it
+ * read the day before on today and the nights gone (Khai, 13 Oct 2026) -- so
+ * the two can be compared night by night and not only in the accuracy table.
  *
  * COVERS, NOT RESERVATIONS. Walk-ins are a third of Neon Pigeon's room and
  * never appear in a book; a forecast of bookings would read low against the
@@ -1360,6 +1361,7 @@ function forecastPanel(payload, v) {
       const actual = d.actual ?? 0;
       bar += '<i class="fc-fact" style="width:' + at(actual) + '"></i>' + whisker;
       if (d.mid !== null) bar += '<i class="fc-tick" style="left:' + at(d.mid) + '"></i>';
+      if (d.last_year !== null) bar += '<i class="fc-ly" style="left:' + at(d.last_year) + '"></i>';
       let diff = '';
       if (d.mid !== null && d.actual !== null) {
         const held = d.actual >= d.lo && d.actual <= d.hi;

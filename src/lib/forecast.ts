@@ -539,7 +539,13 @@ export function venueForecast(
         ...base,
         booked: data.booked.get(venueId)?.get(d.date)?.get(1) ?? d.booked,
         mid: p?.mid ?? null, lo: p?.lo ?? null, hi: p?.hi ?? null, n: p?.n ?? 0,
-        last_year: null, beyond_history: false,
+        /**
+         * Last year's method beside it too (Khai, 13 Oct 2026: "still include
+         * the last year figure even on complete resos"), as it would have read
+         * the day before -- the same footing as the pickup it sits next to.
+         */
+        last_year: lastYearForecast(data, venueId, d.date, addDays(d.date, -1)),
+        beyond_history: false,
       };
     }
     const p = pickupForecast(data, venueId, d.date, lead, d.booked, today);

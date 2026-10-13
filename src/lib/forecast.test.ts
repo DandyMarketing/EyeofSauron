@@ -378,7 +378,9 @@ describe('the forecast for the coming days', () => {
     assert.equal(f.days[0].booked, 0, "the book at yesterday's cutoff");
     // Pickup one day out is exactly 10 on this venue, so yesterday said 0 + 10.
     assert.equal(f.days[0].mid, 10);
-    assert.equal(f.days[0].last_year, null, 'last year is a forward comparison only');
+    // Last year's method sits beside it as well, as it read the day before:
+    // a Sunday a year back served 60 here, at an unchanged level.
+    assert.equal(f.days[0].last_year, 60);
   });
 
   test('a past night is measured against the forecast made the day before it', () => {
@@ -388,6 +390,7 @@ describe('the forecast for the coming days', () => {
     assert.equal(f.days[0].actual, 64, "the strip's number, not a second read");
     assert.equal(f.days[0].booked, 50);
     assert.equal(f.days[0].mid, 60);
+    assert.equal(f.days[0].last_year, 60, "last year's pattern on a finished night too");
     assert.match(f.note, /forecast the day before/);
   });
 

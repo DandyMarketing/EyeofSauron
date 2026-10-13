@@ -776,7 +776,7 @@ unreadable.
 ## Build order & current status
 
 **Status (4 Oct 2026): Phases 0, 1 and 3 built. Phase 2 built today. Phase 4 not
-started.** 63 migrations, 25 query tools, 11 ingest sources, 1,605 tests.
+started.** 63 migrations, 25 query tools, 11 ingest sources, 1,609 tests.
 
 This line was wrong for months — it still read "planning complete, nothing built
 yet" while the product was in daily use, which is BUILD_LOG 6.1 and is worse
@@ -835,6 +835,9 @@ nothing is stored. `cover_pickup` now runs through TODAY so today's book a
 day out exists, and today's half-served covers are dropped before anything
 learns from them. The difference is coloured only once a night is over:
 green inside the range, amber outside; today's stays grey.
+Last year's pattern (the hollow dot) shows on those nights too, as it would
+have read the day before (Khai: "still include the last year figure even on
+complete resos").
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 
 ### Deferred: read-only SQL query tool
@@ -1365,7 +1368,7 @@ is built or dropped.
   another team's board and hides the cause. Revisit if Firangi's $30-50 gaps
   keep recurring (5 and 6 Oct 2026: Revel confirmed by re-export, board short).
 - **`docs/BUILD_LOG.md`, "What must exist before customer #2", item 1** still
-  says there is no test suite. There are 1,605 tests. Stale, like 6.1.
+  says there is no test suite. There are 1,609 tests. Stale, like 6.1.
 
 ## Open decisions (confirm with Khai, don't assume)
 
