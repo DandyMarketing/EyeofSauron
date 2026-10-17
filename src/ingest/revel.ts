@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import type { ProductMixRow, OperationsData, HourlySalesData, MealPeriodSummary } from '../parsers/revel/types.js';
 import { deriveMealPeriods, isDaytime } from '../parsers/revel/meal-periods.js';
+import { sourceAfterRevel } from './revel-source.js';
 
 export async function resolveVenueId(reportKey: string): Promise<string> {
   const { data, error } = await supabase
@@ -148,10 +149,23 @@ export async function ingestOperations(
     );
   }
 
+  // A day the Monday board reached FIRST -- Revel's file late, or lost
+  // (14-17 Oct 2026, BUILD_LOG 6.4) -- stays labelled 'monday' unless this
+  // says otherwise, and the next board sync overwrites a 'monday' row's sales
+  // with the board's. Revel arriving makes it 'both', the same state the
+  // board reaches when Revel was there first.
+  // row-cap: one day of one venue.
+  const { data: existing } = await supabase
+    .from('daily_operations')
+    .select('data_source')
+    .eq('venue_id', venueId)
+    .eq('business_date', businessDate)
+    .maybeSingle();
+
   // Upsert by (venue_id, business_date)
   const { error } = await supabase
     .from('daily_operations')
-    .upsert(record, { onConflict: 'venue_id,business_date' });
+    .upsert({ ...record, data_source: sourceAfterRevel(existing?.data_source) }, { onConflict: 'venue_id,business_date' });
 
   if (error) throw new Error(`Operations upsert failed: ${error.message}`);
 

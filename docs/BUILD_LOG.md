@@ -1637,6 +1637,10 @@ day, which the board had not reached yet, showed as missing.
 **Fix.** `canonicalRedirect()` forwards GET and HEAD only; any other method is
 served in place, with a test. n8n's HTTP Request moves to the new address, and
 the four failed executions are re-run from n8n.
+**A second bug the re-run would have hit.** A day the board reached first is
+labelled `monday`, and Revel's upsert never changed the label -- so the next
+board sync would write the board's sales back over Revel's. Revel loading into
+a `monday` row now makes it `both` (`sourceAfterRevel()`).
 **Recurs?** **Every customer, every domain move.** A redirect is for people
 opening pages. Before changing an address, list everything that SENDS to it --
 webhooks, schedulers, OAuth callbacks -- and change those first.
