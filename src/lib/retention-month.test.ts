@@ -11,7 +11,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  lastCompleteMonth, previousMonth, retentionShares, sumCounts, leftCensored, inPlainWords,
+  lastCompleteMonth, previousMonth, retentionShares, sumCounts, leftCensored, inPlainWords, depthFor, sumDepth,
   historyHorizon, horizonLabel, LIFETIME_LOOKBACK_DAYS,
 } from './retention-month.js';
 
@@ -209,4 +209,19 @@ describe('the sentence names its own window', () => {
     const line = inPlainWords(counts, retentionShares(counts), 'September 2026', '2022-04-01');
     assert.match(line, /not quite the same as never having been/);
   });
+});
+
+test('the 2nd / 3rd / 4th-or-more split is shown only when it adds up to "been here before"', () => {
+  const d = { second: 150, third: 60, fourth_plus: 69 };
+  assert.deepEqual(depthFor(279, d), d);
+  assert.equal(depthFor(278, d), null, 'a split that disagrees with the line above is withheld');
+  assert.equal(depthFor(279, null), null, 'migration 064 not applied');
+  assert.deepEqual(depthFor(0, { second: 0, third: 0, fourth_plus: 0 }), { second: 0, third: 0, fourth_plus: 0 });
+});
+
+test('the group split is the venues added up, or nothing if any venue lacks one', () => {
+  assert.deepEqual(sumDepth([{ second: 1, third: 2, fourth_plus: 3 }, { second: 10, third: 0, fourth_plus: 5 }]),
+    { second: 11, third: 2, fourth_plus: 8 });
+  assert.equal(sumDepth([{ second: 1, third: 2, fourth_plus: 3 }, null]), null, 'never part of a group');
+  assert.equal(sumDepth([]), null);
 });

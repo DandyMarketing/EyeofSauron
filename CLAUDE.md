@@ -946,6 +946,17 @@ accounts excluded from the cost percentages, the chart's one-line story, the
 service note's as-of line (its caveats fold), and errors. The forecast's
 accuracy table stays out too -- its track record belongs beside it.
 
+**"Been here before" is split by visits** (Khai, 17 Oct 2026): 2nd visit,
+3rd visit, 4th visit or more, as rows under that line on the Guests panel --
+the pie stays three slices. A guest is placed by how many DAYS they had been to
+this venue before the month (once makes this month their 2nd), lifetime like
+the line above, walk-ins excluded. `returning_visit_depth()` (migration 064,
+beside `guest_retention()` rather than changing it) sums to `returning_here` by
+construction, checked on synthetic data at both lookbacks; the page shows the
+split only when it does (`depthFor()`), and a missing migration costs the rows,
+never the panel. Sister-venue guests are not split (Khai's choice). The chat's
+`visit_mix` answers the different question of which visit number each VISIT was.
+
 ### Event P&L in Excel: built 12 Oct 2026
 
 The planner's brief downloads as a workbook in the group's own template shape

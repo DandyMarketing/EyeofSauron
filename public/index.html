@@ -440,6 +440,10 @@
   .slice-label { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
   .slice-n { margin-left: auto; font-variant-numeric: tabular-nums; }
   .slice-pct { color: var(--text-muted); font-size: 13px; min-width: 38px; text-align: right; }
+  /* "Been here before" split by visits (Khai, 17 Oct 2026): indented under its
+     line, no swatch of its own, so the pie stays three slices. */
+  .slice.sub { padding-left: 15px; font-size: 13px; }
+  .slice.sub .slice-label::before { content: '\2514\00a0'; color: var(--text-muted); }
   /* --- the ask bar, pinned ------------------------------------------------ */
   /* The only unbounded thing on the page, and it was last after five panels.
      Fixed to the VIEWPORT rather than the document, so it rides above the
@@ -1701,13 +1705,30 @@ function retentionPanel(payload, v) {
         x2.toFixed(2) + ' ' + y2.toFixed(2) + ' Z" fill="' + sl.fill + '"></path>';
   }
 
+  /**
+   * "BEEN HERE BEFORE", BY HOW MANY TIMES (Khai, 17 Oct 2026): rows under its
+   * line, not slices, so the pie stays three parts of one whole. A guest is
+   * placed by the visits they had made HERE before the month -- once is their
+   * 2nd visit -- and a visit is a day. The server sends the split only when it
+   * adds up to the line above; otherwise the line stands alone.
+   */
+  const share = n => total > 0 ? pct(n / total * 100) : '\u2014';
+  const subRows = r.depth && r.counts.returning_here > 0
+    ? [['2nd visit', r.depth.second], ['3rd visit', r.depth.third], ['4th visit or more', r.depth.fourth_plus]]
+        .map(([label, n]) =>
+          '<div class="slice sub">' +
+            '<span class="slice-label">' + label + '</span>' +
+            '<span class="slice-n">' + num(n) + '</span>' +
+            '<span class="slice-pct">' + share(n) + '</span>' +
+          '</div>').join('')
+    : '';
   const key = slices.map(sl =>
     '<div class="slice">' +
       '<i style="background:' + sl.fill + '"></i>' +
       '<span class="slice-label">' + sl.label + '</span>' +
       '<span class="slice-n">' + num(sl.n) + '</span>' +
-      '<span class="slice-pct">' + (total > 0 ? pct(sl.n / total * 100) : '—') + '</span>' +
-    '</div>').join('');
+      '<span class="slice-pct">' + share(sl.n) + '</span>' +
+    '</div>' + (sl.label === 'Been here before' ? subRows : '')).join('');
 
   /**
    * THE WINDOW IS ON THE PANEL, in the subheading, because "been here before"
@@ -1731,6 +1752,7 @@ function retentionPanel(payload, v) {
     '<table><tbody><tr><td>Walk-ins</td><td>' + num(r.counts.walk_in_guests) + '</td></tr></tbody></table>' +
     explain(esc(r.plain),
       since + ' Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.',
+      (r.depth ? '2nd, 3rd and 4th visit or more split the guests who had been here before by how many times they had come before this month: once makes this month their 2nd visit. A visit is a day, so two bookings on one night count once. ' : '') +
       'Walk-ins carry no booking so they cannot be matched to a guest, and are not part of the mix above. ' +
       'Repeat share falls when a venue wins a lot of new guests, so read it next to the booked-guest count rather than on its own.') +
     '</div>';

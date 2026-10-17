@@ -112,6 +112,39 @@ export function sumCounts(rows: RetentionCounts[]): RetentionCounts {
 }
 
 /**
+ * "Been here before", split by how many times (Khai, 17 Oct 2026): guests who
+ * had been to this venue once before the month, twice, or three or more times
+ * -- shown as 2nd visit, 3rd visit, 4th visit or more. From
+ * returning_visit_depth() (migration 064).
+ */
+export interface ReturningDepth {
+  second: number;
+  third: number;
+  fourth_plus: number;
+}
+
+/**
+ * The split, ONLY when it accounts for exactly the returning guests above it.
+ *
+ * The two figures come from two functions, and a split that adds up to 278
+ * under a line saying 279 is a page arguing with itself -- whatever the cause
+ * (a definition drifting in one function, a migration half-applied). Nothing
+ * is better than that: the line above still stands on its own.
+ */
+export function depthFor(returning: number, depth: ReturningDepth | null | undefined): ReturningDepth | null {
+  if (!depth) return null;
+  return depth.second + depth.third + depth.fourth_plus === returning ? depth : null;
+}
+
+/** Summed across venues; null if any venue has no split, so the group never shows part of one. */
+export function sumDepth(rows: Array<ReturningDepth | null>): ReturningDepth | null {
+  if (rows.length === 0 || rows.some(r => r === null)) return null;
+  return (rows as ReturningDepth[]).reduce((t, r) => ({
+    second: t.second + r.second, third: t.third + r.third, fourth_plus: t.fourth_plus + r.fourth_plus,
+  }), { second: 0, third: 0, fourth_plus: 0 });
+}
+
+/**
  * Does this month's lookback reach back past the start of the records?
  *
  * Returns true when the rate would be understated by a shortfall that shrinks

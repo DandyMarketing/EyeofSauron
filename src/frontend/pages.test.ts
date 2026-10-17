@@ -621,6 +621,12 @@ test('the guest mix is a pie, and every slice carries its count', () => {
   assert.match(fn, /num\(sl\.n\)/, 'the slices are percentages with no counts');
   assert.match(fn, /read it next to the booked-guest count/);
 
+  // "Been here before" by visits (Khai, 17 Oct 2026): rows UNDER that line, not
+  // slices, and only when the server sent a split that adds up to it.
+  assert.match(fn, /2nd visit[\s\S]*3rd visit[\s\S]*4th visit or more/, 'the visit split is gone');
+  assert.match(fn, /r\.depth &&/, 'the split is drawn without checking the server sent one');
+  assert.doesNotMatch(fn.slice(fn.indexOf('const slices'), fn.indexOf('].filter')), /2nd visit/, 'the split became pie slices');
+
   /**
    * A slice of exactly the whole cannot be drawn as an arc — start and end
    * coincide and the path collapses. A venue with no returning guests at all

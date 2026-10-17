@@ -33,7 +33,7 @@ import {
 import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
-  lastCompleteMonth, retentionShares, sumCounts, inPlainWords,
+  lastCompleteMonth, retentionShares, sumCounts, inPlainWords, depthFor, sumDepth, type ReturningDepth,
   historyHorizon, LIFETIME_LOOKBACK_DAYS,
   type RetentionCounts, type RetentionShares, type HistoryHorizon,
 } from './retention-month.js';
@@ -132,6 +132,12 @@ export interface RetentionBlock {
    * panel prints that date rather than letting "before" sound absolute.
    */
   horizon: HistoryHorizon;
+  /**
+   * "Been here before" split into 2nd, 3rd and 4th-or-more visits. Null when
+   * migration 064 is not applied, the read failed, or the split does not sum
+   * to returning_here -- the panel then shows the line without it.
+   */
+  depth: ReturningDepth | null;
 }
 
 export interface CostBlock {
@@ -713,6 +719,8 @@ function assembleForecast(
  */
 interface RetentionInputs {
   rows: Array<RetentionCounts & { venue_id: string }>;
+  /** venue id -> returning guests by visits before the month; null when unavailable. */
+  depth: Map<string, ReturningDepth> | null;
   /** venue id -> first booking date we hold. */
   firsts: Map<string, string | null>;
 }
@@ -724,12 +732,16 @@ async function loadRetentionInputs(month: { start: string; end: string }): Promi
    * rule a guest who first came in 2023 and ate here last month counted as NEW
    * TO THE GROUP. The chart tools keep 365 and say so.
    */
-  const [{ data, error }, { data: allVenues }] = await Promise.all([
+  const [{ data, error }, { data: allVenues }, depthRes] = await Promise.all([
     supabaseAdmin.rpc('guest_retention', {
       p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
     }),
     // row-cap: one row per venue.
     supabaseAdmin.from('venues').select('id'),
+    // Same month, same lifetime lookback, so it splits exactly returning_here.
+    supabaseAdmin.rpc('returning_visit_depth', {
+      p_start: month.start, p_end: month.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
+    }),
   ]);
   // Named, not swallowed: an unapplied migration otherwise looks exactly like a
   // month in which nobody ever came back.
@@ -745,7 +757,21 @@ async function loadRetentionInputs(month: { start: string; end: string }): Promi
     .eq('venue_id', id).order('business_date', { ascending: true }).limit(1)));
   const firsts = new Map(ids.map((id, i) => [id, (firstRows[i] as any)?.data?.[0]?.business_date ?? null] as const));
 
-  return { rows: (data ?? []) as RetentionInputs['rows'], firsts };
+  /**
+   * The split is optional: a failure (migration 064 not yet run) costs the
+   * three rows, never the panel. Logged, so an unapplied migration is visible
+   * rather than looking like a month with no regulars.
+   */
+  let depth: Map<string, ReturningDepth> | null = null;
+  if (depthRes.error) {
+    console.warn(`[dashboard] visit depth unavailable: ${depthRes.error.message}`);
+  } else {
+    depth = new Map(((depthRes.data ?? []) as any[]).map(r => [String(r.venue_id), {
+      second: Number(r.second_visit), third: Number(r.third_visit), fourth_plus: Number(r.fourth_plus),
+    }] as const));
+  }
+
+  return { rows: (data ?? []) as RetentionInputs['rows'], firsts, depth };
 }
 
 /**
@@ -762,6 +788,10 @@ function assembleRetention(
   inputs: RetentionInputs,
 ): Record<string, RetentionBlock> | null {
   const { rows, firsts } = inputs;
+  // A venue with no returning guests has no row; zero is its true split.
+  const depthOf = (id: string): ReturningDepth | null =>
+    inputs.depth ? (inputs.depth.get(id) ?? { second: 0, third: 0, fourth_plus: 0 }) : null;
+  const depths: Array<ReturningDepth | null> = [];
   if (rows.length === 0) return null;
 
   const out: Record<string, RetentionBlock> = {};
@@ -783,8 +813,11 @@ function assembleRetention(
     const horizon = historyHorizon(month.start, firsts.get(v.id) ?? null);
     horizons.push(horizon);
 
+    const depth = depthFor(counts.returning_here, depthOf(v.id));
+    depths.push(depth);
+
     out[v.slug] = {
-      month, counts, shares,
+      month, counts, shares, depth,
       plain: inPlainWords(counts, shares, month.label, horizon.from),
       /**
        * WITHHELD ONLY WHEN "LIFETIME" IS A YEAR OR LESS. Below that the phrase
@@ -821,6 +854,7 @@ function assembleRetention(
     );
     out.group = {
       month, counts, shares,
+      depth: depthFor(counts.returning_here, sumDepth(depths)),
       plain: inPlainWords(counts, shares, month.label, groupHorizon.from),
       withheld: groupHorizon.too_thin,
       horizon: groupHorizon,
