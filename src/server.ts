@@ -112,9 +112,10 @@ app.use('*', compress());
 /**
  * The old Railway address moves to sauron.staydandy.com once that is switched
  * on (src/lib/canonical-host.ts). 301, so browsers and phones remember it.
+ * GET and HEAD only: a POST (n8n's nightly Revel upload) is served in place.
  */
 app.use('*', async (c, next) => {
-  const to = canonicalRedirect(c.req.url, process.env);
+  const to = canonicalRedirect(c.req.url, process.env, c.req.method);
   if (to) return c.redirect(to, 301);
   await next();
 });

@@ -1623,6 +1623,24 @@ reaching the running system.
 **Recurs?** **Every customer.** Whatever branch is deployed must be unambiguous
 and written down.
 
+### 6.4 Moving the domain broke the nightly Revel feed for four nights
+**Symptom.** The morning report said Revel's file for Fri 16 Oct "has not
+arrived" -- but Revel had emailed it on time, at 3am as every night.
+**Root cause.** On 13 Oct the old Railway address was set to 301 every request
+to sauron.staydandy.com. n8n's workflow POSTs the files to the OLD address. A
+client following a 301 re-sends a POST as a GET with no body, so from the first
+run after the switch (14 Oct, 04:26) every upload failed.
+**Why it went unnoticed.** n8n recorded the errors, but nobody looks at n8n.
+In Sauron, the Monday board fallback filled in sales for 13-15 Oct, so the days
+did not look empty -- just odd (Neon Pigeon −60% on a Thursday). Only the next
+day, which the board had not reached yet, showed as missing.
+**Fix.** `canonicalRedirect()` forwards GET and HEAD only; any other method is
+served in place, with a test. n8n's HTTP Request moves to the new address, and
+the four failed executions are re-run from n8n.
+**Recurs?** **Every customer, every domain move.** A redirect is for people
+opening pages. Before changing an address, list everything that SENDS to it --
+webhooks, schedulers, OAuth callbacks -- and change those first.
+
 ---
 
 ## What must exist before customer #2

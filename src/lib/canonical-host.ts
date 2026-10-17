@@ -10,8 +10,14 @@
  *
  * Pure, so it is tested: returns the URL to send the browser to, or null.
  */
-export function canonicalRedirect(requestUrl: string, env: Record<string, string | undefined>): string | null {
+export function canonicalRedirect(requestUrl: string, env: Record<string, string | undefined>, method = 'GET'): string | null {
   if (env.REDIRECT_TO_PUBLIC_URL !== 'true') return null;
+  // Only a page being OPENED moves. A POST, PUT or DELETE is a machine sending
+  // data -- n8n delivering Revel's files to /ingest/revel -- and a redirect
+  // loses it: clients re-send a 301'd POST as a GET with no body. From 14 Oct
+  // 2026 every nightly Revel delivery failed this way, silently, for four
+  // nights. Anything that is not GET or HEAD is answered where it lands.
+  if (method !== 'GET' && method !== 'HEAD') return null;
   const target = (env.PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
   if (!/^https:\/\//.test(target)) return null;
   const req = new URL(requestUrl);

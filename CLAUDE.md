@@ -1234,6 +1234,13 @@ new one. The old Railway address forwards every path to the new one with a
 -- off until the new address answers, or it would send everyone to a page
 that does not load. `/version` answers on both.
 
+**Only GET and HEAD are forwarded** (17 Oct 2026). The first version forwarded
+everything, and n8n posts Revel's files to the old address: a 301'd POST is
+re-sent as a GET with no body, so every nightly upload from 14 Oct failed in
+n8n while Sauron quietly filled the gap from the Monday board. Anything that
+SENDS data is now answered where it lands (BUILD_LOG 6.4). n8n's HTTP Request
+should still be pointed at the new address.
+
 **In this order, because each step depends on the one before** (Khai's
 instruction): the domain, then the home-screen offer (an icon saved before the
 move points at the old address), then the invite email that links to the
