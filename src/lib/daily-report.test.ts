@@ -126,7 +126,9 @@ describe('the composed report', () => {
     assert.match(r.text, /\*Yesterday\* \(Sat 10 Oct\): \$1,100 \(\+10% vs Sat 3 Oct\) · 30 covers \(\+20%\)/);
     assert.match(r.text, /\*Week to date\* \(5–10 Oct\): \$2,200 \(−29% vs 28 Sep–3 Oct\)/);
     assert.match(r.text, /\*Month to date\* \(1–10 Oct\): \$4,300 \(\+330% vs 1–10 Sep\) · 55 covers\n_Month to date has 3 weekend days against 2/);
-    assert.match(r.text, /\*Today\*: 118 covers booked/);
+    assert.match(r.text, /\*Today\* \(Sun 11 Oct\): 118 covers booked/);
+    // The heading is the trading day the figures are for, not the morning it is read.
+    assert.match(r.text, /^\*Firangi Superstar\* · Sat 10 Oct\n/);
   });
 
   test('a one-day week is not printed twice', () => {
@@ -145,7 +147,8 @@ describe('the composed report', () => {
     assert.equal(r.status, 'closed');
     assert.equal(r.tonight.closed, true);
     assert.match(r.text, /\*Yesterday\* \(Sun 11 Oct\): closed/);
-    assert.match(r.text, /\*Today\*: closed/);
+    assert.match(r.text, /\*Today\* \(Mon 12 Oct\): closed/);
+    assert.match(r.text, /^\*Firangi Superstar\* · Sun 11 Oct\n/);
   });
 
   test('a late file is named in the message', () => {
@@ -154,7 +157,9 @@ describe('the composed report', () => {
     });
     assert.equal(r.status, 'late');
     assert.match(r.text, /Revel's file for Sat 10 Oct has not arrived\. Figures run to Mon 5 Oct\./);
-    assert.match(r.text, /\*Today\*: no SevenRooms data/);
+    assert.match(r.text, /\*Today\* \(Sun 11 Oct\): no SevenRooms data/);
+    // Late: the heading is the last day there IS, so it never sits above another day's figures.
+    assert.match(r.text, /^\*Firangi Superstar\* · Mon 5 Oct\n/);
   });
 });
 
@@ -189,5 +194,5 @@ test('covers are split by meal beside the total, and the parts add up', () => {
     covers, lastDataDate: '2026-10-12',
   });
   assert.match(r.text, /21 covers[^\n]*: lunch 8, dinner 13/);
-  assert.match(r.text, /\*Today\*: 40 covers booked: lunch 12, dinner 28/);
+  assert.match(r.text, /\*Today\* \(Tue 13 Oct\): 40 covers booked: lunch 12, dinner 28/);
 });

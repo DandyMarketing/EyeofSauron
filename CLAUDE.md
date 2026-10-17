@@ -918,6 +918,12 @@ includes lunch. Every meal served in either span is listed (a lunch venue shows
 brunch is its own meal, and anything the meals do not explain is named as
 "other" so the parts always add up (`mealSplit()`).
 
+**The heading is the TRADING day, not the morning** (Khai, 17 Oct 2026: "Sat
+17 Oct" above Friday's figures read as Saturday's). Each venue's message opens
+with the day its figures are for -- yesterday, or the last day there is when
+Revel's file is late -- and today's date moved to its own line: "*Today* (Sat
+17 Oct): 19 covers booked".
+
 **Owners only, for now** (Khai, 13 Oct 2026): `/api/daily-report` refuses
 anyone else and the dashboard shows the Daily link only to owners -- the API
 is the control, the hidden link is tidiness.

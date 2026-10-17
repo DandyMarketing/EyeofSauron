@@ -307,7 +307,10 @@ export function calendarNote(l: Pick<ReportLine, 'current' | 'prior'>): string |
  * it can become a template with one line per blank when WhatsApp is connected.
  */
 export function reportText(r: Omit<VenueDailyReport, 'text'>): string {
-  const out = [`*${r.venue}* · ${dayLabel(r.date)}`];
+  // The heading carries the TRADING day the figures are for, not the morning
+  // the report is read (Khai, 17 Oct 2026: "Sat 17 Oct" above Friday's figures
+  // read as Saturday's). Today's date goes on the Today line, where it belongs.
+  const out = [`*${r.venue}* · ${dayLabel(r.through ?? addDays(r.date, -1))}`];
 
   if (r.status === 'no_data' || !r.day) {
     out.push('No sales have reached Sauron for this venue yet.');
@@ -329,11 +332,12 @@ export function reportText(r: Omit<VenueDailyReport, 'text'>): string {
   }
 
   // "Today", not "Tonight", now that the book is split by meal: lunch is today too.
-  if (r.tonight.closed) out.push('*Today*: closed');
-  else if (r.tonight.booked === null) out.push('*Today*: no SevenRooms data');
+  const today = `*Today* (${dayLabel(r.date)})`;
+  if (r.tonight.closed) out.push(`${today}: closed`);
+  else if (r.tonight.booked === null) out.push(`${today}: no SevenRooms data`);
   else {
     const split = mealSplit(r.tonight.booked, r.tonight.booked_by_meal);
-    out.push(`*Today*: ${r.tonight.booked.toLocaleString('en-SG')} covers booked${split ? `: ${split}` : ''}`);
+    out.push(`${today}: ${r.tonight.booked.toLocaleString('en-SG')} covers booked${split ? `: ${split}` : ''}`);
   }
 
   out.push('_Sales are net: after discounts, with service charge, before GST._');
