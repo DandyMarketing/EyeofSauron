@@ -729,7 +729,7 @@ function renderDraft(d) {
   const taskTable = tasks.length
     ? '<table><thead><tr><th>When</th><th>What</th><th>Channel</th><th>Owner</th></tr></thead><tbody>' +
       tasks.map(t =>
-        '<tr><td>' + (t.t_minus_days === 0 ? 'On the day' : 'T−' + t.t_minus_days) + '</td>' +
+        '<tr><td>' + (t.t_minus_days === 0 ? 'On the day' : t.t_minus_days < 0 ? Math.abs(t.t_minus_days) + ' day' + (t.t_minus_days === -1 ? '' : 's') + ' after' : 'T−' + t.t_minus_days) + '</td>' +
         '<td>' + escapeHtml(t.description || '') + '</td>' +
         '<td>' + escapeHtml(t.channel || '') + '</td>' +
         '<td>' + escapeHtml(t.owner_name || '') + '</td></tr>').join('') +
@@ -1020,7 +1020,7 @@ async function openMonday(eventId, venues, d) {
   };
 
   const runPreview = async () => {
-    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board, fitting the deadlines to the plan, and grouping the tasks. Nothing is written yet. This usually takes under a minute.</div><div class="md-working">' + (window.eyeBusy ? window.eyeBusy(24) : '') + '<span class="md-clock"></span></div>';
+    sheet.innerHTML = '<h3>Send to Monday</h3><div class="md-sub">Reading each board, and naming the tasks and the workstreams they go under. Nothing is written yet. This usually takes under a minute.</div><div class="md-working">' + (window.eyeBusy ? window.eyeBusy(24) : '') + '<span class="md-clock"></span></div>';
     // A clock, so a long preview reads as working rather than stalled.
     const started = Date.now();
     const clockEl = sheet.querySelector('.md-clock');
@@ -1032,7 +1032,7 @@ async function openMonday(eventId, venues, d) {
       const res = await fetch('/api/plan/monday/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ event_id: eventId, boards: chosen, brief, remembered: rememberedPeople() }),
+        body: JSON.stringify({ event_id: eventId, boards: chosen, brief, has_pnl: !!hasPnl, remembered: rememberedPeople() }),
       });
       const out = await res.json();
       if (!res.ok || out.error) throw new Error(out.error || 'Could not build the preview.');
@@ -1098,10 +1098,12 @@ async function openMonday(eventId, venues, d) {
 
 
   /**
-   * The planner's tasks as SUB-ITEMS (Khai, 13 Oct 2026): each under the
-   * template step Sauron chose, or an extra parent ("Marketing plan"...) that
-   * is made only when something goes under it. Rows are drawn parent first,
-   * its tasks beneath; the "Under" dropdown moves a task.
+   * The planner's tasks as SUB-ITEMS (Khai, 13 Oct 2026), each under its
+   * WORKSTREAM (22 Oct 2026: no board template -- "the brief completion
+   * dictates what is to be done, so each event has a different look"). A
+   * workstream is made only when something goes under it. Rows are drawn
+   * parent first, its tasks beneath; the "Under" dropdown moves a task, and
+   * the move is saved on the send.
    */
   const isExtra = (v, name) => !v.items.some(it => !it.parent && it.name === name);
   const usedExtras = v => v.subitems
@@ -1114,20 +1116,37 @@ async function openMonday(eventId, venues, d) {
     const kids = name => v.items.map((it, j) => ({ it, j, sub: true })).filter(x => x.it.parent === name);
     v.items.forEach((it, j) => { if (!it.parent) { rows.push({ it, j }); rows.push(...kids(it.name)); } });
     for (const name of usedExtras(v)) {
-      const first = v.items.find(it => it.parent === name);
-      rows.push({ it: { name, owner_label: first ? first.owner_label : '' }, extra: true });
+      const w = workstreamItem(v, name);
+      rows.push({ it: w, extra: true });
       rows.push(...kids(name));
     }
     return rows;
   };
+  /**
+   * A workstream item: due when its last task is due, owned by whoever owns
+   * its tasks, and assigned everyone working on them -- so the board's top
+   * level says who is on what without opening anything.
+   */
+  const workstreamItem = (v, name) => {
+    const kids = v.items.filter(it => it.parent === name);
+    const dates = kids.map(it => it.deadline).filter(Boolean).sort();
+    const first = kids[0];
+    const assigned = [...new Set(kids.flatMap(it => it.assigned_ids || []))];
+    const labels = [...new Set(kids.map(it => it.assigned_label).filter(Boolean).join(', ').split(', ').filter(Boolean))];
+    return {
+      name, deadline: dates.length ? dates[dates.length - 1] : null,
+      owner_ids: first ? first.owner_ids : [], owner_label: first ? first.owner_label : '',
+      assigned_ids: assigned, assigned_label: labels.join(', '),
+    };
+  };
   const payloadItems = v => {
     const out = v.items.filter(it => !it.parent).map(it => ({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids }));
     for (const name of usedExtras(v)) {
-      const first = v.items.find(it => it.parent === name);
-      out.push({ name, deadline: null, owner_ids: first ? first.owner_ids : [], assigned_ids: [] });
+      const w = workstreamItem(v, name);
+      out.push({ name, deadline: w.deadline, owner_ids: w.owner_ids, assigned_ids: w.assigned_ids });
     }
     for (const it of v.items.filter(it => it.parent)) {
-      out.push({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids, parent: it.parent, detail: it.detail || null, aliases: it.aliases || [] });
+      out.push({ name: it.name, deadline: it.deadline, owner_ids: it.owner_ids, assigned_ids: it.assigned_ids, parent: it.parent, detail: it.detail || null, aliases: it.aliases || [], task_id: it.task_id || null });
     }
     return out;
   };
@@ -1159,21 +1178,20 @@ async function openMonday(eventId, venues, d) {
           ' To start a separate group instead, rename it above.</div>' + changesBlock(v, i) : '') +
         (v.member === false ? '<div class="md-warn">Sauron writes to Monday as ' + escapeHtml(preview.writes_as) + ', who is not a member of this board, so Monday will refuse. Add them to the board first.</div>' : '') +
         v.warnings.map(w => '<div class="md-note">' + escapeHtml(w) + '</div>').join('') +
-        (brief && !v.attach?.brief ? '<div class="md-note">No "Concept &amp; Mechanics" step on this board\'s template, so the brief will not go on here.</div>' : '') +
-        (hasPnl && !v.attach?.pnl ? '<div class="md-note">No "Financial Forecast" step on this board\'s template, so the P&amp;L will not go on here.</div>' : '') +
+
         (v.subitems && (v.flat || []).length ? '<div class="md-warn">' + v.flat.length + ' of the plan\'s tasks are already on the board as separate items from an earlier send. They now go in as sub-items; delete the separate ones on Monday when you are ready: ' + v.flat.map(escapeHtml).join('; ') + '.</div>' : '') +
         '<div class="md-note">' + (v.subitems
-          ? v.items.filter(it => !it.parent).length + ' items' + (usedExtras(v).length ? ' plus ' + usedExtras(v).length + ' new parent' + (usedExtras(v).length === 1 ? '' : 's') : '') + ', with ' + v.items.filter(it => it.parent).length + ' of the plan\'s tasks as sub-items under them. Sauron chose where each task goes; move any with "Under". Each task\'s full text goes on it as a note, tagging its people'
+          ? usedExtras(v).length + ' workstream' + (usedExtras(v).length === 1 ? '' : 's') + ' for this event, with ' + v.items.filter(it => it.parent).length + ' tasks as sub-items under them, plus the brief' + (v.items.some(it => it.name === 'Financial forecast' && !it.parent) ? ' and the P&amp;L' : '') + '. Everything comes from the brief -- nothing is added from the board\'s template. Sauron chose each task\'s workstream; move any with "Under". Each task\'s full text goes on it as a note, tagging its people'
           : v.items.length + ' items') + (flagged ? ', <span style="color:var(--error)">' + flagged + ' flagged</span> — check them in Monday after, or fix the plan and send again' : '') + '.</div>' +
         '<table><thead><tr><th>Deadline</th><th>Task</th><th>Owner</th><th>Assigned to</th><th>Why / flags</th></tr></thead><tbody>' +
         rowsOf(v).map(({ it, j, sub, extra }) => extra
-          ? '<tr class="md-parent"><td class="md-date" data-l="Due">—</td><td class="md-task">' + escapeHtml(it.name) +
-            '<span class="md-src">new parent item</span></td><td data-l="Owner">' + escapeHtml(it.owner_label || '—') + '</td><td data-l="Assigned">—</td><td></td></tr>'
+          ? '<tr class="md-parent"><td class="md-date" data-l="Due">' + escapeHtml(fmt(it.deadline)) + '</td><td class="md-task">' + escapeHtml(it.name) +
+            '<span class="md-src">workstream</span></td><td data-l="Owner">' + escapeHtml(it.owner_label || '—') + '</td><td data-l="Assigned">' + escapeHtml(it.assigned_label || '—') + '</td><td></td></tr>'
           : '<tr' + (sub ? ' class="md-sub"' : '') + '><td class="md-date" data-l="Due">' + escapeHtml(fmt(it.deadline)) + '</td>' +
           '<td class="md-task">' + (sub ? '<span class="md-arrow">↳</span>' : '') + escapeHtml(it.name) +
             // The full task, which goes on as a note on the sub-item, tagging its people.
             (it.detail ? '<span class="md-detail">' + escapeHtml(it.detail) + '</span>' : '') +
-            '<span class="md-src">' + (it.source === 'template' ? 'board template' : sub ? 'sub-item, from the plan' : 'from the plan') + '</span>' +
+            '<span class="md-src">' + (it.source === 'brief' ? 'from the brief' : sub ? 'task, from the plan' : 'from the plan') + '</span>' +
             (sub ? '<label class="md-pick-l">Under: <select class="md-parent-pick" data-v="' + i + '" data-it="' + j + '">' +
               v.parents.map(pn => '<option' + (pn === it.parent ? ' selected' : '') + '>' + escapeHtml(pn) + '</option>').join('') +
               '</select></label>' : '') + '</td>' +
@@ -1193,12 +1211,12 @@ async function openMonday(eventId, venues, d) {
     const any = preview.venues.some(sendable);
     sheet.innerHTML =
       '<h3>Preview — nothing written yet</h3>' +
-      '<div class="md-sub">Sauron writes as ' + escapeHtml(preview.writes_as) + '. Template steps keep the board\'s own owners; the plan\'s tasks go to the person the plan named.</div>' +
+      '<div class="md-sub">Sauron writes as ' + escapeHtml(preview.writes_as) + '. Each task goes to the person the plan named; a workstream is assigned everyone on its tasks.</div>' +
       // By choice (Khai, 12 Oct 2026): each attachment is a tick, on unless
       // there is nothing to attach.
       '<div class="md-attach">' +
-        '<label><input type="checkbox" data-a="brief"' + (attach.brief ? ' checked' : '') + (brief ? '' : ' disabled') + '> Brief → Concept &amp; Mechanics <small>the brief as the update\'s text, with the Word file attached</small></label>' +
-        '<label><input type="checkbox" data-a="pnl"' + (attach.pnl ? ' checked' : '') + (hasPnl ? '' : ' disabled') + '> P&amp;L → Financial Forecast <small>the headline figures as the update, with the Excel attached</small></label>' +
+        '<label><input type="checkbox" data-a="brief"' + (attach.brief ? ' checked' : '') + (brief ? '' : ' disabled') + '> Brief → Event brief <small>the brief as the update\'s text, with the Word file attached</small></label>' +
+        '<label><input type="checkbox" data-a="pnl"' + (attach.pnl ? ' checked' : '') + (hasPnl ? '' : ' disabled') + '> P&amp;L → Financial forecast <small>the headline figures as the update, with the Excel attached</small></label>' +
         (brief ? '' : '<div class="md-note">This draft has no brief text to attach.</div>') +
         (hasPnl ? '' : '<div class="md-note">This brief has no revenue lines, so there is no P&amp;L to attach.</div>') +
         (preview.venues.some(v => v.exists) ? '<div class="md-note">Where the group is already on the board, these go on as a new update marked "Revised", with the earlier one kept below it. If the text has not changed, nothing is posted.</div>' : '') +

@@ -285,8 +285,9 @@ test('an unknown choice still lets the environment override stand', () => {
 test('the event planner runs on Opus in every pass (Khai, 13 Oct 2026: "always Opus")', () => {
   assert.equal(modelFor('planning', {}).model, 'claude-opus-5');
   const src = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
-  // The planner's own passes: brief and P&L, progress board, names, deadlines, grouping.
-  assert.equal((src.match(/modelFor\('planning', process\.env\)\.model/g) ?? []).length, 5);
+  // The planner's own passes: brief and P&L, progress board, names and
+  // workstreams. The template deadline and grouping passes went on 22 Oct 2026.
+  assert.equal((src.match(/modelFor\('planning', process\.env\)\.model/g) ?? []).length, 3);
   assert.doesNotMatch(src, /modelFor\('lookup'/);
 });
 

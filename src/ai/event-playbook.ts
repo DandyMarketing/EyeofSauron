@@ -60,6 +60,22 @@ export interface PlaybookRow {
 
 export const PLAYBOOK: PlaybookRow[] = [
   // --- A. The point -------------------------------------------------------
+  // The board's Event Template opened with "0. Review last year performance".
+  // With the template gone from the Monday send (Khai, 22 Oct 2026) the plan
+  // itself has to carry it.
+  {
+    key: 'last_year',
+    stage: 'point',
+    decision: 'What happened the last time we ran this or something like it -- covers, sales, what worked and what did not -- looked up, never remembered.',
+    ask: 'Have we run this, or something like it, before? Let me pull what it did -- what would you keep, and what would you change?',
+    weak: '"It went well." A memory of a busy night with no figure behind it.',
+    challenge:
+      'LOOK IT UP before asking: query_events for the past event and its look-back, query_sales for the night against a normal one. Put the figures in front of the person and ask what they would keep and change. "We have never done anything like it" settles it.',
+    measurable: false,
+    sharpen_with: ['query_events', 'query_sales', 'query_reservations'],
+    blocking: false,
+    applies_when: 'the venue may have run this event, or a similar one, before',
+  },
   {
     key: 'objective',
     stage: 'point',
@@ -287,12 +303,43 @@ export const PLAYBOOK: PlaybookRow[] = [
     blocking: true,
     blocking_when: 'the product is not a walk-in product',
   },
+  {
+    key: 'creative_assets',
+    stage: 'campaign',
+    decision: 'The artwork and print: the key visual requested on the Marketing Request Board, partner logos, bios and branding collected, menus and collateral requested and sent to the printers, and the artwork shared with GR and Ops -- each with an owner and a date.',
+    ask: 'Who requests the key visual, and by when? Do we need partner logos and bios, printed menus or other collateral -- and who sends them to the printers?',
+    weak: 'Nobody asked for the artwork until the week of launch, so the first post goes out late or on an old image.',
+    challenge:
+      'ARTWORK HAS A LEAD TIME and everything waits on it: the posts, the printed menus, the offer page. Work back from the first post: the key visual request goes in first, partner logos and bios before it, printing after the menus are signed off. Each gets an owner and a date. Then the artwork goes to GR and Ops so the floor knows what guests have seen. "No print" is a valid answer for a post-only campaign.',
+    measurable: false,
+    sharpen_with: [],
+    blocking: true,
+    blocking_when: 'the event has a campaign, printed menus or partners',
+  },
+  {
+    key: 'launch_and_takedown',
+    stage: 'campaign',
+    decision: 'The day comms go live -- website pop-up, Google Business Profile, Chope, LinkTree, scheduled stories -- and the day they come down after the event, each with an owner.',
+    ask: 'On which day does it go live everywhere -- website, Google, Chope, LinkTree, stories -- and who takes it all down after?',
+    weak: 'Launched piecemeal, and the website still advertising it a month later.',
+    challenge:
+      'One launch day, one owner, every listing on it. The take-down is the task everyone forgets: an event still on the website after it has happened tells guests nobody is minding the shop. Name the person and the day after the event it comes down.',
+    measurable: false,
+    sharpen_with: [],
+    blocking: false,
+  },
 
   // --- E. Running the night ---------------------------------------------
   // Khai, 13 Oct 2026, going through the board's Event Template: staffing,
   // photography and the food and drink menus need DISCUSSING, so they are
-  // decisions. Booking rules, artwork, printing, comms and the debrief need
-  // only an owner and a date, and the board's template already creates those.
+  // decisions. Booking rules, artwork, printing, comms and the debrief needed
+  // only an owner and a date, and the board's template created those.
+  //
+  // 22 Oct 2026: the template no longer goes to Monday -- the brief alone
+  // decides what is there -- so those steps are rows here (booking_setup,
+  // creative_assets, launch_and_takedown, debrief). Khai: "the questions asked
+  // by the AI and pushed back should be enough to cover those points as a
+  // minimum." They ask for an owner and a date, not a debate.
   {
     key: 'staffing',
     stage: 'running',
@@ -344,6 +391,20 @@ export const PLAYBOOK: PlaybookRow[] = [
     applies_when: 'the event sells drinks',
   },
 
+  {
+    key: 'booking_setup',
+    stage: 'running',
+    decision: 'How guests book and on what terms -- deposit or prepayment, minimum spend, cancellation, table times -- the SevenRooms offer page and any Chope or website listing, who sets it up and by when.',
+    ask: 'How do people book this, and on what terms -- deposit, minimum spend, cancellation, seating times? Who sets up the SevenRooms offer page, and by when?',
+    weak: '"Normal bookings." No deposit on a night that sells out, or an offer page nobody built until launch day.',
+    challenge:
+      'A ticketed or set-menu night with no deposit is a night of no-shows. Settle the terms, then the SevenRooms offer page (it has to exist BEFORE the first post links to it), any Chope or website listing, the person who sets them up and the date. Check how this venue\'s guests book (check_booking_channels) and its no-show rate (query_reservations).',
+    measurable: false,
+    sharpen_with: ['query_reservations', 'check_booking_channels'],
+    blocking: true,
+    blocking_when: 'the event takes bookings',
+  },
+
   // --- F. The follow-through ---------------------------------------------
   {
     key: 'owners_and_deadlines',
@@ -370,6 +431,18 @@ export const PLAYBOOK: PlaybookRow[] = [
       'Deciding this in advance turns a bad week into a decision instead of a panic. Set the date you check and the number you need by then. The answer is rarely to cancel — it is usually to switch from broadcast to phoning people — but that switch happens days earlier if it was written down.',
     measurable: true,
     sharpen_with: [],
+    blocking: false,
+  },
+  {
+    key: 'debrief',
+    stage: 'follow_through',
+    decision: 'A debrief after the event: the date, who runs it, and that it judges the night against the objective set at the start.',
+    ask: 'When do we debrief, who runs it, and what will we judge it on?',
+    weak: 'No debrief, so next year starts from memory again.',
+    challenge:
+      'The debrief is how next year\'s plan starts from figures: put it in the diary within a week of the event, with an owner, and judge the night against the objective and the abort line set here. Sauron can pull the night\'s covers and sales for it.',
+    measurable: false,
+    sharpen_with: ['query_sales', 'query_reservations'],
     blocking: false,
   },
 ];

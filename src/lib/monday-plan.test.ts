@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groupTitle, parseGroupDate, stepKey, historicalOffsets, matchPerson, findColumns,
-  deadlineFlags, buildItems, columnValues, sanitiseItems, deadlinePrompt, attachTargets, pnlUpdateHtml, splitNames, matchPeople,
-  planChanges, sanitiseUpdates, updateValues, alreadyPosted, assignParents, parentByKind, EXTRA_PARENTS, readTitles, cleanTitle, detailUpdateHtml, type MondayUser, type BoardItem, type PlannerTask,
+  deadlineFlags, buildItems, columnValues, sanitiseItems, attachTargets, pnlUpdateHtml, splitNames, matchPeople,
+  planChanges, sanitiseUpdates, updateValues, alreadyPosted, parentByKind, EXTRA_PARENTS, workstreamOf, workstreams, readWorkstreams, titlePrompt, TITLE_SYSTEM, briefItems, readTitles, cleanTitle, detailUpdateHtml, type MondayUser, type BoardItem, type PlannerTask,
 } from './monday-plan.js';
 
 const users: MondayUser[] = [
@@ -133,21 +133,7 @@ test('what comes back from the browser is checked before it is written', () => {
   assert.equal(sanitiseItems([{ name: '' }]), null);
   assert.equal(sanitiseItems(Array.from({ length: 121 }, () => ({ name: 'x' }))), null);
   assert.deepEqual(sanitiseItems([{ name: ' A ', deadline: 'soon', owner_ids: ['5', -1, 'x'], assigned_ids: [2.5, 7] }]),
-    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7], parent: null, detail: null, aliases: [] }]);
-});
-
-test('the deadline pass is given the plan first and the board\'s history as a labelled reference', () => {
-  const p = deadlinePrompt({
-    event: { name: 'NYE', start_date: '2026-12-31', end_date: '2026-12-31' },
-    tasks: [{ description: 'Launch post', channel: 'carousel', kind: 'content', due_date: '2026-12-10', owner_name: 'Corbin' }],
-    steps: [{ name: '13. Send Menus to Printers', owner_ids: [], assigned_ids: [] }, { name: '99. New step', owner_ids: [], assigned_ids: [] }],
-    history: new Map([['send menus to printers', { days_before: 18, n: 2 }]]),
-    today: '2026-10-12',
-  });
-  assert.ok(p.indexOf('THE PLAN') < p.indexOf('CHECKLIST'));
-  assert.match(p, /2026-12-10: Launch post \(carousel\) -- Corbin/);
-  assert.match(p, /0\. 13\. Send Menus to Printers \[on past events on this board: due 18 days before, median of 2\]/);
-  assert.match(p, /1\. 99\. New step \[no history on this board\]/);
+    [{ name: 'A', deadline: null, owner_ids: [5], assigned_ids: [7], parent: null, detail: null, aliases: [], task_id: null }]);
 });
 
 test('the brief and the P&L find their steps by words, whatever the number', () => {
@@ -306,18 +292,40 @@ const npSteps = [
 const task = (description: string, kind: string): PlannerTask =>
   ({ description, kind, channel: null, due_date: '2026-12-01', owner_name: null });
 
-test('each task goes under the step the AI chose, or an extra parent -- never a step that does not exist', () => {
-  const tasks = [task('Book the DJ', 'ops'), task('Post 4: dinner menu being cooked', 'content'), task('Press invites', 'outreach'), task('Something odd', 'other')];
-  const out = assignParents(tasks, npSteps, { tasks: [
-    { task: 0, step: 2 },
-    { task: 1, step: -1, extra: 'Marketing plan' },
-    { task: 2, step: 9 },              // no such step: falls back to its kind
-    // task 3 not answered at all: by kind
-  ] });
-  assert.deepEqual(out.map(t => t.parent), ['8. Source entertainment/partners/sponsors', 'Marketing plan', 'PR & outreach', 'Other tasks']);
-  // Nothing usable from the pass: every task still has a parent.
-  assert.deepEqual(assignParents(tasks, npSteps, null).map(t => t.parent), ['Operations', 'Marketing plan', 'PR & outreach', 'Other tasks']);
+test('each task goes under its own workstream, or by its kind until it has one -- never a template step', () => {
+  // Khai, 22 Oct 2026: the brief alone decides what is on the board.
+  const tasks: PlannerTask[] = [
+    { ...task('Book the DJ', 'ops'), workstream: 'Entertainment' },
+    { ...task('Post 4: dinner menu being cooked', 'content'), workstream: 'Marketing' },
+    task('Press invites', 'outreach'),
+    { ...task('Set up the rooftop bar', 'ops'), workstream: '  ' },
+  ];
+  assert.deepEqual(tasks.map(workstreamOf), ['Entertainment', 'Marketing', 'PR & outreach', 'Operations']);
+  assert.deepEqual(workstreams(tasks), ['Entertainment', 'Marketing', 'PR & outreach', 'Operations'], 'in the order the plan uses them');
   assert.ok(EXTRA_PARENTS.includes(parentByKind('content') as any));
+  void npSteps;
+});
+
+test('the naming pass reads workstreams, and is told the event and the ones in use', () => {
+  const w = readWorkstreams(3, { tasks: [
+    { task: 0, title: 'Book the DJ', workstream: 'Entertainment' },
+    { task: 1, title: 'x', workstream: 'A workstream name far too long to be a heading on a board' },
+    { task: 9, workstream: 'Nope' },
+  ] });
+  assert.deepEqual([...w], [[0, 'Entertainment']]);
+  const p = titlePrompt([task('Book the DJ', 'ops')], { name: 'NYE Rooftop', concept: 'A rooftop countdown' }, ['Entertainment']);
+  assert.match(p, /THE EVENT: NYE Rooftop -- A rooftop countdown/);
+  assert.match(p, /WORKSTREAMS ALREADY IN USE.*Entertainment/);
+  assert.match(TITLE_SYSTEM, /each event has|should not look the same/);
+});
+
+test('the brief and the P&L get their own items when the template is gone', () => {
+  const me: MondayUser = { id: '9', name: 'Khai', email: 'k@x' };
+  const items = briefItems(me, true);
+  assert.deepEqual(items.map(i => i.name), ['Event brief', 'Financial forecast']);
+  assert.deepEqual(items[0].owner_ids, [9]);
+  assert.deepEqual(briefItems(null, false).map(i => i.name), ['Event brief'], 'no forecast item without a P&L');
+  assert.deepEqual(attachTargets(['Event brief', 'Financial forecast', 'Entertainment']), { brief: 0, pnl: 1 });
 });
 
 test('a sub-item must hang off a top-level item sent with it', () => {

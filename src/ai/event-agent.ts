@@ -610,14 +610,16 @@ export function eventDraftTool(venueSlugs?: string[]) {
 
         tasks: {
           type: 'array',
-          description: 'The content and outreach schedule. EVERY ITEM HAS A DATE — a post without one is an intention, not a plan — and every item has an owner.',
+          description:
+            'EVERY TASK THE EVENT NEEDS, not only content: this list IS what goes to Monday -- there is no checklist added there any more, so a task missing here is missing on the board. EVERY ITEM HAS A DATE -- a post without one is an intention, not a plan -- and every item has an owner. ' +
+            'AT A MINIMUM, one task for each of these that applies to this event, named for this event: review what the last one like it did; the booking rules and the SevenRooms offer page; the food menu and the drink list signed off; the financial forecast signed off; partners, entertainment or sponsors secured; partner logos, bios and branding collected; the key visual requested on the Marketing Request Board; menus and collateral sent to print; the key visual shared with GR and Ops; launch comms (website pop-up, Google Business Profile, Chope, LinkTree, scheduled stories); comms taken down after the event; the debrief. Then the content and outreach schedule and everything else the conversation settled. Leave out only what genuinely does not apply (no print for a post-only campaign).',
           items: {
             type: 'object',
             properties: {
               kind: { type: 'string', enum: ['content', 'outreach', 'ops', 'other'] },
               description: { type: 'string', description: '"Reel: the dish being plated", "Call VIPs who booked the last collab".' },
               channel: { type: 'string', description: 'Format for content, channel for outreach: reel, carousel, story, phone, whatsapp, email.' },
-              t_minus_days: { type: 'number', description: 'Days before the event. 14 means a fortnight out, 0 is the day itself.' },
+              t_minus_days: { type: 'number', description: 'Days before the event. 14 means a fortnight out, 0 is the day itself. NEGATIVE for after the event ends: -1 is the day after, -7 a week after (taking comms down, the debrief).' },
               owner_name: { type: 'string', description: 'A person\'s name. "The team" is not an owner, and neither is "Planner" or "You" -- write the person planning\'s actual name.' },
             },
             required: ['kind', 'description', 't_minus_days', 'owner_name'],

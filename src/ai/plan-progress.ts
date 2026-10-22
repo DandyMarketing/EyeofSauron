@@ -19,6 +19,7 @@ import { PLAYBOOK, type PlaybookRow, type Stage } from './event-playbook.js';
 
 /** Short names for the panel. The playbook's `decision` line is the full one. */
 export const DECISION_LABELS: Record<string, string> = {
+  last_year: 'Last time',
   objective: 'Objective & target',
   target_demographic: 'Who it is for',
   audience_motivation: 'Why they come',
@@ -37,12 +38,16 @@ export const DECISION_LABELS: Record<string, string> = {
   alternative_channels: 'Other channels',
   content_plan: 'Content schedule',
   direct_outreach: 'Direct outreach',
+  creative_assets: 'Artwork & print',
+  launch_and_takedown: 'Launch & take-down',
   staffing: 'Staffing',
   photography: 'Photography',
   food_menu: 'Food menu',
   drink_menu: 'Drink menu',
+  booking_setup: 'Booking set-up',
   owners_and_deadlines: 'Owners & deadlines',
   abort_condition: 'Abort condition',
+  debrief: 'Debrief',
 };
 
 /**
@@ -52,6 +57,7 @@ export const DECISION_LABELS: Record<string, string> = {
  * figures, at most 60 characters -- a test holds that.
  */
 export const DECISION_HINTS: Record<string, string> = {
+  last_year: 'What the last one like it did, and what to change',
   objective: 'The number that proves it worked, vs a normal night',
   target_demographic: 'Exactly which guests: who, what they spend',
   audience_motivation: 'Why they give up their night for this',
@@ -70,12 +76,16 @@ export const DECISION_HINTS: Record<string, string> = {
   alternative_channels: 'Borrowed trust: communities, clubs, concierges, institutions',
   content_plan: 'Every post with a date: what goes out when',
   direct_outreach: 'Who gets a personal message, and on which days',
+  creative_assets: 'Key visual, partner logos, printing: owner and date',
+  launch_and_takedown: 'The day it goes live everywhere, and comes down',
   staffing: 'Extra people per room and shift, roster owner, the cost',
   photography: 'Photos or video before or on the night: who, what, cost',
   food_menu: 'What we serve, who writes it, sign-off date, fits price',
   drink_menu: 'What we pour, who writes it, sign-off date, fits price',
+  booking_setup: 'Deposit, terms, the SevenRooms offer page: who, when',
   owners_and_deadlines: 'A person and a date against every task',
   abort_condition: 'Bookings needed by when, and what we do if short',
+  debrief: 'When we debrief, who runs it, judged on what',
 };
 
 // Short, because six sit side by side under the bar on a phone and longer

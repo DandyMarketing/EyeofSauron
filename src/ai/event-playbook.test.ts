@@ -415,16 +415,17 @@ test('the P&L is its own pass, run beside the brief, and the brief no longer car
   assert.equal((eventDraftTool().input_schema.properties as any).pnl, undefined);
 });
 
-test('running the night: staffing, photography and both menus are decisions, the rest are tasks', () => {
-  // Khai, 13 Oct 2026, going through the board's Event Template.
+test('running the night: staffing, photography, both menus and the booking set-up', () => {
+  // Khai, 13 Oct 2026, going through the board's Event Template; booking set-up
+  // joined on 22 Oct 2026 when the template stopped going to Monday.
   const running = PLAYBOOK.filter(r => r.stage === 'running').map(r => r.key);
-  assert.deepEqual(running, ['staffing', 'photography', 'food_menu', 'drink_menu']);
+  assert.deepEqual(running, ['staffing', 'photography', 'food_menu', 'drink_menu', 'booking_setup']);
   assert.match(PLAYBOOK.find(r => r.key === 'staffing')!.challenge, /SECURITY IS LABOUR/);
   assert.match(PLAYBOOK.find(r => r.key === 'staffing')!.challenge, /marked a proposal, never "the standard ratio"/);
   assert.equal(PLAYBOOK.find(r => r.key === 'food_menu')!.applies_when, 'the event sells food');
   assert.match(PLAYBOOK.find(r => r.key === 'photography')!.challenge, /"No" is a valid answer/);
-  // Booking rules stay a task on the board's template, not a decision.
-  assert.equal(PLAYBOOK.some(r => /booking_rules/.test(r.key)), false);
+  // Booking set-up asks for terms, an owner and a date -- not a debate.
+  assert.match(PLAYBOOK.find(r => r.key === 'booking_setup')!.decision, /SevenRooms offer page/);
   assert.match(EVENT_AGENT_PROMPT, /RUNNING THE NIGHT/);
 });
 
@@ -438,4 +439,35 @@ test('a photographer is a photographer, never a "shooter"', () => {
   assert.ok(!/shoots it|shooter/i.test(row.ask + ' ' + row.challenge), 'the playbook plants "shooter" again');
   assert.match(row.ask, /photographer or videographer/);
   assert.match(EVENT_AGENT_PROMPT, /"Photographer" or "videographer", not\s+"shooter"/);
+});
+
+test("the board template's standard steps are covered by the planner's own questions", () => {
+  /**
+   * Khai, 22 Oct 2026: the Event Template no longer goes to Monday, and "the
+   * questions asked by the AI and pushed back should be enough to cover those
+   * points as a minimum". The NP template's steps, each with the row that
+   * now carries it.
+   */
+  const keys = new Set(PLAYBOOK.map(r => r.key));
+  const covered: Record<string, string> = {
+    'Review last year performance': 'last_year',
+    'Strategy & Target Audience': 'target_demographic',
+    'Concept & Mechanics': 'product_shape',
+    'Submit Event Booking Rules Form': 'booking_setup',
+    'Submit & Review Food Menu': 'food_menu',
+    'Submit & Review Beverage Menu': 'drink_menu',
+    'Submit & Review Financial Forecast': 'cost_build_and_breakeven',
+    'Source entertainment/partners/sponsors': 'partner_terms',
+    'Source Logos, Bios, & Branding Details from Partners': 'creative_assets',
+    'Submit KV Request': 'creative_assets',
+    'Menu & Collateral Printing Request': 'creative_assets',
+    'Share KVs to GR, OPS': 'creative_assets',
+    'Send Menus to Printers': 'creative_assets',
+    'Set Up & Link 7R Offer Page': 'booking_setup',
+    'Launch Comms': 'launch_and_takedown',
+    'Remove Socials': 'launch_and_takedown',
+    'Conduct Debrief': 'debrief',
+  };
+  for (const [step, key] of Object.entries(covered)) assert.ok(keys.has(key), `${step}: no "${key}" row`);
+  assert.match(EVENT_AGENT_PROMPT, /launch_and_takedown/);
 });

@@ -1129,6 +1129,33 @@ too.
 heading however old they are -- the recent list is a top-50 -- up to 20 per
 list, saved on the server so they match across devices.
 
+**The brief alone decides what goes on Monday** (Khai, 22 Oct 2026: "starts
+from nothing and the brief completion dictates what is to be done, so each
+event has a different look"). This REPLACES the Event Template parts above:
+no template steps, no deadline pass fitting dates to them, no grouping under
+them. Each event's items are its own WORKSTREAMS -- "Venue & build",
+"Ticketing & bookings", "After the event" -- with the tasks as sub-items and
+the full text as an update tagging the people, plus an **Event brief** item
+(the brief and its Word file) and a **Financial forecast** item (the P&L, only
+when there is one). The naming pass writes each task's short name AND
+workstream once per event, told the event and the workstreams already in use,
+and both are SAVED (`event_tasks.title`, 060; `event_tasks.workstream`, 066),
+so a re-send finds the same parent; moving a task with "Under" saves the move
+on send. A workstream item is due when its last task is due and is assigned
+everyone on its tasks. A task with no workstream yet goes under a parent by
+its kind (`EXTRA_PARENTS`).
+
+**So the template's standard steps had to move into the plan.** Khai: "the
+questions asked by the AI and pushed back should be enough to cover those
+points as a minimum". The planner gained five rows (`last_year`,
+`booking_setup`, `creative_assets`, `launch_and_takedown`, `debrief`), and the
+brief must list a task for each standard step that applies: last year's
+review, booking rules and the SevenRooms offer page, menus and forecast signed
+off, partners and their logos, the key visual request, print, sharing the KV
+with GR and Ops, launch comms, taking them down, the debrief. A test maps every
+NP template step to the row that now carries it. After-event tasks take a
+NEGATIVE "days before" (-7 is a week after the END), dated by `taskDue()`.
+
 **Not built:** reading Done / Stuck back into the brief.
 
 ### The look: warm light, Inter, settled 13 Oct 2026

@@ -46,9 +46,9 @@ import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { venueRates } from './lib/event-rates.js';
-import { cleanEventNumbers, cleanDraft } from './lib/event-fields.js';
+import { cleanEventNumbers, cleanDraft, taskDue } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
-import { groupTitle, buildItems, deadlineTool, deadlinePrompt, DEADLINE_SYSTEM, parentTool, parentPrompt, PARENT_SYSTEM, assignParents, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask, type StepDeadline } from './lib/monday-plan.js';
+import { groupTitle, buildItems, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, readWorkstreams, workstreamOf, workstreams, briefItems, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, readInactiveNames, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor, isModelFeatureError } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -1337,21 +1337,16 @@ app.post('/api/events', async (c) => {
 
   const tasks = Array.isArray(d.tasks) ? d.tasks : [];
   if (tasks.length > 0) {
-    const start = Date.parse(`${d.start_date}T00:00:00Z`);
     const { error: taskError } = await supabaseAdmin.from('event_tasks').insert(
       tasks.map((t: any) => {
-        const tMinus = Number(t.t_minus_days);
+        const due = taskDue(d.start_date, d.end_date ?? d.start_date, Number(t.t_minus_days));
         return {
           event_id: created.id,
           kind: ['content', 'outreach', 'ops', 'other'].includes(t.kind) ? t.kind : 'other',
           description: String(t.description ?? '').slice(0, 2000),
           channel: t.channel ?? null,
-          // Stored as a NEGATIVE offset, matching the column's own definition,
-          // while the draft speaks in "14 days before" like a person does.
-          t_minus_days: Number.isFinite(tMinus) ? -Math.abs(tMinus) : null,
-          due_date: Number.isFinite(tMinus)
-            ? new Date(start - Math.abs(tMinus) * 86_400_000).toISOString().slice(0, 10)
-            : null,
+          t_minus_days: due.offset,
+          due_date: due.date,
           owner_name: t.owner_name ?? null,
         };
       }),
@@ -1451,51 +1446,68 @@ async function issuedEvent(user: SessionUser, eventId: string) {
   const scoped = await venuesInScope(user);
   const venues = scoped.filter(v => (links ?? []).some((l: any) => l.venue_id === v.id));
   if (venues.length === 0) return null;
-  // `title` (migration 060) is the short Monday name; read without it until
-  // the migration is applied, so the send keeps working in between.
+  // `title` (migration 060) is the short Monday name and `workstream` (066)
+  // the parent it goes under; read without each until its migration is
+  // applied, so the send keeps working in between.
+  const cols = 'id, description, channel, kind, due_date, owner_name';
   let tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
-    .select('id, description, channel, kind, due_date, owner_name, title').eq('event_id', eventId).order('id'));
+    .select(`${cols}, title, workstream`).eq('event_id', eventId).order('id'));
+  if (tasks.error && /workstream/.test(tasks.error.message)) {
+    tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
+      .select(`${cols}, title`).eq('event_id', eventId).order('id'));
+  }
   if (tasks.error && /title/.test(tasks.error.message)) {
     tasks = await selectAll(() => supabaseAdmin.from('event_tasks')
-      .select('id, description, channel, kind, due_date, owner_name').eq('event_id', eventId).order('id'));
+      .select(cols).eq('event_id', eventId).order('id'));
   }
   if (tasks.error) throw new Error(tasks.error.message);
   return { ev: ev as any, venues, tasks: (tasks.data ?? []) as PlannerTask[] };
 }
 
 /**
- * Short Monday names for the tasks that have none yet, written ONCE per event
- * and saved before use (migration 060). Sauron finds a sub-item already on the
- * board by its name, so the name must be the same on every preview and send.
- * Read back after saving: if two previews ran at once, the stored name wins.
- * Anything that fails leaves a task without a short name -- it then goes to
- * Monday under its full text, as before -- never with an unsaved one.
+ * Short Monday names and WORKSTREAMS for the tasks that have none yet, written
+ * ONCE per event and saved before use (migrations 060 and 066). Sauron finds a
+ * sub-item already on the board by its name and its parent, so both must be
+ * the same on every preview and send. Read back after saving: if two previews
+ * ran at once, the stored value wins. Anything that fails leaves a task with
+ * its full text as its name and its kind deciding its parent -- never with an
+ * unsaved one.
  */
-async function withTaskTitles(tasks: PlannerTask[]): Promise<PlannerTask[]> {
-  const missing = tasks.filter(t => !t.title && t.id);
+async function withTaskNames(tasks: PlannerTask[], ev: { name: string; concept?: string | null }): Promise<PlannerTask[]> {
+  const missing = tasks.filter(t => t.id && (!t.title || !t.workstream));
   if (missing.length === 0) return tasks;
   try {
+    const inUse = [...new Set(tasks.map(t => t.workstream).filter((w): w is string => !!w))];
     const res = await anthropic.messages.create({
       model: modelFor('planning', process.env).model,
       max_tokens: modelFor('planning', process.env).maxTokens,
       system: [{ type: 'text', text: TITLE_SYSTEM, cache_control: { type: 'ephemeral' } }],
       tools: [titleTool(missing.length) as any],
       tool_choice: { type: 'tool', name: 'record_task_titles' },
-      messages: [{ role: 'user', content: titlePrompt(missing) }],
+      messages: [{ role: 'user', content: titlePrompt(missing, ev, inUse) }],
     });
     const call = res.content.find((b: any) => b.type === 'tool_use') as any;
     const names = readTitles(missing.length, call?.input);
-    // Only where still empty: a name already saved is never replaced.
-    await Promise.all(missing.map((t, k) => names.get(k)
-      ? supabaseAdmin.from('event_tasks').update({ title: names.get(k) }).eq('id', t.id!).is('title', null)
-      : null));
+    const streams = readWorkstreams(missing.length, call?.input);
+    // Only where still empty: a value already saved is never replaced.
+    await Promise.all(missing.flatMap((t, k) => [
+      !t.title && names.get(k) ? supabaseAdmin.from('event_tasks').update({ title: names.get(k) }).eq('id', t.id!).is('title', null) : null,
+      !t.workstream && streams.get(k) ? supabaseAdmin.from('event_tasks').update({ workstream: streams.get(k) }).eq('id', t.id!).is('workstream', null) : null,
+    ]));
     // row-cap: the tasks of one event.
-    const { data, error } = await supabaseAdmin.from('event_tasks').select('id, title').in('id', missing.map(t => t.id!));
-    if (error) throw new Error(error.message);
-    const stored = new Map((data ?? []).map((r: any) => [r.id, r.title as string | null]));
-    return tasks.map(t => (!t.title && t.id && stored.get(t.id) ? { ...t, title: stored.get(t.id)! } : t));
+    let read = await supabaseAdmin.from('event_tasks').select('id, title, workstream').in('id', missing.map(t => t.id!));
+    if (read.error && /workstream/.test(read.error.message)) {
+      read = await supabaseAdmin.from('event_tasks').select('id, title').in('id', missing.map(t => t.id!)) as any;
+    }
+    if (read.error) throw new Error(read.error.message);
+    const stored = new Map((read.data ?? []).map((r: any) => [r.id, r as { title: string | null; workstream?: string | null }]));
+    return tasks.map(t => {
+      const r = t.id ? stored.get(t.id) : undefined;
+      if (!r) return t;
+      return { ...t, title: t.title || r.title || null, workstream: t.workstream || r.workstream || null };
+    });
   } catch (e: any) {
-    console.error(`[plan/monday] short task names not written, full names used: ${e?.message ?? e}`);
+    console.error(`[plan/monday] task names and workstreams not written, full names and kinds used: ${e?.message ?? e}`);
     return tasks;
   }
 }
@@ -1529,7 +1541,7 @@ app.post('/api/plan/monday/preview', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ event_id?: string; boards?: Record<string, string>; brief?: string; remembered?: Record<string, unknown> }>().catch(() => null);
+  const body = await c.req.json<{ event_id?: string; boards?: Record<string, string>; brief?: string; has_pnl?: boolean; remembered?: Record<string, unknown> }>().catch(() => null);
   // Earlier picks from this browser: lower-cased name -> Monday user id. Only
   // short names and whole-number ids survive; anything else is ignored.
   const remembered: Record<string, string> = {};
@@ -1542,7 +1554,7 @@ app.post('/api/plan/monday/preview', async (c) => {
     const issued = await issuedEvent(user, body.event_id);
     if (!issued) return c.json({ error: 'That event was not found, or none of its venues are yours.' }, 404);
     const { ev, venues } = issued;
-    const tasks = await withTaskTitles(issued.tasks);
+    const tasks = await withTaskNames(issued.tasks, ev);
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const { users, me, account } = await readPeople();
     const sender = users.find(u => u.email && user.email && u.email.toLowerCase() === user.email.toLowerCase()) ?? null;
@@ -1556,53 +1568,21 @@ app.post('/api/plan/monday/preview', async (c) => {
       try { board = await readBoardForPlan(String(boardId)); }
       catch (e: any) { return { slug: v.slug, venue: v.name, error: String(e?.message ?? e) }; }
 
-      // The deadline pass and the grouping pass are independent: run together.
+      /**
+       * THE BRIEF DECIDES WHAT IS ON THE BOARD (Khai, 22 Oct 2026: "starts from
+       * nothing and the brief completion dictates what is to be done, so each
+       * event has a different look"). No Event Template: each task goes under
+       * its workstream, named for this event, and the items are those
+       * workstreams plus the Event brief and Financial forecast the files go on.
+       */
       const subitems = !!(board.subBoardId && board.subColumns);
-      const [deadlines, grouped] = await Promise.all([
-        (async (): Promise<StepDeadline[]> => {
-          if (board.template.length === 0) return [];
-          const res = await anthropic.messages.create({
-            model: modelFor('planning', process.env).model,
-            max_tokens: modelFor('planning', process.env).maxTokens,
-            system: [{ type: 'text', text: DEADLINE_SYSTEM, cache_control: { type: 'ephemeral' } }],
-            tools: [deadlineTool(board.template.length) as any],
-            tool_choice: { type: 'tool', name: 'record_checklist_deadlines' },
-            messages: [{ role: 'user', content: deadlinePrompt({ event: ev, tasks, steps: board.template, history: board.history, today, brief: body.brief ?? null }) }],
-          });
-          const call = res.content.find((b: any) => b.type === 'tool_use') as any;
-          return (Array.isArray(call?.input?.steps) ? call.input.steps : [])
-            .filter((s: any) => Number.isInteger(s?.index))
-            .map((s: any) => ({ index: s.index, due: typeof s.due === 'string' ? s.due : null, phase: s.phase === 'after' ? 'after' : 'before', reason: String(s.reason ?? '').slice(0, 200) }));
-        })(),
-        /**
-         * Each planner task under the template step it belongs to, or an extra
-         * parent (Khai, 13 Oct 2026). A failed pass costs the AI's choice, not
-         * the preview: every task then goes under a parent by its kind.
-         */
-        (async (): Promise<PlannerTask[]> => {
-          if (!subitems || tasks.length === 0) return tasks;
-          try {
-            const res = await anthropic.messages.create({
-              model: modelFor('planning', process.env).model,
-              max_tokens: modelFor('planning', process.env).maxTokens,
-              system: [{ type: 'text', text: PARENT_SYSTEM, cache_control: { type: 'ephemeral' } }],
-              tools: [parentTool(tasks.length) as any],
-              tool_choice: { type: 'tool', name: 'record_task_parents' },
-              messages: [{ role: 'user', content: parentPrompt(board.template, tasks) }],
-            });
-            const call = res.content.find((b: any) => b.type === 'tool_use') as any;
-            return assignParents(tasks, board.template, call?.input);
-          } catch (e: any) {
-            console.error(`[plan/monday/preview] grouping pass failed, grouping by kind: ${e?.message ?? e}`);
-            return assignParents(tasks, board.template, null);
-          }
-        })(),
-      ]);
+      const grouped: PlannerTask[] = tasks.map(t => ({ ...t, parent: subitems ? workstreamOf(t) : null }));
 
       const boardUsers = users.filter(u => board.subscribers.includes(u.id));
-      const known = new Set(users.map(u => Number(u.id)));
-      const inactive = await readInactiveNames([...new Set(board.template.flatMap(t => [...t.owner_ids, ...t.assigned_ids]))].filter(id => !known.has(id)));
-      const items = buildItems({ steps: board.template, deadlines, tasks: grouped, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date, inactive });
+      const items = [
+        ...briefItems(sender, !!body.has_pnl),
+        ...buildItems({ steps: [], deadlines: [], tasks: grouped, users, boardUsers, remembered, sender, today, start: ev.start_date, end: ev.end_date }),
+      ];
       const there = board.groups.find(g => g.title.trim().toLowerCase() === title.toLowerCase());
       const exists = !!there;
       const key = (n: string) => n.trim().toLowerCase();
@@ -1626,7 +1606,6 @@ app.post('/api/plan/monday/preview', async (c) => {
         ? planChanges(items, inGroup, board.columns, id => nameOf.get(id) ?? `#${id}`, board.subColumns)
         : [];
       const warnings: string[] = [];
-      if (!board.templateGroup) warnings.push('This board has no "Event Template" group, so only the planner\'s tasks will go.');
       if (!board.columns.deadline) warnings.push('This board has no "Deadline" date column; items will go without dates.');
       if (!board.columns.assigned) warnings.push('This board has no "Assigned To" column; nobody will be assigned.');
       if (!subitems && tasks.length) warnings.push('This board has no sub-items, so the plan\'s tasks go in as separate items.');
@@ -1641,7 +1620,8 @@ app.post('/api/plan/monday/preview', async (c) => {
         board: { id: board.id, name: board.name, url: account ? `https://${account}.monday.com/boards/${board.id}` : null },
         group_title: title, exists, already, changes,
         subitems, flat,
-        parents: subitems ? [...board.template.map(s => s.name.slice(0, 255)), ...EXTRA_PARENTS] : [],
+        // The event's own workstreams first, then the plain fallbacks to move a task to.
+        parents: subitems ? [...new Set([...workstreams(tasks), ...EXTRA_PARENTS])] : [],
         member: board.permissions === 'everyone' || board.subscribers.includes(me.id),
         items, warnings,
       };
@@ -1685,6 +1665,22 @@ async function sendPlanToMonday(
   const expected = groupTitle(issued.ev.name, issued.ev.start_date, issued.ev.end_date);
   const { account, users: people } = await readPeople();
   const personName = new Map(people.map(u => [Number(u.id), u.name]));
+
+  /**
+   * A task moved to another workstream on the preview is SAVED there, so the
+   * next send looks for it under the same parent instead of adding it again.
+   * Only this event's own tasks, and only where the parent really changed.
+   */
+  const ownTasks = new Map(issued.tasks.filter(t => t.id).map(t => [t.id!, t]));
+  const moved = new Map<string, string>();
+  for (const v of body.venues ?? []) {
+    for (const it of sanitiseItems(v.items) ?? []) {
+      const t = it.task_id ? ownTasks.get(it.task_id) : undefined;
+      if (t && it.parent && it.parent !== workstreamOf(t)) moved.set(t.id!, it.parent.slice(0, 40));
+    }
+  }
+  await Promise.all([...moved].map(([id, w]) => supabaseAdmin.from('event_tasks').update({ workstream: w }).eq('id', id).eq('event_id', issued.ev.id)
+    .then(({ error }) => { if (error) console.warn(`[plan/monday/send] workstream not saved for task ${id}: ${error.message}`); })));
 
   const results = await Promise.all(body.venues!.map(async v => {
     const venue = issued.venues.find(x => x.slug === v.slug);

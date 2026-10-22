@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toNumber, cleanEventNumbers, cleanDraft } from './event-fields.js';
+import { toNumber, cleanEventNumbers, cleanDraft, taskDue } from './event-fields.js';
 
 test('a sentence in a number field is dropped and named, not stored and not fatal', () => {
   // 13 Oct 2026: break_even_covers = "NA - break-even expressed as revenue: ..."
@@ -66,4 +66,13 @@ test('every field of a draft is checked against its kind of cell, and what is cl
     /Other spaces: 1 value was words/, /P&L revenue lines: 1 value was words/]) {
     assert.ok(notes.some(x => n.test(x)), `missing note ${n}`);
   }
+});
+
+test('a task date: days before the start, or after the end when negative', () => {
+  assert.deepEqual(taskDue('2026-12-31', '2027-01-01', 14), { offset: -14, date: '2026-12-17' });
+  assert.deepEqual(taskDue('2026-12-31', '2027-01-01', 0), { offset: 0, date: '2026-12-31' });
+  // The debrief a week after a two-day event: after the END, not the start.
+  assert.deepEqual(taskDue('2026-12-31', '2027-01-01', -7), { offset: 8, date: '2027-01-08' });
+  assert.deepEqual(taskDue('2026-12-31', '2026-12-31', -1), { offset: 1, date: '2027-01-01' });
+  assert.deepEqual(taskDue('2026-12-31', '2026-12-31', NaN), { offset: null, date: null });
 });

@@ -133,3 +133,24 @@ export function cleanDraft(raw: unknown): { draft: Record<string, any>; notes: s
   }
   return { draft: d, notes };
 }
+
+/**
+ * A task's date from the draft's "days before". The draft speaks like a person
+ * -- 14 is a fortnight before the event STARTS -- and since 22 Oct 2026 a
+ * NEGATIVE number is days after it ENDS (-1 the day after: taking comms down,
+ * the debrief). Before then every number was read as "before", so a debrief
+ * landed ahead of the event it reviews.
+ *
+ * `offset` is days from the start, as the event_tasks column has always held:
+ * negative before, positive after.
+ */
+export function taskDue(start: string, end: string, tMinus: number): { offset: number | null; date: string | null } {
+  if (!Number.isFinite(tMinus)) return { offset: null, date: null };
+  const day = 86_400_000;
+  const s = Date.parse(`${start}T00:00:00Z`);
+  const e = Date.parse(`${end || start}T00:00:00Z`);
+  if (Number.isNaN(s)) return { offset: null, date: null };
+  if (tMinus >= 0) return { offset: tMinus === 0 ? 0 : -tMinus, date: new Date(s - tMinus * day).toISOString().slice(0, 10) };
+  const after = (Number.isNaN(e) ? s : e) - tMinus * day;
+  return { offset: Math.round((after - s) / day), date: new Date(after).toISOString().slice(0, 10) };
+}

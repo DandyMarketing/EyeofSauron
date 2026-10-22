@@ -60,6 +60,12 @@ export interface PlannerTask {
   id?: string;
   /** The short Monday name (migration 060): written once, then kept. */
   title?: string | null;
+  /**
+   * The WORKSTREAM it goes under on Monday (migration 066): an area of work
+   * named for this event -- "Venue & build", "Ticketing" -- written once and
+   * kept, so a re-send finds the same parent every time.
+   */
+  workstream?: string | null;
 }
 
 export interface StepDeadline { index: number; due: string | null; phase: 'before' | 'after'; reason: string }
@@ -71,7 +77,8 @@ export type PersonMatch =
 
 export interface PreviewItem {
   name: string;
-  source: 'template' | 'planner';
+  /** 'brief': the Event brief and Financial forecast items the files go on. */
+  source: 'template' | 'planner' | 'brief';
   deadline: string | null;
   reason: string | null;
   owner_ids: number[];
@@ -95,6 +102,8 @@ export interface PreviewItem {
    * and not made twice.
    */
   aliases?: string[];
+  /** The event_tasks row, so a task moved to another workstream on the preview is saved there. */
+  task_id?: string | null;
 }
 
 /**
@@ -284,162 +293,21 @@ export function deadlineFlags(
   return f;
 }
 
-/** The forced tool the deadline pass fills in. */
-export function deadlineTool(stepCount: number) {
-  return {
-    name: 'record_checklist_deadlines',
-    description: 'Give every checklist step a deadline that fits this plan.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        steps: {
-          type: 'array',
-          description: `One entry per checklist step, ${stepCount} in all, by index.`,
-          items: {
-            type: 'object',
-            properties: {
-              index: { type: 'number', description: 'The step\'s index as listed.' },
-              due: { type: 'string', description: 'YYYY-MM-DD.' },
-              phase: { type: 'string', enum: ['before', 'after'], description: '"after" only for a step that happens once the event is over (debrief, taking the promotion down).' },
-              reason: { type: 'string', description: 'Why this date, from the plan, in at most fifteen words: "two days before launch comms on 12 Dec".' },
-            },
-            required: ['index', 'due', 'phase', 'reason'],
-          },
-        },
-      },
-      required: ['steps'],
-    },
-  };
-}
-
-/**
- * What the deadline pass is told. The plan's own dates come first because they
- * are the decision; the board's history is labelled as a reference so a
- * planner who has set a three-week campaign is not overruled by an old habit.
- */
-export function deadlinePrompt(input: {
-  event: { name: string; start_date: string; end_date: string; concept?: string | null; ad_plan?: string | null };
-  tasks: PlannerTask[];
-  steps: TemplateStep[];
-  history: Map<string, { days_before: number; n: number }>;
-  today: string;
-  brief?: string | null;
-}): string {
-  const taskLines = input.tasks
-    .slice().sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''))
-    .map(t => `- ${t.due_date ?? 'no date'}: ${t.description}${t.channel ? ` (${t.channel})` : ''}${t.owner_name ? ` -- ${t.owner_name}` : ''}`);
-  const stepLines = input.steps.map((s, i) => {
-    const h = input.history.get(stepKey(s.name));
-    const ref = h ? ` [on past events on this board: due ${h.days_before} days before, median of ${h.n}]` : ' [no history on this board]';
-    return `${i}. ${s.name}${ref}`;
-  });
-  return [
-    `TODAY: ${input.today}`,
-    `EVENT: ${input.event.name}, ${input.event.start_date}${input.event.end_date !== input.event.start_date ? ` to ${input.event.end_date}` : ''}`,
-    input.event.concept ? `CONCEPT: ${input.event.concept}` : '',
-    input.event.ad_plan ? `AD PLAN: ${input.event.ad_plan}` : '',
-    '',
-    'THE PLAN\'S SCHEDULE (decided in the planning conversation -- this is what the deadlines must fit):',
-    taskLines.length ? taskLines.join('\n') : '(no dated tasks)',
-    input.brief ? `\nTHE BRIEF:\n${input.brief.slice(0, 6000)}` : '',
-    '',
-    'THE BOARD\'S CHECKLIST, to give deadlines:',
-    stepLines.join('\n'),
-  ].filter(l => l !== '').join('\n');
-}
-
-export const DEADLINE_SYSTEM =
-  'You set deadlines for an event checklist so it fits a plan that has already been decided. ' +
-  'The plan\'s schedule is the authority: the first post or launch comms date anchors the campaign, and everything ' +
-  'that has to exist before launch (strategy, concept, financial forecast, menus, partner details, key visuals, printing, ' +
-  'the booking page) is due before it, in the order one depends on the other -- a menu is reviewed before it is printed, ' +
-  'printed before launch. Post-event steps (debrief, taking promotion down) come after the event ends. ' +
-  'Past events on the board are a reference for how long a step usually needs, not a rule. ' +
-  'Never give a date before today unless the step genuinely had to be done already -- then give today and say it is overdue. ' +
-  'Every step gets a date.';
-
 /**
  * THE PLANNER'S TASKS AS SUB-ITEMS (Khai, 13 Oct 2026: "too many line items
- * ... there should be sub items like marketing plan, the AI needs to classify
- * it"). Decided with him: each task goes under the Event Template step it
- * belongs to -- menu tasks under the menu step, the DJ under entertainment --
- * and a task that fits no step under one of these extra parents. The AI
- * chooses; the preview shows its choice with a dropdown to move any task.
+ * ... the AI needs to classify it"). Since 22 Oct 2026 each task goes under its
+ * event's own WORKSTREAM (workstreamOf), never an Event Template step -- the
+ * template no longer goes to Monday. These plain parents are the fallback for
+ * a task with no workstream yet, and extra choices in the preview's "Under".
  */
 export const EXTRA_PARENTS = ['Marketing plan', 'PR & outreach', 'Operations', 'Other tasks'] as const;
 
-/** Where a task goes when the grouping pass gives nothing usable: by its kind. */
+/** Where a task goes when it has no workstream yet (the naming pass did not reach it): by its kind. */
 export function parentByKind(kind: string): string {
   return kind === 'content' ? 'Marketing plan'
     : kind === 'outreach' ? 'PR & outreach'
     : kind === 'ops' ? 'Operations'
     : 'Other tasks';
-}
-
-export function parentTool(taskCount: number) {
-  return {
-    name: 'record_task_parents',
-    description: 'Put every planner task under the checklist step it belongs to, or under an extra parent.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        tasks: {
-          type: 'array',
-          description: `One entry per task, ${taskCount} in all, by index.`,
-          items: {
-            type: 'object',
-            properties: {
-              task: { type: 'number', description: 'The task\'s index as listed.' },
-              step: { type: 'number', description: 'The checklist step\'s index it belongs under, or -1 when no step fits.' },
-              extra: { type: 'string', enum: [...EXTRA_PARENTS], description: 'Only when step is -1.' },
-            },
-            required: ['task', 'step'],
-          },
-        },
-      },
-      required: ['tasks'],
-    },
-  };
-}
-
-export const PARENT_SYSTEM =
-  'You file an event plan\'s tasks under the steps of the team\'s checklist, so the board reads as a short checklist with ' +
-  'the detail beneath each step. Put a task under a step only when it is genuinely part of that step: writing or costing a ' +
-  'menu under the menu step, booking a DJ or a partner under the entertainment/partners step, a photographer under the ' +
-  'photography step, booking rules under the booking-rules step. Do NOT stretch a step to hold a task -- social posts, ' +
-  'reels, stories, ads and influencer work go under "Marketing plan"; press, invitations, VIP and guest outreach under ' +
-  '"PR & outreach"; staffing, set-up, security and running the night under "Operations" unless a step covers them; ' +
-  'anything else under "Other tasks". Every task gets exactly one place.';
-
-export function parentPrompt(steps: TemplateStep[], tasks: PlannerTask[]): string {
-  return [
-    'THE CHECKLIST STEPS:',
-    steps.map((s, i) => `${i}. ${s.name}`).join('\n') || '(none)',
-    '',
-    `EXTRA PARENTS, for a task no step fits: ${EXTRA_PARENTS.join(', ')}`,
-    '',
-    'THE TASKS:',
-    tasks.map((t, i) => `${i}. [${t.kind}] ${t.description}${t.channel ? ` (${t.channel})` : ''}`).join('\n'),
-  ].join('\n');
-}
-
-/**
- * The pass's answer, checked: a step index that exists, or a listed extra.
- * Anything else -- a missing task, an index past the end -- falls back to the
- * task's kind, so every task always has a parent and none is guessed into a
- * step it was never put under.
- */
-export function assignParents(
-  tasks: PlannerTask[], steps: TemplateStep[], answer: unknown,
-): PlannerTask[] {
-  const list = Array.isArray((answer as any)?.tasks) ? (answer as any).tasks : [];
-  const chosen = new Map<number, string>();
-  for (const a of list) {
-    if (!Number.isInteger(a?.task) || a.task < 0 || a.task >= tasks.length) continue;
-    if (Number.isInteger(a.step) && a.step >= 0 && a.step < steps.length) chosen.set(a.task, steps[a.step].name.slice(0, 255));
-    else if ((EXTRA_PARENTS as readonly string[]).includes(a.extra)) chosen.set(a.task, a.extra);
-  }
-  return tasks.map((t, i) => ({ ...t, parent: chosen.get(i) ?? parentByKind(t.kind) }));
 }
 
 /**
@@ -453,7 +321,7 @@ export function assignParents(
 export function titleTool(taskCount: number) {
   return {
     name: 'record_task_titles',
-    description: 'Give every task a short name for a checklist.',
+    description: 'Give every task a short name for a checklist, and the workstream it belongs to.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -465,8 +333,9 @@ export function titleTool(taskCount: number) {
             properties: {
               task: { type: 'number', description: 'The task\'s index as listed.' },
               title: { type: 'string', description: 'At most six words: "Cost the dinner menu", "Book the DJ", "Post 4: kitchen reel".' },
+              workstream: { type: 'string', description: 'The area of work it belongs to, named for THIS event, two to four words: "Venue & build", "Ticketing & bookings", "Entertainment", "Marketing", "Food & drink". Reuse a name already in use where the task fits it.' },
             },
-            required: ['task', 'title'],
+            required: ['task', 'title', 'workstream'],
           },
         },
       },
@@ -476,13 +345,48 @@ export function titleTool(taskCount: number) {
 }
 
 export const TITLE_SYSTEM =
-  'You name the tasks of an event plan for a team checklist on Monday. Each name is what a person scanning the list ' +
-  'needs to recognise the task: at most six words, plain, starting with the action or the thing. Keep a post\'s number ' +
-  'if it has one ("Post 4: kitchen reel"). Leave out figures, prices, dates and reasons -- the full task is kept in a ' +
-  'note under the name.';
+  'You lay out an event plan for the team\'s board on Monday, where each WORKSTREAM is an item and its tasks are ' +
+  'sub-items beneath it. Nothing else is added to the board: the workstreams you choose ARE the shape of this ' +
+  'event\'s plan, so they should read like this event, not a generic checklist -- a rooftop New Year\'s Eve and a ' +
+  'chef collaboration should not look the same. Use three to eight workstreams, each holding related tasks, named in ' +
+  'two to four plain words ("Venue & build", "Ticketing & bookings", "Entertainment", "Marketing", "PR & outreach", ' +
+  '"Food & drink", "Running the night", "After the event"). Every task gets exactly one. ' +
+  'Each task NAME is what a person scanning the list needs to recognise it: at most six words, plain, starting with ' +
+  'the action or the thing. Keep a post\'s number if it has one ("Post 4: kitchen reel"). Leave out figures, prices, ' +
+  'dates and reasons -- the full task is kept in a note under the name.';
 
-export function titlePrompt(tasks: PlannerTask[]): string {
-  return 'THE TASKS:\n' + tasks.map((t, i) => `${i}. ${t.description}${t.channel ? ` (${t.channel})` : ''}`).join('\n');
+export function titlePrompt(tasks: PlannerTask[], event?: { name: string; concept?: string | null }, inUse: string[] = []): string {
+  return [
+    event ? `THE EVENT: ${event.name}${event.concept ? ` -- ${String(event.concept).slice(0, 600)}` : ''}` : '',
+    inUse.length ? `WORKSTREAMS ALREADY IN USE for this event (reuse these where a task fits; add a new one only when none does): ${inUse.join('; ')}` : '',
+    'THE TASKS:',
+    tasks.map((t, i) => `${i}. [${t.kind}] ${t.description}${t.channel ? ` (${t.channel})` : ''}`).join('\n'),
+  ].filter(Boolean).join('\n\n');
+}
+
+/** The pass's workstreams, checked: a short plain name, or none (the task's kind decides). */
+export function readWorkstreams(taskCount: number, answer: unknown): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const a of Array.isArray((answer as any)?.tasks) ? (answer as any).tasks : []) {
+    if (!Number.isInteger(a?.task) || a.task < 0 || a.task >= taskCount) continue;
+    const w = cleanTitle(a.workstream);
+    if (w && w.length <= 40) out.set(a.task, w);
+  }
+  return out;
+}
+
+/**
+ * Where each task goes on Monday: its saved workstream, or -- for a task the
+ * naming pass never reached -- a parent by its kind. Never a template step:
+ * since 22 Oct 2026 the brief alone decides what is on the board.
+ */
+export function workstreamOf(t: PlannerTask): string {
+  return t.workstream?.trim() || parentByKind(t.kind);
+}
+
+/** The workstreams in the order the plan first uses them, for the parents and the "Under" list. */
+export function workstreams(tasks: PlannerTask[]): string[] {
+  return [...new Set(tasks.map(workstreamOf))];
 }
 
 /** The pass's names, checked; a task with no usable name keeps none (and its long name). */
@@ -595,6 +499,7 @@ export function buildItems(input: {
         assigned_label: assignedLabel,
         flags,
         parent: t.parent ?? null,
+        task_id: t.id ?? null,
         ...(m.unresolved.length ? { unresolved: m.unresolved.map(u => ({ name: u.name, options: options(u.candidates) })) } : {}),
       };
     });
@@ -618,7 +523,7 @@ export function columnValues(item: Pick<PreviewItem, 'deadline' | 'owner_ids' | 
  * and came back, and a browser can send anything: names are strings, people
  * are whole numbers, dates are dates, and there is a ceiling on how many.
  */
-export type SendItem = Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null; detail?: string | null; aliases?: string[] };
+export type SendItem = Pick<PreviewItem, 'name' | 'deadline' | 'owner_ids' | 'assigned_ids'> & { parent?: string | null; detail?: string | null; aliases?: string[]; task_id?: string | null };
 
 export function sanitiseItems(raw: unknown): SendItem[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 120) return null;
@@ -631,6 +536,7 @@ export function sanitiseItems(raw: unknown): SendItem[] | null {
     parent: typeof r?.parent === 'string' && r.parent.trim() ? r.parent.trim().slice(0, 255) : null,
     detail: typeof r?.detail === 'string' && r.detail.trim() ? r.detail.trim().slice(0, 2000) : null,
     aliases: (Array.isArray(r?.aliases) ? r.aliases : []).filter((x: unknown) => typeof x === 'string' && x.trim()).map((x: string) => x.trim().slice(0, 255)).slice(0, 3),
+    task_id: typeof r?.task_id === 'string' && /^[0-9a-f-]{36}$/i.test(r.task_id) ? r.task_id : null,
   }));
   // A parent must be one of the top-level items sent with it.
   const tops = new Set(out.filter(i => !i.parent).map(i => i.name.toLowerCase()));
@@ -777,7 +683,7 @@ export function alreadyPosted(html: string, existing: string[]): boolean {
 export function attachTargets(names: string[]): { brief: number | null; pnl: number | null } {
   const keys = names.map(stepKey);
   const find = (re: RegExp) => { const i = keys.findIndex(k => re.test(k)); return i < 0 ? null : i; };
-  return { brief: find(/concept\s*(&|and)\s*mechanic/), pnl: find(/financial forecast/) };
+  return { brief: find(/^event brief$|concept\s*(&|and)\s*mechanic/), pnl: find(/financial forecast/) };
 }
 
 /** The Financial Forecast update: the headline figures, with where each rate came from. */
@@ -818,4 +724,23 @@ export function detailUpdateHtml(detail: string, deadline: string | null, people
     people.length ? `<p>For: ${people.map(esc).join(', ')}</p>` : '',
     '<p><em>From the event plan in Sauron.</em></p>',
   ].join('');
+}
+
+/**
+ * The two items the files go on (22 Oct 2026). With the board's template gone
+ * there is no "Concept & Mechanics" or "Financial Forecast" step to attach to,
+ * so the event gets its own: the brief as an update with the Word file, and
+ * the P&L's headline figures with the Excel. The forecast only when there is
+ * a P&L to put on it.
+ */
+export function briefItems(sender: MondayUser | null, hasPnl: boolean): PreviewItem[] {
+  const base = (name: string, reason: string): PreviewItem => ({
+    name, source: 'brief', deadline: null, reason,
+    owner_ids: sender ? [Number(sender.id)] : [], assigned_ids: [],
+    owner_label: sender?.name ?? '', assigned_label: '', flags: [], parent: null,
+  });
+  return [
+    base('Event brief', 'The brief goes on here, with the Word file'),
+    ...(hasPnl ? [base('Financial forecast', 'The P&L goes on here, with the Excel')] : []),
+  ];
 }
