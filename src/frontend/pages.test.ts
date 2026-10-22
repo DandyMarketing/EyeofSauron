@@ -1605,3 +1605,14 @@ test('the People tab shows each person\'s AI usage and cost, with the month and 
   assert.match(admin, /System \$\{usd\(/, 'the System spend is not shown');
   assert.match(admin, /onchange="changeUsageMonth/, 'no month picker');
 });
+
+test('Query defaults to Sonnet; the planner does not', () => {
+  // Khai, 22 Oct 2026: "for query please default to sonnet".
+  const chat = readFileSync('public/chat.html', 'utf8');
+  assert.match(chat, /<select id="model-select">\s*<option value="sonnet" selected>/, 'Sonnet is not the first, chosen option');
+  const server = readFileSync('src/server.ts', 'utf8');
+  assert.match(server, /const QUERY_DEFAULT_MODEL = 'sonnet'/);
+  assert.equal((server.match(/body\.model \|\| QUERY_DEFAULT_MODEL/g) ?? []).length, 2, 'both Query routes');
+  const plan = server.slice(server.indexOf("app.post('/api/plan', async"), server.indexOf('\napp.', server.indexOf("app.post('/api/plan', async") + 10));
+  assert.doesNotMatch(plan, /QUERY_DEFAULT_MODEL/, 'the planner stays on Opus');
+});

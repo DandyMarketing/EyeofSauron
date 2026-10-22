@@ -638,6 +638,14 @@ async function saveTurn(
  * second request and no window where the work is finished but the reply has not
  * arrived. An `error` event carries the same sentence /ask would have returned.
  */
+/**
+ * Query answers on Sonnet unless the person picks Opus (Khai, 22 Oct 2026:
+ * "for query please default to sonnet"). The Query page sends its choice;
+ * this covers a request that sends none. The planner and the weekly
+ * recommendations are untouched -- they stay on Opus.
+ */
+const QUERY_DEFAULT_MODEL = 'sonnet';
+
 app.post('/ask/stream', async (c) => {
   setFeature('query');
   const user = await requireAuth(c);
@@ -706,7 +714,7 @@ app.post('/ask/stream', async (c) => {
     try {
       const result = await askSauron(
         body.question, body.history ?? [], venueFilter, 'chat',
-        effectiveRole(user), undefined, body.model, undefined,
+        effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL, undefined,
         push, venueNames,
       );
       const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
@@ -758,7 +766,7 @@ app.post('/ask', async (c) => {
      */
     const result = await askSauron(
       body.question, body.history ?? [], venueFilter, 'chat',
-      effectiveRole(user), undefined, body.model,
+      effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL,
     );
     // After the answer exists, never before. See saveTurn.
     const conversationId = await saveTurn(user, body.conversation_id, body.question, result);

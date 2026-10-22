@@ -557,7 +557,7 @@ is routing and its last is analysis, through the same call site.
 
 | Purpose | Model | Thinking | Why |
 |---|---|---|---|
-| `chat` | Opus 5 | adaptive, high | Where the product's value is delivered |
+| `chat` | Opus 5 | adaptive, high | Where the product's value is delivered. **Query defaults to Sonnet 5 at medium effort** (Khai, 22 Oct 2026: "for query please default to sonnet"); Opus is one pick away in the dropdown and remembered per browser. The planner stays on Opus |
 | `recommendation` | Opus 5 | adaptive, xhigh | Nobody waiting; a weak proactive suggestion teaches people to ignore the feature |
 | `lookup` | Sonnet 5 | none | A date and a number. Latency beats depth |
 | `recovery` | Sonnet 5 | none | Restating data already gathered, after something already failed |

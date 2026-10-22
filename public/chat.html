@@ -822,9 +822,12 @@
         timeout and returned nothing. The depth moves with the choice now, which
         is what makes the second label true.
       -->
+      <!-- Sonnet first and chosen by default (Khai, 22 Oct 2026: "for query
+           please default to sonnet"). A choice made in this browser is still
+           remembered, so anyone who picks Opus keeps it. -->
       <select id="model-select">
+        <option value="sonnet" selected>Sonnet — lighter thinking, quicker and cheaper</option>
         <option value="opus">Opus — thinks hardest, slower, dearer</option>
-        <option value="sonnet">Sonnet — lighter thinking, quicker and cheaper</option>
       </select>
       <span id="model-note"></span>
     </div>
