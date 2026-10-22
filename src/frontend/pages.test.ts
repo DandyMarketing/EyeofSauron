@@ -1595,3 +1595,13 @@ test('Issues: resolved reports have their own list, and long conversations fold'
   // Copy for Claude still gives the whole report, built on the server.
   assert.match(admin, /navigator\.clipboard\.writeText\(data\.markdown\)/);
 });
+
+test('the People tab shows each person\'s AI usage and cost, with the month and System apart', () => {
+  // Khai, 22 Oct 2026. Fetched on its own, so a failure costs the figures and
+  // never the list of people.
+  const admin = readFileSync('public/admin.html', 'utf8');
+  assert.match(admin, /api\('GET', '\/admin\/api\/usage'/, 'usage is not fetched');
+  assert.match(admin, /usageLineHtml\(user\.id\)/, 'no usage line under the name');
+  assert.match(admin, /System \$\{usd\(/, 'the System spend is not shown');
+  assert.match(admin, /onchange="changeUsageMonth/, 'no month picker');
+});

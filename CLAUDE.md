@@ -1323,6 +1323,26 @@ four exchanges was "still too long -- the data you collect is more important". I
 conversation, fetched by id and owner; nothing is dropped, and Copy for Claude
 carries all of it.
 
+### AI usage and cost per person, 22 Oct 2026
+
+Khai: "track the usage of each person and calculate the cost based on the
+model and query they have asked ... on the admin page next to the user name".
+**One row per CALL** in `ai_usage` (migration 065), written where the call is
+made: the engine records each round itself (it knows its purpose), and every
+other call site goes through `metered()` (`src/lib/ai-usage.ts`) -- the
+planner's passes, named by their forced tool, titles, and the scheduled jobs.
+**Who** comes from a per-request scope opened by server middleware and filled
+by `requireAuth`, so no function signature changed; a call with nobody signed
+in (weekly recommendations, post classifier) is **System**, and people +
+System is the whole Anthropic bill. Cost is list price in US dollars from
+`src/lib/ai-pricing.ts`, kept with the TOKENS so it can be recalculated; an
+unknown model is NULL, never zero, and counted. Recording never throws.
+The People tab shows answers and cost under each name, a month picker
+(Singapore months, from October 2026), the total and System; a name opens the
+split by Query/Plan and model. **Back-filled** from saved answers since 13 Oct
+(tool_trace) by the migration itself, only before live recording began, so
+nothing counts twice; the planner's passes before 22 Oct were never recorded.
+
 ### The weekly brief is in every menu, 13 Oct 2026
 
 Khai: "no one actually knows it's there." No menu linked to it -- the only way

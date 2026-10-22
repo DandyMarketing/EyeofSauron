@@ -6,6 +6,7 @@ import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { classifierPrompt, classificationTool, parseClassification } from '../ai/post-classifier.js';
 import { fetchImageAsBase64 } from '../lib/image-fetch.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
+import { metered } from '../lib/ai-usage.js';
 
 /**
  * Classify posts by what they are ABOUT.
@@ -26,7 +27,8 @@ import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
  * signed and expire within days -- the same reason they are never stored.
  */
 
-const client = new Anthropic();
+// Metered (src/lib/ai-usage.ts): no one is signed in here, so it is reported as System.
+const client = metered(new Anthropic(), 'post_classifier');
 
 const arg = (name: string, fallback: number) => {
   const found = process.argv.find(a => a.startsWith(`--${name}=`));

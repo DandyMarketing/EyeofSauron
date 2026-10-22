@@ -29,6 +29,7 @@ import {
   EXTERNAL_CONTEXT_FRAMING,
   type WebSource,
 } from './web-search.js';
+import { recordUsage, newRunId } from '../lib/ai-usage.js';
 
 const client = new Anthropic();
 
@@ -280,6 +281,8 @@ export async function askSauron(
   const toolCalls: QueryResult['toolCalls'] = [];
   const trace: ToolTrace[] = [];
   const run: RunMeta = { purpose, model_chosen: choice.model, calls: [], rounds: 0, pauses: 0, out_of_time: false, rescued: null, recovery_error: null, web_searches: 0, ms: 0 };
+  // One id for every call this answer makes, so the admin page counts it once.
+  const usageRun = newRunId();
   const runStarted = Date.now();
   const charts: QueryResult['charts'] = [];
 
@@ -597,6 +600,18 @@ export async function askSauron(
       cache_write: (r.usage as any)?.cache_creation_input_tokens ?? null,
       ms: Date.now() - callStarted,
       rescue: !!opts.choice,
+    });
+    // What it cost, and whose it was (src/lib/ai-usage.ts). Never throws.
+    recordUsage({
+      purpose: opts.choice ? 'recovery' : purpose,
+      model: (r as any).model ?? active.model,
+      input_tokens: r.usage?.input_tokens ?? 0,
+      output_tokens: r.usage?.output_tokens ?? 0,
+      cache_read: (r.usage as any)?.cache_read_input_tokens ?? 0,
+      cache_write: (r.usage as any)?.cache_creation_input_tokens ?? 0,
+      web_searches: searchRequestCount(r.usage),
+      ms: Date.now() - callStarted,
+      run_id: usageRun,
     });
 
     /**

@@ -642,6 +642,20 @@
   .urow:first-child { border-top: 0; }
   .u-name { font-weight: 600; font-size: 15px; }
   .u-email { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+  /* AI usage and cost (Khai, 22 Oct 2026): a line under each name, the month
+     and the System spend in a bar above the list. */
+  .usage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+  .usage-bar select { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); }
+  .usage-bar .ub-total { font-weight: 600; }
+  .usage-bar .ub-note { flex-basis: 100%; color: var(--text-muted); font-size: 13px; }
+  .u-usage { display: inline-block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--accent);
+    font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+  .u-usage.none { color: var(--text-muted); cursor: default; }
+  .u-usage-detail { margin-top: 6px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .u-usage-detail b { color: var(--text); font-weight: 600; }
+  .usage-bar .warn, .u-usage-detail .warn { color: var(--accent); }
   .u-access { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .acc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .acc-line .role-badge { min-width: 64px; text-align: center; }
@@ -1428,11 +1442,107 @@ async function loadAttention(panel) {
 }
 
 async function loadPeople(panel) {
-  const [usersData] = await Promise.all([api('GET', '/admin/api/users'), loadVenues()]);
+  // Usage in parallel and on its own: a failure costs the figures, not the list.
+  const [usersData, usage] = await Promise.all([api('GET', '/admin/api/users'), loadUsage(), loadVenues()]);
+  usageData = usage;
   panel.innerHTML = '';
   renderInvite(panel);
   renderRoleSlot(panel);
   renderUsers(panel, usersData.users || []);
+}
+
+/**
+ * AI USAGE AND COST PER PERSON (Khai, 22 Oct 2026), from /admin/api/usage.
+ *
+ * List prices in US dollars, which is how Anthropic bills: every call to the
+ * AI is recorded with its model and tokens (src/lib/ai-usage.ts). "Answers" is
+ * questions answered in Query and replies in Plan; the planner's own passes
+ * (brief, P&L, progress board, Monday) cost money without being answers, so a
+ * planner's cost can be high for few answers. System is what nobody asked for:
+ * the weekly recommendations and the Instagram post classifier.
+ */
+let usageData = null;
+let usageMonth = null;
+const openUsage = new Set();
+
+async function loadUsage() {
+  try {
+    return await api('GET', '/admin/api/usage' + (usageMonth ? '?month=' + encodeURIComponent(usageMonth) : ''));
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+}
+
+const usd = n => {
+  const v = Number(n) || 0;
+  if (v === 0) return '$0';
+  if (v < 0.01) return '<$0.01';
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const MODEL_NAMES = { 'claude-opus-5': 'Opus 5', 'claude-sonnet-5': 'Sonnet 5', 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5' };
+const modelName = m => MODEL_NAMES[m] || m;
+
+/** Months from the first one recorded (October 2026) to now, newest first. */
+function usageMonths(current) {
+  const out = [];
+  let [y, m] = current.split('-').map(Number);
+  while (y > 2026 || (y === 2026 && m >= 10)) {
+    const key = y + '-' + String(m).padStart(2, '0');
+    out.push({ key, label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-SG', { month: 'long', year: 'numeric', timeZone: 'UTC' }) });
+    m -= 1; if (m === 0) { m = 12; y -= 1; }
+  }
+  return out;
+}
+
+function usageBarHtml() {
+  const u = usageData;
+  if (!u) return '';
+  if (u.error) return `<div class="usage-bar"><span class="warn">AI usage: ${esc(u.error)}</span></div>`;
+  const now = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' }).slice(0, 7);
+  const opts = usageMonths(now).map(o => `<option value="${o.key}"${o.key === u.month.key ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+  const sys = u.system;
+  const unpriced = u.total.unpriced
+    ? ` <span class="warn">${u.total.unpriced} call${u.total.unpriced === 1 ? '' : 's'} on a model with no price, not in the total</span>` : '';
+  return `<div class="usage-bar">
+    <span>AI usage</span>
+    <select aria-label="Month" onchange="changeUsageMonth(this.value)">${opts}</select>
+    <span class="ub-total">Total ${usd(u.total.cost_usd)}</span>
+    <span>System ${usd(sys ? sys.cost_usd : 0)} <span class="muted">(weekly recommendations, post classifier)</span></span>${unpriced}
+    <span class="ub-note">List prices in US dollars, as Anthropic bills. "Answers" are Query answers and Plan replies; the planner's brief, P&amp;L and Monday passes are in the cost. Before 22 Oct 2026 only answers were recorded, so earlier Plan costs leave those passes out.</span>
+  </div>`;
+}
+
+function usageLineHtml(userId) {
+  const u = usageData;
+  if (!u || u.error) return '';
+  const p = u.people[userId];
+  if (!p || (!p.calls && !p.cost_usd)) return `<div><span class="u-usage none">No AI use this month</span></div>`;
+  const open = openUsage.has(userId);
+  const part = (label, f, unit) => f ? `<div>${label}: <b>${f.answers.toLocaleString('en-SG')}</b> ${unit} · <b>${usd(f.cost_usd)}</b>${f.calls > f.answers ? ` <span class="muted">(${f.calls.toLocaleString('en-SG')} AI calls)</span>` : ''}</div>` : '';
+  const models = Object.entries(p.by_model).sort((a, b) => b[1].cost_usd - a[1].cost_usd)
+    .map(([m, s]) => `${esc(modelName(m))} ${usd(s.cost_usd)}`).join(' · ');
+  return `<div><button class="u-usage" aria-expanded="${open}" onclick="toggleUsage('${userId}')">${p.answers.toLocaleString('en-SG')} answer${p.answers === 1 ? '' : 's'} · ${usd(p.cost_usd)}</button></div>
+    <div class="u-usage-detail" id="usage-${userId}"${open ? '' : ' hidden'}>
+      ${part('Query', p.by_feature.query, 'answers')}${part('Plan', p.by_feature.plan, 'replies')}
+      <div>By model: ${models}</div>
+      ${p.unpriced ? `<div class="warn">${p.unpriced} call(s) on a model with no price, not in this figure</div>` : ''}
+    </div>`;
+}
+
+function toggleUsage(userId) {
+  const d = document.getElementById('usage-' + userId);
+  if (!d) return;
+  d.hidden = !d.hidden;
+  if (d.hidden) openUsage.delete(userId); else openUsage.add(userId);
+  const b = d.previousElementSibling && d.previousElementSibling.querySelector('.u-usage');
+  if (b) b.setAttribute('aria-expanded', String(!d.hidden));
+}
+
+async function changeUsageMonth(key) {
+  usageMonth = key;
+  usageData = await loadUsage();
+  const section = document.getElementById('users-section');
+  if (section && section._users) fillUsers(section, section._users);
 }
 
 async function loadConnections(panel) {
@@ -1820,8 +1930,9 @@ function fillUsers(usersSection, users) {
     const d = new Date(iso.slice(0, 10) + 'T00:00:00Z');
     return isNaN(d) ? iso.slice(0, 10) : d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   };
+  usersSection._users = users;
   const unknown = users.find(u => u.last_seen && u.last_seen.tone === 'unknown');
-  let html = `<h2>Users (${users.length})</h2>` +
+  let html = `<h2>Users (${users.length})</h2>` + usageBarHtml() +
     // A read that failed is said, never drawn as "Never signed in" on every row.
     (unknown ? `<div class="u-warn">Sign-in times could not be read, so "last seen" is unknown for everyone: ${esc(unknown.last_seen.error || 'no reason given')}</div>` : '') +
     '<div class="ulist">';
@@ -1857,7 +1968,7 @@ function fillUsers(usersSection, users) {
     ).join('');
 
     html += `<div class="urow">
-      <div class="u-who"><div class="u-name">${esc(user.full_name || '—')}${isSelf ? ' <span class="muted">(you)</span>' : ''}</div><div class="u-email">${esc(user.email)}</div></div>
+      <div class="u-who"><div class="u-name">${esc(user.full_name || '—')}${isSelf ? ' <span class="muted">(you)</span>' : ''}</div><div class="u-email">${esc(user.email)}</div>${usageLineHtml(user.id)}</div>
       <div class="u-access">${access}</div>
       <div class="u-status">
         <div class="last-seen last-seen-${esc((user.active_seen || seen).tone)}">Active: ${esc((user.active_seen || seen).text.toLowerCase())}</div>

@@ -12,6 +12,7 @@
 import { selectAll } from '../lib/paged.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabaseAdmin } from '../auth/session.js';
+import { metered } from '../lib/ai-usage.js';
 import { modelFor } from './model-policy.js';
 import { relightCharts } from './chart-svg.js';
 import { filterConversation, scopeOfTurn } from './conversation-scope.js';
@@ -178,7 +179,8 @@ export async function titleConversation(conversationId: string, question: string
 
   const choice = modelFor('lookup');
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // Metered: a title is a small call, and still somebody's.
+    const client = metered(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }), 'title');
     const res = await client.messages.create({
       model: choice.model,
       max_tokens: 32,

@@ -9,6 +9,7 @@ import { modelFor } from '../ai/model-policy.js';
 import { fatalApiReason, fatalRunSummary } from '../lib/api-fatal.js';
 import { latestClosedMonth } from '../lib/accounting-period.js';
 import { feeAnomalies, feeWarning, unexplained, type FeeMonth, type FeeAcknowledgement } from '../lib/fee-checks.js';
+import { metered } from '../lib/ai-usage.js';
 import {
   analysisBrief,
   recommendationTool,
@@ -41,7 +42,8 @@ import {
  * in the flag it raises.
  */
 
-const client = new Anthropic();
+// Metered (src/lib/ai-usage.ts): no one is signed in here, so it is reported as System.
+const client = metered(new Anthropic(), 'recommendation_split');
 
 const arg = (name: string) => process.argv.find(a => a.startsWith(`--${name}=`))?.split('=')[1];
 const onlySlug = arg('venue');

@@ -54,13 +54,17 @@ import { modelFor, isModelFeatureError } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
 import type { ProgressEvent } from './ai/progress.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { metered, withUsageScope, setCaller, setFeature } from './lib/ai-usage.js';
+import { monthWindow, summariseUsage, type SummaryRow } from './lib/ai-usage-summary.js';
 
 /**
  * A direct client for the ONE call that is not a conversation: the forced tool
  * that turns a settled plan into a draft. Everything else goes through the
  * engine, which owns the tool loop, the retries and the caching.
  */
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Metered: every call through this client is the planner's, and is costed to
+// whoever is signed in (src/lib/ai-usage.ts).
+const anthropic = metered(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }), 'plan_other');
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
@@ -107,6 +111,12 @@ const app = new Hono();
  * its own kind of lie. `server.compress.test.ts` pins the behaviour, so a
  * future `contentTypeFilter` option cannot quietly take the protection away.
  */
+/**
+ * Each request gets its own usage scope, so every AI call it makes is costed
+ * to whoever signed in (requireAuth fills it in). First, so it wraps the rest.
+ */
+app.use('*', (c, next) => withUsageScope(() => next()));
+
 app.use('*', compress());
 
 /**
@@ -195,6 +205,8 @@ async function requireAuth(c: any): Promise<SessionUser | null> {
   const user = await validateSession(token);
   // When they last USED Sauron, for "last seen" on the admin page.
   if (user) noteActivity(user.id);
+  // Whose AI calls these are, for the usage and cost on the admin page.
+  if (user) setCaller(user.id);
   return user;
 }
 
@@ -627,6 +639,7 @@ async function saveTurn(
  * arrived. An `error` event carries the same sentence /ask would have returned.
  */
 app.post('/ask/stream', async (c) => {
+  setFeature('query');
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
@@ -714,6 +727,7 @@ app.post('/ask/stream', async (c) => {
 });
 
 app.post('/ask', async (c) => {
+  setFeature('query');
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
@@ -784,6 +798,7 @@ app.post('/ask', async (c) => {
  * different cached prefix, which is correct rather than wasteful.
  */
 app.post('/api/plan', async (c) => {
+  setFeature('plan');
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
 
@@ -1964,6 +1979,27 @@ app.patch('/admin/api/reports/:id', async (c) => {
 });
 
 // --- Admin API (owner only) ---
+
+/**
+ * AI usage and cost per person for one month (Khai, 22 Oct 2026). Grouped in
+ * Postgres (ai_usage_summary, migration 065), so this reads a few dozen rows
+ * whatever the month held. Its own request: a failure costs the usage figures
+ * on the People tab, never the list of people.
+ */
+app.get('/admin/api/usage', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+  const month = monthWindow(c.req.query('month'), today);
+  // row-cap: grouped by person x feature x model -- a few dozen rows a month.
+  const { data, error } = await supabaseAdmin.rpc('ai_usage_summary', { p_from: month.from, p_to: month.to });
+  if (error) {
+    return c.json({ error: /ai_usage/.test(error.message)
+      ? 'Usage is not recorded yet: run migration 065_ai_usage.sql in Supabase.'
+      : `Could not read usage: ${error.message}` }, 500);
+  }
+  return c.json(summariseUsage((data ?? []) as SummaryRow[], month));
+});
 
 app.get('/admin/api/users', async (c) => {
   const user = await requireOwner(c);
