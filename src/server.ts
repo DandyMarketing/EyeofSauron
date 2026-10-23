@@ -27,7 +27,7 @@ import { discoverAccounts, ingestMetaInsights, probeMetrics, fetchInsights, reda
 import { loadKey } from './lib/crypto.js';
 import { logIngestion, checkDataGaps } from './ingest/log.js';
 import { countUnresolved } from './ingest/resolved.js';
-import { askSauron } from './ai/engine.js';
+import { askSauron, QUERY_HISTORY_MAX } from './ai/engine.js';
 import { relightCharts } from './ai/chart-svg.js';
 import { unseenCount } from './lib/brief-unseen.js';
 import { canonicalRedirect } from './lib/canonical-host.js';
@@ -502,6 +502,15 @@ app.post('/ingest/revel', async (c) => {
 });
 
 
+/**
+ * The last ten exchanges of a Query conversation, whatever the page sent. A
+ * reopened chat used to send every saved message on its next question.
+ * Plan is not trimmed: the planner argues toward a brief and needs all of it.
+ */
+function queryHistory(history: ChatMessage[] | undefined): ChatMessage[] {
+  return Array.isArray(history) ? history.slice(-QUERY_HISTORY_MAX) : [];
+}
+
 // --- Chat history (each person's own, and nobody else's) ---------------------
 
 /**
@@ -714,7 +723,7 @@ app.post('/ask/stream', async (c) => {
 
     try {
       const result = await askSauron(
-        body.question, body.history ?? [], venueFilter, 'chat',
+        body.question, queryHistory(body.history), venueFilter, 'chat',
         effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL, undefined,
         push, venueNames,
       );
@@ -766,7 +775,7 @@ app.post('/ask', async (c) => {
      * question, and no browser can point our API key at an arbitrary model.
      */
     const result = await askSauron(
-      body.question, body.history ?? [], venueFilter, 'chat',
+      body.question, queryHistory(body.history), venueFilter, 'chat',
       effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL,
     );
     // After the answer exists, never before. See saveTurn.

@@ -1645,6 +1645,9 @@ async function openConversation(id) {
     history.push({ role: 'assistant', content: m.content });
   }
 
+  // The same last ten exchanges a new answer keeps; the server trims too.
+  if (history.length > 20) history = history.slice(-20);
+
   if (data.withheld > 0) {
     const note = document.createElement('div');
     note.className = 'message assistant';

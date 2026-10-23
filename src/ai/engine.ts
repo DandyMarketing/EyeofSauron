@@ -93,6 +93,16 @@ export interface RunMeta {
   ms: number;
 }
 
+/** A tool result past this many characters (~10,000 tokens) is logged. */
+const LARGE_RESULT_CHARS = 40_000;
+
+/**
+ * How much earlier conversation a Query answer carries: the last ten
+ * exchanges. The page trims to this too; this is the control, since the
+ * history arrives from a browser and every token of it is billed.
+ */
+export const QUERY_HISTORY_MAX = 20;
+
 /** A tool's result as kept for a report: no chart markup, at most this long. */
 const TRACE_RESULT_CHARS = 12000;
 export function traceExcerpt(raw: string): string {
@@ -755,6 +765,12 @@ export async function askSauron(
         const t0 = Date.now();
         const out = await handleToolCall(block.name, block.input as Record<string, any>, venueFilter, role);
         trace.push({ name: block.name, input: block.input as Record<string, any>, result: traceExcerpt(out), ms: Date.now() - t0 });
+        // Said out loud, because a big result is paid for again on every later
+        // round of the answer and is otherwise visible only on the bill: one
+        // half-year lookup was ~185,000 tokens before ranges were folded.
+        if (out.length > LARGE_RESULT_CHARS) {
+          console.warn(`[engine] LARGE TOOL RESULT: ${block.name} returned ${out.length.toLocaleString('en')} characters (~${Math.round(out.length / 4).toLocaleString('en')} tokens), input ${JSON.stringify(block.input).slice(0, 200)}`);
+        }
         return out;
       }),
     );

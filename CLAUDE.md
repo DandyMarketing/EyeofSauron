@@ -585,6 +585,16 @@ else. Known limit worth watching there: a breakpoint looks back at most 20
 content blocks, so one round with more than 20 tool_use/tool_result blocks
 misses and pays full price -- visible as the hit rate dropping.
 
+**Tool results are the cost, not history** (measured 23 Oct 2026, BUILD_LOG
+5.15). Writing new tool results into the cache was 70% of an Opus answer's
+cost, and one tool caused most of it: `query_daily_operations` returned a row
+per day for any range. A range over 31 days now comes back by week or month
+(`src/lib/ops-buckets.ts`, `group_by` to choose), any result over 40,000
+characters is logged as LARGE TOOL RESULT, and Query carries the last ten
+exchanges, enforced on the server. Measure a tool's result size from
+`conversation_messages.tool_trace` before adding a summary layer: Plan's whole
+fortnight was $6.
+
 **A refused optional feature costs the feature, never the product.**
 `isModelFeatureError()` catches a 400 naming thinking or output_config, retries
 without them and says so loudly -- the same rule as `isWebSearchConfigError()`,

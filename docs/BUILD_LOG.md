@@ -1605,6 +1605,28 @@ time.** A transaction's `now()` is one value for every row in it, so a timestamp
 cannot order rows written together -- give them an explicit order, or sort on
 something that has one.
 
+### 5.15 A Query answer cost 86 cents, and most of it was one tool's day rows
+**Symptom.** Measured from `ai_usage` over the fortnight to 23 Oct 2026: 44
+Opus answers cost $38.05, about 86 cents each, against 15 cents on Sonnet. The
+average call carried 102,000 tokens, though the standing prompt and tools are
+about 40,000. Khai asked for a limit on context before it compresses.
+**Root cause.** Not history and not web search (seven searches in two weeks).
+Saving new content to the cache was $26.6 of the $38, and the new content was
+tool results: `query_daily_operations` averaged 78,000 characters a call and
+peaked at 741,000 (~185,000 tokens), because any range returned every day's
+row. The reported half-year question (3.10) made nine such calls, and each
+later round of the answer resent them all.
+**Fix.** A range over 31 days now comes back by week (to 120 days) or month,
+from the same day rows, with totals unchanged and the venue's notes and the
+largest covers gaps kept by date (`src/lib/ops-buckets.ts`); `group_by` picks
+day, week, month or weekday, and day rows are refused past 93 days. Any tool
+result over 40,000 characters is logged. Query history is capped at the last
+ten exchanges on the server, not just the page, which a reopened chat skipped.
+**Recurs?** **Any tool whose result grows with the range asked for.** Measure
+result sizes from `tool_trace` before reaching for summaries: the next largest
+are `query_profit_and_loss` (48,000 characters on average) and
+`query_supplier_bills` (16,000).
+
 ---
 
 ## 6. Process failures

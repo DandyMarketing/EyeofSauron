@@ -22,6 +22,7 @@ import { holidayCoverage } from '../lib/school-calendar.js';
 import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASELINE_MONTHS } from '../lib/channel-health.js';
 import { rankComparable, previousOccurrence, comparabilityCaveats, type EventLike, type Criteria } from '../lib/events.js';
 import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
+import { chooseGrouping, bucketDays, DAILY_HARD_MAX, type DayRow } from '../lib/ops-buckets.js';
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -1552,6 +1553,20 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   // and makes a venue that shuts one day a week look weaker than it is.
   const avgDailyGross = Number((totals.gross_sales / Math.max(1, tradingDays)).toFixed(2));
 
+  /**
+   * A long range comes back as weeks or months, not days (23 Oct 2026): a
+   * half-year of day rows was ~185,000 tokens for ONE lookup, resent on every
+   * later round of the answer. Totals above are unchanged. What a day row
+   * carried that a bucket cannot -- the venue's own notes, the covers gaps --
+   * is kept by date, the notes in full and the gaps as the largest ten.
+   */
+  const { grouping, note: groupingNote } = chooseGrouping(input.group_by, data.length);
+  const buckets = grouping === 'day' ? null : bucketDays(daily as DayRow[], grouping);
+  const notes = daily.filter(d => d.finance_notes).map(d => ({ date: d.date, note: d.finance_notes as string }));
+  const NOTES_MAX = 40;
+  const SOP_MAX = 10;
+  const sopLargest = [...sopBreaches].sort((a, b) => Math.abs(b.variance ?? 0) - Math.abs(a.variance ?? 0)).slice(0, SOP_MAX);
+
   return JSON.stringify({
     venue: input.venue_slug,
     date_range: dateLabel(dateFilter),
@@ -1585,8 +1600,26 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     // Days where SevenRooms covers and Revel's paid-guest count disagree by
     // more than 2. Covers are the SevenRooms number by design; a gap here
     // means the floor SOP was not followed, not that the figure is wrong.
-    covers_sop_review: sopBreaches.length > 0 ? sopBreaches : undefined,
-    daily,
+    ...(buckets
+      ? {
+          grouping,
+          grouping_note: groupingNote ??
+            `${data.length} days, returned by ${grouping}, not day by day. Totals cover every day. For particular days, ask again with group_by "day" and a range of ${DAILY_HARD_MAX} days or less.`,
+          buckets,
+          finance_notes: notes.length > 0 ? notes.slice(0, NOTES_MAX) : undefined,
+          finance_notes_omitted: notes.length > NOTES_MAX ? notes.length - NOTES_MAX : undefined,
+          covers_sop_review: sopBreaches.length > 0 ? sopLargest : undefined,
+          covers_sop_review_days: sopBreaches.length > 0 ? sopBreaches.length : undefined,
+          covers_sop_review_note: sopBreaches.length > SOP_MAX
+            ? `${sopBreaches.length} days had a covers gap; the ${SOP_MAX} largest are listed.`
+            : undefined,
+        }
+      : {
+          grouping: 'day',
+          grouping_note: groupingNote,
+          covers_sop_review: sopBreaches.length > 0 ? sopBreaches : undefined,
+          daily,
+        }),
     figure_definitions: FIGURE_DEFINITIONS,
   });
 }
