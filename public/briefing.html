@@ -47,6 +47,7 @@
 <link rel="preload" href="/vendor/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theme.css?v=2">
 <link rel="modulepreload" href="/brief-badge.js">
+<link rel="modulepreload" href="/answer-excel.js">
 <link rel="icon" href="/brand/sauron-eye.svg" type="image/svg+xml">
 <link rel="icon" href="/brand/icon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -578,6 +579,7 @@ function renderPeriod(key, rows, withheld, isLatest) {
 
 function renderRecommendation(r) {
   const charts = (r.charts || []).map(c => '<div class="zoom-chart">' + c.svg + '</div>').join('');
+  const body = renderMarkdown(r.body || '');
   return '' +
     '<div class="rec' + (r.status === 'dismissed' ? ' dismissed' : '') + '" id="rec-' + r.id + '">' +
       '<div class="rec-head">' +
@@ -587,7 +589,7 @@ function renderRecommendation(r) {
           '<span class="rec-confidence">confidence ' + Number(r.confidence).toFixed(2) + '</span>' +
         '</div>' +
       '</div>' +
-      '<div class="rec-body">' + renderMarkdown(r.body || '') + charts + '</div>' +
+      '<div class="rec-body">' + body + charts + '</div>' +
       '<div class="rec-actions">' +
         '<button class="rec-btn' + (r.status === 'acted_on' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {status:\'acted_on\'}, this)">Acted on</button>' +
         '<button class="rec-btn' + (r.rating === 'useful' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'useful\'}, this)">Useful</button>' +
@@ -595,6 +597,7 @@ function renderRecommendation(r) {
         '<button class="rec-btn' + (r.rating === 'wrong' ? ' on' : '') + '" onclick="rateRec(\'' + r.id + '\', {rating:\'wrong\', status:\'dismissed\'}, this)">Wrong</button>' +
         '<button class="share-btn" onclick="printOne(\'' + r.id + '\')">PDF</button>' +
         '<button class="share-btn" onclick="shareImage(\'' + r.id + '\', this)">Image</button>' +
+        (body.includes('<table') ? '<button class="share-btn" onclick="excelRec(\'' + r.id + '\', this)">Excel</button>' : '') +
         '<span class="rec-note">' + (r.evidence || []).length + ' quer' + ((r.evidence || []).length === 1 ? 'y' : 'ies') + ' behind this</span>' +
       '</div>' +
     '</div>';
@@ -712,6 +715,17 @@ async function shareImage(id, btn) {
     btn.textContent = label;
     btn.classList.remove('working');
   }
+}
+
+/**
+ * A recommendation's tables as Excel (issue report 68ccfe2d, 23 Oct 2026), as
+ * shown on the card. /answer-excel.js is shared with Query and Plan.
+ */
+async function excelRec(id, btn) {
+  const card = document.getElementById('rec-' + id);
+  if (!card) return;
+  const { downloadAnswerExcel } = await import('/answer-excel.js');
+  downloadAnswerExcel(card.querySelector('.rec-body'), card.querySelector('.rec-headline')?.textContent || '', token, btn);
 }
 
 /**

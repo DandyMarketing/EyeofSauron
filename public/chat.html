@@ -24,6 +24,7 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/report-issue.js">
+<link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
    browser's choice from the menu switch if it made one, else the device's own
@@ -1137,10 +1138,9 @@ function addExportButtons(bar, bubble, question) {
 }
 
 /**
- * Excel, on an answer that has a table (issue report 68ccfe2d, 23 Oct 2026:
- * asked three times for a table as Excel, told three times it was attached,
- * and no file existed). The tables are read off the page as RENDERED, so the
- * file holds exactly what the answer shows; the server only lays them out.
+ * Excel, on an answer that has a table (issue report 68ccfe2d, 23 Oct 2026).
+ * The tables are read off the page as rendered; /answer-excel.js is shared
+ * with Plan and Weekly Recommends.
  */
 function addExcelButton(bar, bubble, question) {
   if (!bubble.querySelector('table')) return;
@@ -1148,61 +1148,11 @@ function addExcelButton(bar, bubble, question) {
   btn.className = 'export-btn';
   btn.textContent = 'Excel';
   btn.title = 'Download the tables in this answer as an Excel file, exactly as shown';
-  btn.addEventListener('click', () => downloadAnswerExcel(bubble, question, btn));
-  bar.appendChild(btn);
-}
-
-function answerTables(bubble) {
-  const cellText = el => el.textContent.replace(/\s+/g, ' ').trim();
-  return [...bubble.querySelectorAll('table')].map(table => {
-    // The heading above the table names its sheet: the nearest h2-h4, or a
-    // paragraph that is nothing but bold text, before the previous table.
-    let caption = '';
-    for (let el = table.previousElementSibling; el && el.tagName !== 'TABLE'; el = el.previousElementSibling) {
-      const boldOnly = el.tagName === 'P' && el.children.length === 1 && el.firstElementChild.tagName === 'STRONG' &&
-        cellText(el) === cellText(el.firstElementChild);
-      if (/^H[1-4]$/.test(el.tagName) || boldOnly) { caption = cellText(el); break; }
-    }
-    const headers = [...table.querySelectorAll('thead th')].map(cellText);
-    const rows = [...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(cellText));
-    return { caption, headers, rows };
+  btn.addEventListener('click', async () => {
+    const { downloadAnswerExcel } = await import('/answer-excel.js');
+    downloadAnswerExcel(bubble, question, authToken, btn);
   });
-}
-
-async function downloadAnswerExcel(bubble, question, btn) {
-  const label = btn.textContent;
-  btn.textContent = 'Building...';
-  btn.classList.add('working');
-  try {
-    // The words around the tables carry the definitions and caveats, so they
-    // go in too, on their own sheet. The bar under the answer is not the answer.
-    const text = [...bubble.querySelectorAll('p, li, h1, h2, h3, h4')]
-      .filter(el => !el.closest('table') && !el.closest('.teach-bar'))
-      .map(el => el.textContent.replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
-    const res = await fetch('/api/export/answer', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + authToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: question || '', text, tables: answerTables(bubble) }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Could not build the Excel file.');
-    }
-    const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'sauron-answer.xlsx';
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  } catch (e) {
-    console.error('[chat] excel export failed', e);
-    alert((e && e.message) || 'Could not build the Excel file.');
-  } finally {
-    btn.textContent = label;
-    btn.classList.remove('working');
-  }
+  bar.appendChild(btn);
 }
 
 /**

@@ -25,6 +25,7 @@
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/board-suggest.js">
 <link rel="modulepreload" href="/report-issue.js">
+<link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
    browser's choice from the menu switch if it made one, else the device's own
@@ -132,6 +133,10 @@
     color: var(--text-muted); font-size: 13px; text-decoration: underline; cursor: pointer; font-family: inherit; }
   .msg .report-link:hover { color: var(--text); }
   @media print { .msg .report-link { display: none; } }
+  .msg .excel-link { display: block; margin: 6px 0 0 auto; background: none; border: 0; padding: 2px 0;
+    color: var(--text-muted); font-size: 13px; text-decoration: underline; cursor: pointer; font-family: inherit; }
+  .msg .excel-link:hover, .msg .excel-link.working { color: var(--text); }
+  @media print { .msg .excel-link { display: none; } }
 
   .intro {
     border: 1px dashed var(--border); border-radius: 10px;
@@ -623,6 +628,25 @@ function addReportLink(el, ctx) {
   el.appendChild(btn);
 }
 
+/**
+ * "Download as Excel" under an answer with a table (issue report 68ccfe2d,
+ * 23 Oct 2026). The tables as shown; /answer-excel.js is shared with Query and
+ * Weekly Recommends.
+ */
+function addExcelLink(el, question) {
+  const body = el?.querySelector('.bubble');
+  if (!body || !body.querySelector('table') || el.querySelector(':scope > .excel-link')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'excel-link';
+  btn.textContent = 'Download as Excel';
+  btn.addEventListener('click', async () => {
+    const { downloadAnswerExcel } = await import('/answer-excel.js');
+    downloadAnswerExcel(body, question, token, btn);
+  });
+  el.appendChild(btn);
+}
+
 function setBusy(on) {
   busy = on;
   sendBtn.disabled = on;
@@ -677,6 +701,7 @@ async function send() {
 
     history.push({ role: 'user', content: message });
     history.push({ role: 'assistant', content: data.answer || '' });
+    addExcelLink(pending, message);
     addReportLink(pending, { question: message, answer: data.answer || '' });
     refreshProgress();
     if (data.conversation_id && data.conversation_id !== conversationId) {
@@ -1720,6 +1745,7 @@ async function openPlan(id) {
       const el = addMessage('Planner', 'agent', renderMarkdown(m.content || ''));
       const asked = [...history].reverse().find(h => h.role === 'user')?.content || '';
       history.push({ role: 'assistant', content: m.content || '' });
+      addExcelLink(el, asked);
       addReportLink(el, { question: asked, answer: m.content || '' });
       // Every earlier question was answered by the message after it; only a
       // plan that ENDS on the planner's question still has one open.

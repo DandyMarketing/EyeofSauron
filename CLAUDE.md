@@ -1355,15 +1355,15 @@ carries all of it.
 Issue report 68ccfe2d: asked for a table as Excel, Sauron said three times the
 file was attached -- the third adding it had "verified" it -- and Query could
 make no file at all (BUILD_LOG 3.10). Khai chose to build the export. An
-**Excel** button sits under every Query answer that holds a table, live and
-reopened: the page reads its RENDERED tables and `POST /api/export/answer`
+**Excel** button sits under every Query and Plan answer that holds a table,
+live and reopened, and on every Weekly Recommends card with one: the page reads
+its RENDERED tables (`/answer-excel.js`, one module for the three) and `POST /api/export/answer`
 (`src/lib/answer-export.ts`) lays them out, one sheet per table named by the
 heading above it, plus an Answer sheet with the text so definitions and caveats
 travel. Figures become numbers in the format they were written ("$5,974",
 "38.6%"); a cell holding two figures stays text. No warehouse read, so no scope
 check: the file holds what that browser already showed. The prompt says Query
 cannot make, attach, send or save files and must point at the button instead.
-Not on Plan or Weekly Recommends yet.
 
 ### AI usage and cost per person, 22 Oct 2026
 

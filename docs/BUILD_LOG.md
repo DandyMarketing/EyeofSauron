@@ -1016,8 +1016,9 @@ so a polite request for one was answered with the action it described. The
 traces are the proof: one answer ran no tool at all, the other two ran
 `query_daily_operations` only.
 **Fix.** Built the thing that was asked for, and told the model the truth about
-it. An **Excel** button under every answer that holds a table, in live and
-reopened chats, downloads those tables as rendered -- read off the page, laid
+it. An **Excel** button under every answer that holds a table -- Query and
+Plan, live and reopened, and Weekly Recommends cards -- downloads those tables
+as rendered -- read off the page, laid
 out by `POST /api/export/answer` (`src/lib/answer-export.ts`), with the
 answer's own text on a sheet beside them. The prompt now says Query cannot
 make, attach, send or save files, must never claim to, and should put the
