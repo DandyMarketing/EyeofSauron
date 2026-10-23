@@ -1683,7 +1683,7 @@ function retentionPanel(payload, v) {
   const slices = [
     { label: 'New to the group', n: r.counts.new_to_group, fill: 'var(--accent)' },
     { label: 'Been here before', n: r.counts.returning_here, fill: '#2a8780' },
-    { label: 'From a sister venue', n: r.counts.crossed_from_sister, fill: '#7a6ff0' },
+    { label: 'Visited a sister venue', n: r.counts.crossed_from_sister, fill: '#7a6ff0' },
   ].filter(x => x.n > 0);
 
   const R = 46, CX = 52, CY = 52;

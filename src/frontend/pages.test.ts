@@ -614,7 +614,7 @@ test('the guest mix is a pie, and every slice carries its count', () => {
   assert.match(fn, /class="pie"/, 'the guest mix is not drawn as a pie');
   assert.match(fn, /New to the group/, 'the new-guest slice is gone');
   assert.match(fn, /Been here before/, 'the returning slice is gone');
-  assert.match(fn, /From a sister venue/, 'the cross-venue slice is gone');
+  assert.match(fn, /Visited a sister venue/, 'the cross-venue slice is gone');
 
   // The denominator, and each slice's count beside its percentage.
   assert.match(fn, /num\(total\)/, 'the booked-guest total is not on the page');
