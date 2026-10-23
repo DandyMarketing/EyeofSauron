@@ -45,6 +45,7 @@ import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNo
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
+import { buildAnswerWorkbook, exportFileName, invalidExport } from './lib/answer-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft, taskDue } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
@@ -2437,6 +2438,45 @@ app.get('/api/dashboard/export', async (c) => {
   } catch (e: any) {
     console.error(`[dashboard/export] ${e?.message ?? e}`);
     return c.json({ error: 'Could not build the export.' }, 500);
+  }
+});
+
+/**
+ * A Query answer's tables as Excel (issue report 68ccfe2d, 23 Oct 2026: told
+ * three times a file was attached when Query could make none). The page sends
+ * the tables it RENDERED, and this lays them out -- see answer-export.ts.
+ *
+ * NO WAREHOUSE READ, so no venue or domain check: the workbook holds exactly
+ * what this person's browser already showed them. Signed in and past the terms
+ * gate like every page, and bounded in size because the body is a browser's.
+ */
+app.post('/api/export/answer', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+
+  if (Number(c.req.header('content-length') ?? 0) > 2_000_000) {
+    return c.json({ error: 'That answer is too large to export.' }, 413);
+  }
+  const body = await c.req.json<any>().catch(() => null);
+  const invalid = invalidExport(body);
+  if (invalid) return c.json({ error: invalid }, 400);
+
+  try {
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const wb = await buildAnswerWorkbook(body, today);
+    const buf = await wb.xlsx.writeBuffer();
+    return new Response(buf as ArrayBuffer, {
+      headers: {
+        'Content-Type': XLSX_TYPE,
+        'Content-Disposition': `attachment; filename="${exportFileName(body.question ?? '', today)}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (e: any) {
+    console.error(`[export/answer] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
+    return c.json({ error: 'Could not build the Excel file.' }, 500);
   }
 });
 

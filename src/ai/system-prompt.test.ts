@@ -31,6 +31,18 @@ test('the prompt tells the reader which retention measure is being quoted', () =
   assert.match(SYSTEM_PROMPT_BASE, /never "retention was 12%" alone/);
 });
 
+test('the prompt says Sauron cannot attach files, and points at the Excel button', () => {
+  /**
+   * Issue report 68ccfe2d: asked for a table as Excel, the model said three
+   * times it had attached one -- the third time adding that it had checked --
+   * when Query had no way to make a file. A false "done" is worse than a wrong
+   * figure: nobody can check it against anything, so they go looking.
+   */
+  assert.match(SYSTEM_PROMPT_BASE, /YOU CANNOT MAKE, ATTACH, SEND OR SAVE FILES/);
+  assert.match(SYSTEM_PROMPT_BASE, /EXCEL button/);
+  assert.match(SYSTEM_PROMPT_BASE, /press Excel/);
+});
+
 test('the prompt says who is reading, because that is what forces the visual', () => {
   assert.match(SYSTEM_PROMPT_BASE, /SHOW THE DATA, DO NOT NARRATE IT/);
   assert.match(SYSTEM_PROMPT_BASE, /they are not\s+analysts/);

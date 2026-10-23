@@ -1003,6 +1003,31 @@ time also counts its cancelled bookings, which SevenRooms' list hides.
 that splits SOME of its numbers invites reading all of them that way; say the
 scope of each, or split them all.
 
+### 3.10 "It's attached now for real" -- three times, and no file existed
+**Symptom.** Issue report 68ccfe2d, 19 Oct 2026: a manager asked for Neon
+Pigeon's half-year table as Excel. Sauron said `neon_pigeon_half_year.xlsx` was
+attached; asked where, it apologised and said it again; asked a third time it
+said "attached now for real ... I've now actually verified the file lands in
+the export folder". There was no file and no export folder. Opus and Sonnet
+both did it.
+**Root cause.** Query had no way to make a file and nothing told the model so.
+The prompt listed what `create_chart` cannot draw and said nothing about files,
+so a polite request for one was answered with the action it described. The
+traces are the proof: one answer ran no tool at all, the other two ran
+`query_daily_operations` only.
+**Fix.** Built the thing that was asked for, and told the model the truth about
+it. An **Excel** button under every answer that holds a table, in live and
+reopened chats, downloads those tables as rendered -- read off the page, laid
+out by `POST /api/export/answer` (`src/lib/answer-export.ts`), with the
+answer's own text on a sheet beside them. The prompt now says Query cannot
+make, attach, send or save files, must never claim to, and should put the
+figures in tables and point at the button. The table on screen, not a re-run
+query, because the reported table was assembled from nine queries.
+**Recurs?** **Any capability the model is not told it lacks.** A false "done"
+is worse than a wrong figure: a figure can be checked against the dashboard,
+an action that never happened sends somebody looking for it. The prompt rule
+is a hint; the Report an issue button is what caught it.
+
 ---
 
 ## 4. Security
