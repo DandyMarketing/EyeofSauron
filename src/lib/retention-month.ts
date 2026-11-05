@@ -91,6 +91,46 @@ export function previousMonth(month: { start: string }): { start: string; end: s
   return lastCompleteMonth(month.start);
 }
 
+/** The `n` complete months before `month`, oldest first. */
+export function monthsBefore(month: { start: string }, n: number): Array<{ start: string; end: string; label: string }> {
+  const out: Array<{ start: string; end: string; label: string }> = [];
+  let m: { start: string } = month;
+  for (let i = 0; i < n; i++) {
+    const p = previousMonth(m);
+    out.unshift(p);
+    m = p;
+  }
+  return out;
+}
+
+/**
+ * One column of the Guests panel's trend (Khai, 5 Nov 2026: "at least show a
+ * chart vs the past 6 months before so to see the trend"). The same lifetime
+ * measure as the pie, so the newest column IS the pie.
+ */
+export interface TrendPoint {
+  start: string;
+  /** 'Oct', and the year so the page can mark where one turns. */
+  month: string;
+  year: number;
+  counts: RetentionCounts;
+  shares: RetentionShares;
+  /** A year of history or less behind it: not shown as a measurement. */
+  withheld: boolean;
+}
+
+export function trendPoint(start: string, counts: RetentionCounts, dataStartsAt: string | null): TrendPoint {
+  const d = new Date(`${start}T00:00:00Z`);
+  return {
+    start,
+    month: d.toLocaleDateString('en-SG', { month: 'short', timeZone: 'UTC' }),
+    year: d.getUTCFullYear(),
+    counts,
+    shares: retentionShares(counts),
+    withheld: historyHorizon(start, dataStartsAt).too_thin,
+  };
+}
+
 export function retentionShares(c: RetentionCounts): RetentionShares {
   if (!c.booked_guests) return { repeat_pct: null, group_pct: null, new_pct: null };
   const r2 = (n: number) => Math.round(n * 10) / 10;

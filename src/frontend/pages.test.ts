@@ -1253,8 +1253,10 @@ test('retention runs once for everybody, not once per person', () => {
   // owner and again for each manager.
   const lib = readFileSync('src/lib/dashboard.ts', 'utf8');
   assert.match(lib, /retentionCache\.get\(month\.start, token,/);
+  // The six-month trend too, refreshed by the day: its months are closed.
+  assert.match(lib, /retentionTrendCache\.get\(month\.start, day,/);
   // And each reader is still handed only their own venues.
-  assert.match(lib, /assembleRetention\(venues, month, retentionInputs\)/);
+  assert.match(lib, /assembleRetention\(venues, month, retentionInputs, trendInputs\)/);
 });
 
 test('migration 052 reads history for the period\'s guests, not for all time', () => {

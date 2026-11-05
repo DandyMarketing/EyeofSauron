@@ -34,8 +34,8 @@ import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWind
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
   lastCompleteMonth, retentionShares, sumCounts, inPlainWords, depthFor, sumDepth, type ReturningDepth,
-  historyHorizon, LIFETIME_LOOKBACK_DAYS,
-  type RetentionCounts, type RetentionShares, type HistoryHorizon,
+  historyHorizon, LIFETIME_LOOKBACK_DAYS, monthsBefore, trendPoint,
+  type RetentionCounts, type RetentionShares, type HistoryHorizon, type TrendPoint,
 } from './retention-month.js';
 import { monthOpenUntil } from './accounting-period.js';
 import { costRatios, costCaveats, costBucket, isSushiSales, type CostRatios, type PLRow } from './cost-ratios.js';
@@ -138,6 +138,19 @@ export interface RetentionBlock {
    * to returning_here -- the panel then shows the line without it.
    */
   depth: ReturningDepth | null;
+  /**
+   * The six months before this one and this one, oldest first, on the SAME
+   * lifetime measure, so the last column is the pie above it (Khai, 5 Nov
+   * 2026). Null while it is still loading or when it failed; the panel then
+   * shows the month without its trend.
+   *
+   * A lifetime window grows by a month per column, which is the trap the chat's
+   * 365-day charts avoid. It is accepted here because every venue's records
+   * reach back to April 2022: six months more on top of four years is a sliver,
+   * where on a young venue it would be the whole trend. A column with a year of
+   * history or less is withheld, as the pie is.
+   */
+  trend: TrendPoint[] | null;
 }
 
 export interface CostBlock {
@@ -229,6 +242,8 @@ const PANEL_GRACE_MS = 250;
  * these four and why never sales or covers.
  */
 const retentionCache = new HourlyCache<RetentionInputs>();
+/** The six months before the measured one. Closed months: refreshed daily, not hourly. */
+const retentionTrendCache = new HourlyCache<TrendInputs>();
 const costsCache = new HourlyCache<Record<string, CostBlock>>();
 const periodCostsCache = new HourlyCache<Record<string, WeeklyCogs>>();
 const forecastCache = new HourlyCache<ForecastInputs>();
@@ -302,6 +317,8 @@ export async function buildDashboard(
   // owner and every manager share one run. Each reader's slice is cut below.
   const retentionC = track('retention', retentionCache.get(month.start, token,
     () => loadRetentionInputs(month)));
+  const retentionTrendC = track('retention_trend', retentionTrendCache.get(month.start, day,
+    () => loadRetentionTrend(month)));
   const costsC = track('costs', costsCache.get(`${month.start}|${scope}`, token,
     () => orThrow('costs', buildCosts(venues, day))));
   // Keyed by venues only, so the hour turning over -- or the day -- serves the
@@ -558,8 +575,9 @@ export async function buildDashboard(
       return null;
     }
   };
-  const [retentionInputs, costs, periodCosts, forecastInputs, { data: hols }] = await Promise.all([
+  const [retentionInputs, trendInputs, costs, periodCosts, forecastInputs, { data: hols }] = await Promise.all([
     panel('retention', retentionC),
+    panel('retention_trend', retentionTrendC),
     panel('costs', costsC),
     panel('period_costs', periodCostsC),
     panel('forecast', forecastC),
@@ -567,7 +585,7 @@ export async function buildDashboard(
   ]);
   const holidays = new Map<string, string>((hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]));
   const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays) : null;
-  const retention = retentionInputs ? assembleRetention(venues, month, retentionInputs) : null;
+  const retention = retentionInputs ? assembleRetention(venues, month, retentionInputs, trendInputs) : null;
 
   timings.total = { ms: since() };
   /**
@@ -579,7 +597,7 @@ export async function buildDashboard(
   console.log(
     `[dashboard] ${timings.total.ms}ms` +
     ` data_through=${timings.data_through?.ms}ms core=${timings.core?.ms}ms` +
-    ['retention', 'costs', 'period_costs', 'forecast']
+    ['retention', 'retention_trend', 'costs', 'period_costs', 'forecast']
       .map(n => ` ${n}=${pending.includes(n) ? 'pending' : `${timings[n]?.cache ?? 'failed'}@${timings[n]?.ms ?? '?'}ms`}`)
       .join('') +
     ` venues=${venues.length}`,
@@ -774,6 +792,44 @@ async function loadRetentionInputs(month: { start: string; end: string }): Promi
   return { rows: (data ?? []) as RetentionInputs['rows'], firsts, depth };
 }
 
+/** venue id -> counts, per month start, for the months before the measured one. */
+type TrendInputs = Map<string, Map<string, RetentionCounts>>;
+
+/** How many months before the measured one the Guests trend shows. */
+export const TREND_MONTHS = 6;
+
+/**
+ * The months before the measured one, on the panel's own lifetime measure.
+ * Two at a time, not six at once: this is the query that has brushed the
+ * statement timeout, and six in parallel on a cold start is how it would.
+ */
+async function loadRetentionTrend(month: { start: string }): Promise<TrendInputs> {
+  const months = monthsBefore(month, TREND_MONTHS);
+  const out: TrendInputs = new Map();
+  for (let i = 0; i < months.length; i += 2) {
+    const pair = months.slice(i, i + 2);
+    const res = await Promise.all(pair.map(m => supabaseAdmin.rpc('guest_retention', {
+      p_start: m.start, p_end: m.end, p_lookback: LIFETIME_LOOKBACK_DAYS,
+    })));
+    pair.forEach((m, j) => {
+      const { data, error } = res[j];
+      if (error) throw new Error(`guest_retention ${m.start}: ${error.message}`);
+      out.set(m.start, new Map(((data ?? []) as any[]).map(r => [String(r.venue_id), countsOf(r)] as const)));
+    });
+  }
+  return out;
+}
+
+const ZERO_COUNTS: RetentionCounts = { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
+
+function countsOf(r: any): RetentionCounts {
+  return {
+    booked_guests: Number(r.booked_guests), returning_here: Number(r.returning_here),
+    crossed_from_sister: Number(r.crossed_from_sister), new_to_group: Number(r.new_to_group),
+    walk_in_guests: Number(r.walk_in_guests),
+  };
+}
+
 /**
  * Retention for the last COMPLETE month, keyed by venue slug plus "group",
  * for THIS reader's venues only.
@@ -786,6 +842,7 @@ function assembleRetention(
   venues: Array<{ id: string; name: string; slug: string }>,
   month: { start: string; end: string; label: string },
   inputs: RetentionInputs,
+  trendInputs: TrendInputs | null = null,
 ): Record<string, RetentionBlock> | null {
   const { rows, firsts } = inputs;
   // A venue with no returning guests has no row; zero is its true split.
@@ -794,19 +851,23 @@ function assembleRetention(
   const depths: Array<ReturningDepth | null> = [];
   if (rows.length === 0) return null;
 
+  /** Six months before, then this month: a venue with no row in a month had nobody booked. */
+  const trendFor = (id: string, current: RetentionCounts): TrendPoint[] | null => {
+    if (!trendInputs) return null;
+    const first = firsts.get(id) ?? null;
+    const before = [...trendInputs.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([start, byVenue]) => trendPoint(start, byVenue.get(id) ?? { ...ZERO_COUNTS }, first));
+    return [...before, trendPoint(month.start, current, first)];
+  };
+
   const out: Record<string, RetentionBlock> = {};
   const mine: RetentionCounts[] = [];
   const horizons: HistoryHorizon[] = [];
 
   for (const v of venues) {
     const r = rows.find(x => x.venue_id === v.id);
-    const counts: RetentionCounts = r
-      ? {
-          booked_guests: Number(r.booked_guests), returning_here: Number(r.returning_here),
-          crossed_from_sister: Number(r.crossed_from_sister), new_to_group: Number(r.new_to_group),
-          walk_in_guests: Number(r.walk_in_guests),
-        }
-      : { booked_guests: 0, returning_here: 0, crossed_from_sister: 0, new_to_group: 0, walk_in_guests: 0 };
+    const counts: RetentionCounts = r ? countsOf(r) : { ...ZERO_COUNTS };
     mine.push(counts);
     const shares = retentionShares(counts);
 
@@ -827,6 +888,7 @@ function assembleRetention(
        */
       withheld: horizon.too_thin,
       horizon,
+      trend: trendFor(v.id, counts),
     };
   }
 
@@ -858,6 +920,15 @@ function assembleRetention(
       plain: inPlainWords(counts, shares, month.label, groupHorizon.from),
       withheld: groupHorizon.too_thin,
       horizon: groupHorizon,
+      // Summed month by month, as the group's pie is; a column is withheld when
+      // any venue's is, for the reason the shallowest venue bounds the group.
+      trend: trendInputs
+        ? (out[venues[0].slug].trend ?? []).map((_, i) => {
+            const cols = venues.map(v => out[v.slug].trend![i]);
+            const p = trendPoint(cols[0].start, sumCounts(cols.map(c => c.counts)), groupHorizon.from);
+            return { ...p, withheld: cols.some(c => c.withheld) };
+          })
+        : null,
     };
   }
 

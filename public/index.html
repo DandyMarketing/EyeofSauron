@@ -431,6 +431,12 @@
      denominator is read backwards: repeat share FALLS when a venue wins a lot
      of new guests. */
   .pie-row { display: flex; gap: 14px; align-items: center; padding: 4px 14px 10px; flex-wrap: wrap; }
+  .guest-trend { padding: 10px 14px 4px; border-top: 1px solid var(--border); }
+  .guest-trend .trend-head { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+  .guest-trend svg { display: block; width: 100%; max-width: 480px; height: auto; }
+  /* The "been here before" teal, lifted in the dark so its figures stay readable. */
+  .guest-trend .teal { color: #2a8780; fill: #2a8780; }
+  :root[data-theme="dark"] .guest-trend .teal { color: #5bbdb3; fill: #5bbdb3; }
   .pie { width: 104px; height: 104px; flex-shrink: 0; }
   .pie-key { flex: 1; min-width: 160px; font-size: 14px; }
   .pie-total { font-size: 21px; font-weight: 600; margin-bottom: 6px; }
@@ -1750,12 +1756,70 @@ function retentionPanel(payload, v) {
       '</div>' +
     '</div>' +
     '<table><tbody><tr><td>Walk-ins</td><td>' + num(r.counts.walk_in_guests) + '</td></tr></tbody></table>' +
+    guestTrend(r.trend) +
     explain(esc(r.plain),
       since + ' Monthly, not weekly \u2014 a week holds too few returning guests for the rate to mean anything.',
+      (r.trend ? 'The columns are the six months before and this one, on the same measure as the pie, so the last column is the pie. Each splits that month\u2019s booked guests the same three ways, with the total above and the share who had been here before beneath. Read the share against the total: it rises when fewer new guests come as well as when more come back. ' : '') +
       (r.depth ? '2nd, 3rd and 4th visit or more split the guests who had been here before by how many times they had come before this month: once makes this month their 2nd visit. A visit is a day, so two bookings on one night count once. ' : '') +
       'Walk-ins carry no booking so they cannot be matched to a guest, and are not part of the mix above. ' +
       'Repeat share falls when a venue wins a lot of new guests, so read it next to the booked-guest count rather than on its own.') +
     '</div>';
+}
+
+/**
+ * The Guests trend (Khai, 5 Nov 2026: "at least show a chart vs the past 6
+ * months before so to see the trend"). One column per month, each a full 100%
+ * split the pie's three ways, so the retention share and the reason it moved
+ * are in one picture.
+ *
+ * "BEEN HERE BEFORE" SITS ON THE BASELINE, so its height reads as the rate
+ * without having to subtract anything. The booked total is above every column
+ * and the share beneath it: a share that rises because new guests fell looks
+ * identical to one that rises because regulars came back, and only the total
+ * tells them apart. A column with too little history behind it is drawn empty
+ * and says so, as the pie is withheld.
+ *
+ * Text at 13px on a viewBox about the width of a phone's panel, so labels stay
+ * at the theme's floor rather than shrinking with the drawing.
+ */
+function guestTrend(trend) {
+  if (!trend || trend.length < 2) return '';
+  const W = 340, top = 22, barH = 96, H = top + barH + 44;
+  const colW = W / trend.length, bw = Math.min(30, colW * 0.62);
+  const parts = [
+    ['returning_here', '#2a8780'],
+    ['crossed_from_sister', '#7a6ff0'],
+    ['new_to_group', 'var(--accent)'],
+  ];
+  let svg = '';
+  trend.forEach((p, i) => {
+    const cx = colW * i + colW / 2, x = cx - bw / 2;
+    const last = i === trend.length - 1;
+    const total = p.counts.booked_guests;
+    const yearMark = (i === 0 || p.month === 'Jan') ? ' ' + String(p.year).slice(2) : '';
+    const label = '<text x="' + cx + '" y="' + (top + barH + 17) + '" text-anchor="middle" font-size="13" fill="var(--text-muted)"' +
+      (last ? ' font-weight="600"' : '') + '>' + esc(p.month) + yearMark + '</text>';
+    if (p.withheld || !total) {
+      svg += '<rect x="' + x + '" y="' + top + '" width="' + bw + '" height="' + barH + '" fill="none" stroke="var(--border)" stroke-dasharray="3 3"></rect>' +
+        '<text x="' + cx + '" y="' + (top - 7) + '" text-anchor="middle" font-size="13" fill="var(--text-muted)">—</text>' + label +
+        '<text x="' + cx + '" y="' + (top + barH + 35) + '" text-anchor="middle" font-size="13" fill="var(--text-muted)">' + (p.withheld ? 'withheld' : 'none') + '</text>';
+      return;
+    }
+    let y = top + barH;
+    for (const [k, fill] of parts) {
+      const h = barH * (p.counts[k] / total);
+      if (h <= 0) continue;
+      y -= h;
+      svg += '<rect x="' + x + '" y="' + y.toFixed(2) + '" width="' + bw + '" height="' + h.toFixed(2) + '" fill="' + fill + '"></rect>';
+    }
+    svg += '<text x="' + cx + '" y="' + (top - 7) + '" text-anchor="middle" font-size="13" fill="var(--text-muted)">' + num(total) + '</text>' + label +
+      '<text x="' + cx + '" y="' + (top + barH + 35) + '" text-anchor="middle" font-size="13" font-weight="600" class="teal">' +
+        (p.shares.repeat_pct === null ? '—' : Math.round(p.shares.repeat_pct) + '%') + '</text>';
+  });
+  return '<div class="guest-trend">' +
+    '<div class="trend-head">Last ' + trend.length + ' months · booked guests above, <span class="teal">been here before</span> below</div>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Guest mix, month by month">' + svg + '</svg>' +
+  '</div>';
 }
 
 /**

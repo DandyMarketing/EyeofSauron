@@ -967,6 +967,18 @@ split only when it does (`depthFor()`), and a missing migration costs the rows,
 never the panel. Sister-venue guests are not split (Khai's choice). The chat's
 `visit_mix` answers the different question of which visit number each VISIT was.
 
+**The Guests panel shows its trend** (Khai, 5 Nov 2026: "at least show a chart
+vs the past 6 months before so to see the trend"): stacked columns for the six
+months before and the measured one, split the pie's three ways, "been here
+before" on the baseline with its share beneath and the booked total above, so a
+share that rose because new guests fell is visible as such. Same LIFETIME
+measure as the pie, so the last column is the pie; accepted for a line here,
+unlike the chat's 365-day charts, only because every venue's records reach back
+to April 2022 and six more months on four years is a sliver. A column with a
+year of history or less is withheld. The six months come from their own cache,
+refreshed daily, two RPCs at a time. In Query, any answer quoting or comparing
+a retention rate must also chart at least the six months before it.
+
 ### Event P&L in Excel: built 12 Oct 2026
 
 The planner's brief downloads as a workbook in the group's own template shape

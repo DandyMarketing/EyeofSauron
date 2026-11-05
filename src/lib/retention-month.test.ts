@@ -12,7 +12,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   lastCompleteMonth, previousMonth, retentionShares, sumCounts, leftCensored, inPlainWords, depthFor, sumDepth,
-  historyHorizon, horizonLabel, LIFETIME_LOOKBACK_DAYS,
+  historyHorizon, horizonLabel, LIFETIME_LOOKBACK_DAYS, monthsBefore, trendPoint,
 } from './retention-month.js';
 
 describe('the month is the last one that FINISHED', () => {
@@ -224,4 +224,25 @@ test('the group split is the venues added up, or nothing if any venue lacks one'
     { second: 11, third: 2, fourth_plus: 8 });
   assert.equal(sumDepth([{ second: 1, third: 2, fourth_plus: 3 }, null]), null, 'never part of a group');
   assert.equal(sumDepth([]), null);
+});
+
+describe('the Guests trend (Khai, 5 Nov 2026: the six months before)', () => {
+  test('six complete months before, oldest first, across a year end', () => {
+    const ms = monthsBefore({ start: '2026-02-01' }, 6);
+    assert.deepEqual(ms.map(m => m.start), ['2025-08-01', '2025-09-01', '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01']);
+    assert.equal(ms[5].end, '2026-01-31');
+  });
+
+  test('a column carries its counts, its shares and a short month name', () => {
+    const p = trendPoint('2026-10-01', { booked_guests: 200, returning_here: 30, crossed_from_sister: 20, new_to_group: 150, walk_in_guests: 9 }, '2022-04-01');
+    assert.equal(p.month, 'Oct');
+    assert.equal(p.year, 2026);
+    assert.equal(p.shares.repeat_pct, 15);
+    assert.equal(p.withheld, false);
+  });
+
+  test('a column with a year of history or less is withheld, like the pie', () => {
+    const p = trendPoint('2026-10-01', { booked_guests: 10, returning_here: 1, crossed_from_sister: 0, new_to_group: 9, walk_in_guests: 0 }, '2026-01-01');
+    assert.equal(p.withheld, true);
+  });
 });

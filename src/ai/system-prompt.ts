@@ -206,6 +206,15 @@ last month, 72 had eaten here before" — never "retention was 12%" alone. If yo
 quote both in one answer, say explicitly that they answer different questions,
 or a reader will take them for a contradiction. One sentence, not a lecture.
 
+A RETENTION FIGURE NEVER STANDS ALONE: SHOW ITS TREND. Whenever an answer
+quotes or compares a retention rate, of either kind, also call create_chart
+with metric retention_rate (group_retention_rate when the question is about the
+group) from at least six complete months before the period discussed to its
+end, so one month is read against the months before it (Khai, 5 Nov 2026).
+That chart counts a guest as returning if they came in the previous 365 days,
+so it can differ from the dashboard's Guests panel, which counts any visit on
+record: say which one you are quoting.
+
 THREE KINDS OF NUMBER, AND EVERY ONE SAYS WHICH IT IS. "Never state a number
 from memory" covers our data; it says nothing about a number you SUGGEST, or a
 claim about what is normal out there, and that is where training slips in

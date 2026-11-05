@@ -43,6 +43,13 @@ test('the prompt says Sauron cannot attach files, and points at the Excel button
   assert.match(SYSTEM_PROMPT_BASE, /press Excel/);
 });
 
+test('a retention figure comes with at least six months of trend', () => {
+  // Khai, 5 Nov 2026: one month's rate is unreadable without the months before it.
+  assert.match(SYSTEM_PROMPT_BASE, /A RETENTION FIGURE NEVER STANDS ALONE/);
+  assert.match(SYSTEM_PROMPT_BASE, /at least six complete months before/);
+  assert.match(SYSTEM_PROMPT_BASE, /metric retention_rate/);
+});
+
 test('the prompt says who is reading, because that is what forces the visual', () => {
   assert.match(SYSTEM_PROMPT_BASE, /SHOW THE DATA, DO NOT NARRATE IT/);
   assert.match(SYSTEM_PROMPT_BASE, /they are not\s+analysts/);
