@@ -30,7 +30,7 @@ import {
   BACKTEST_DAYS, TRAINING_WEEKS,
   type PickupData, type BacktestRecord, type CoverForecast,
 } from './forecast.js';
-import { periodWindow, movement, defaultPeriod, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
+import { periodWindow, movement, defaultPeriod, forecastBack, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
   lastCompleteMonth, retentionShares, sumCounts, inPlainWords, depthFor, sumDepth, type ReturningDepth,
@@ -385,8 +385,10 @@ export async function buildDashboard(
     Promise.all(venues.map(v => getCovers(v.id, window.prior.start, window.prior.end))),
     // A couple of nights back through next week, so last night's actual and
     // tonight's book are on one strip without a second request.
+    // From Monday when that is further back, for the forecast panel's nights
+    // before the strip's (forecastBack); the strip reads only its own eight.
     Promise.all(venues.map(v => getCovers(
-      v.id, addDays(window.today, -SERVICE_BACK), addDays(window.today, SERVICE_FORWARD),
+      v.id, addDays(window.today, -forecastBack(window.today)), addDays(window.today, SERVICE_FORWARD),
     ))),
     /**
      * TODAY AT RESERVATION GRAIN, which the daily roll-up above cannot give.
@@ -584,7 +586,19 @@ export async function buildDashboard(
     holidaysP,
   ]);
   const holidays = new Map<string, string>((hols ?? []).map((h: any) => [String(h.holiday_date), String(h.name)]));
-  const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays) : null;
+  /**
+   * The week's nights before the strip's, for the forecast panel alone: what
+   * came in, by the strip's own rule for a night gone (completed covers), so a
+   * Monday listed here reads as it did on the strip two days ago.
+   */
+  const earlier = venues.map((v, i) => {
+    const shut = new Set(closedWeekdays[i]);
+    return Array.from({ length: forecastBack(window.today) - SERVICE_BACK }, (_, d) => {
+      const date = addDays(window.today, d - forecastBack(window.today));
+      return { date, booked: 0, closed: shut.has(weekdayOf(date)), actual: coversService[i].get(date)?.covers ?? 0 };
+    });
+  });
+  const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays, earlier) : null;
   const retention = retentionInputs ? assembleRetention(venues, month, retentionInputs, trendInputs) : null;
 
   timings.total = { ms: since() };
@@ -680,6 +694,8 @@ function assembleForecast(
   today: string,
   inputs: ForecastInputs,
   holidays: Map<string, string>,
+  /** Per venue, this week's nights before the strip's, oldest first. */
+  earlier: Array<Array<{ date: string; booked: number; closed: boolean; actual: number }>> = venues.map(() => []),
 ): Record<string, CoverForecast> {
   const { data, records } = inputs;
   const leads = FORECAST_LEADS;
@@ -700,9 +716,9 @@ function assembleForecast(
      * night and today carry the strip's own number as what came in, so the two
      * panels can never disagree about a night.
      */
-    const days = out[i].service.map(d => d.basis === 'book'
+    const days = [...earlier[i], ...out[i].service.map(d => d.basis === 'book'
       ? { date: d.date, booked: d.covers, closed: d.closed }
-      : { date: d.date, booked: 0, closed: d.closed, actual: d.covers });
+      : { date: d.date, booked: 0, closed: d.closed, actual: d.covers })];
     const f = venueForecast(data, v.id, today, days, leads, holidays, records.get(v.id) ?? []);
     result[v.slug] = f;
     perVenue.push(f);

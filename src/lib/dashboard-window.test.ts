@@ -12,7 +12,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dashboardWindow, daysSinceMonday, movement, sgtToday,
-  periodWindow, defaultPeriod, isPeriodKind, weekendDays,
+  periodWindow, defaultPeriod, isPeriodKind, weekendDays, forecastBack,
 } from './dashboard-window.js';
 
 describe('the window is like-for-like by weekday', () => {
@@ -329,4 +329,14 @@ describe('the window is built from the last day with data, not the calendar', ()
     assert.ok(w.warnings.some(x => /incomplete by 2 day\(s\)/.test(x)), w.warnings.join(' | '));
     assert.ok(w.warnings.some(x => /rather than as a quiet week/.test(x)));
   });
+});
+
+test('the forecast panel keeps every night of this week so far, and never fewer than two', () => {
+  // Khai, 8 Nov 2026: on a Wednesday, Monday and Tuesday stay visible.
+  // 2026-11-02 is a Monday.
+  assert.equal(forecastBack('2026-11-02'), 2);  // Monday: Saturday and Sunday, as the strip
+  assert.equal(forecastBack('2026-11-03'), 2);  // Tuesday: Sunday and Monday
+  assert.equal(forecastBack('2026-11-04'), 2);  // Wednesday: Monday and Tuesday
+  assert.equal(forecastBack('2026-11-05'), 3);  // Thursday: Monday to Wednesday
+  assert.equal(forecastBack('2026-11-08'), 6);  // Sunday: the whole week
 });

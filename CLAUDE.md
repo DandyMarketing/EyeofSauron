@@ -835,9 +835,12 @@ Seasonal lift is reported, not applied, until a backtest shows applying it helps
 
 **Every night on the strip, dated, and the past measured** (Khai, 13 Oct
 2026: "put the date and keep all days there and measure the current against
-the forecast"). The panel shows the strip's own eight nights -- two back,
-today, five ahead -- one ROW per night (day, date, bar, numbers), because
-eight columns on a phone shrank every label below readable. Today and past
+the forecast"). The panel shows every night of THIS WEEK so far (never fewer
+than the strip's two back), today, and five ahead (Khai, 8 Nov 2026: "on
+wednesday you will still show mon and tues"; `forecastBack()`), so a Sunday
+lists twelve rows; the service strip itself stays at two back, five ahead.
+One ROW per night (day, date, bar, numbers), because eight columns on a
+phone shrank every label below readable. Today and past
 nights are measured against the forecast made **the day before** (Khai's
 choice: the last number staff and prep were planned on), rebuilt by the
 backtest's own rule from the book as it stood a day earlier at this hour --

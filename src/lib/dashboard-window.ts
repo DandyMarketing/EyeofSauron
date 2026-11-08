@@ -357,3 +357,15 @@ export function periodWindow(
     warnings,
   };
 }
+
+/**
+ * How many nights back the FORECAST panel reaches: every night of this week so
+ * far, Monday first, and never fewer than the service strip's two (Khai, 8 Nov
+ * 2026: "on wednesday you will still show mon and tues past covers that way
+ * there will always be days visible"). The strip itself stays at two, so it
+ * does not grow sideways on a phone; on a Sunday the forecast lists twelve rows.
+ */
+export const STRIP_BACK = 2;
+export function forecastBack(today: string): number {
+  return Math.max(STRIP_BACK, daysSinceMonday(today));
+}
