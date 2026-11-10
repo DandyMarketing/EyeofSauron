@@ -16,6 +16,7 @@ import { streamSSE } from 'hono/streaming';
 import { injectConfig } from './lib/inject-config.js';
 import { parseFilename, parseProductMix, parseOperationsReport, parseHourlySalesXlsx, parseHourlySalesCsv, reconcile, paymentsReconcile, classSplitReconciles } from './parsers/revel/index.js';
 import { resolveVenueId, resolveVenueSlug, ingestProductMix, ingestOperations, ingestHourlySales, getClosedWeekdays } from './ingest/revel.js';
+import { closedDatesFor } from './lib/venue-closures-read.js';
 import { classifyIngestFailure, isEmptyReportError } from './ingest/closures.js';
 import { warnSchema } from './lib/schema-check.js';
 import { humanApiError } from './lib/api-fatal.js';
@@ -281,8 +282,11 @@ async function ingestFailureStatus<T extends string>(
   try {
     const meta = parseFilename(filename);
     const venueId = await resolveVenueId(meta.venueKey);
-    const closed = await getClosedWeekdays(venueId);
-    return classifyIngestFailure(message, closed, meta.businessDate, fallback);
+    const [closed, oneOff] = await Promise.all([
+      getClosedWeekdays(venueId),
+      closedDatesFor(venueId, meta.businessDate, meta.businessDate),
+    ]);
+    return classifyIngestFailure(message, closed, meta.businessDate, fallback, oneOff);
   } catch {
     return fallback;
   }
@@ -415,7 +419,7 @@ app.post('/ingest/revel', async (c) => {
         results.push({ filename: pm.filename, status: 'ingested', detail: `${count} rows` });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status: 'success', row_count: count });
       } catch (e: any) {
-        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error');
+        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error', await closedDatesFor(venueId, businessDate, businessDate));
         results.push({ filename: pm.filename, status: status === 'closed' ? 'closed' : 'error', detail: e.message });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: pm.filename, report_type: 'product_mix', status, error_message: e.message });
       }
@@ -468,7 +472,7 @@ app.post('/ingest/revel', async (c) => {
         results.push({ filename: ops.filename, status: 'ingested', detail });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status: 'success', row_count: opsRows });
       } catch (e: any) {
-        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error');
+        const status = classifyIngestFailure(e.message, await getClosedWeekdays(venueId), businessDate, 'ingestion_error', await closedDatesFor(venueId, businessDate, businessDate));
         results.push({ filename: ops.filename, status: status === 'closed' ? 'closed' : 'error', detail: e.message });
         await logIngestion({ venue_id: venueId, venue_key: venueKey, business_date: businessDate, filename: ops.filename, report_type: 'operations', status, error_message: e.message });
       }
@@ -2720,6 +2724,53 @@ app.get('/admin/api/venues', async (c) => {
   // row-cap: one row per venue.
   const { data } = await supabaseAdmin.from('venues').select('id, name, slug');
   return c.json({ venues: data ?? [] });
+});
+
+/**
+ * One-off closures (migration 067, Khai, 10 Nov 2026): days a venue was or will
+ * be shut beyond its regular closed weekday, with the reason. Owners only, like
+ * the rest of Settings. A date already listed for that venue is updated rather
+ * than duplicated. Read by the tools, the dashboard, the daily report and the
+ * ingest watchdog -- see src/lib/venue-closures.ts.
+ */
+app.get('/admin/api/closures', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const { data, error } = await selectAll(() => supabaseAdmin
+    .from('venue_closures')
+    .select('id, venue_id, closed_on, reason, created_at')
+    .order('closed_on', { ascending: false }));
+  if (error) {
+    return c.json({ error: /venue_closures/.test(error.message)
+      ? 'Closures are not set up yet: run migration 067_venue_closures.sql in Supabase.'
+      : error.message }, 500);
+  }
+  return c.json({ closures: data });
+});
+
+app.post('/admin/api/closures', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const b = await c.req.json<any>().catch(() => ({}));
+  const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
+  if (typeof b.venue_id !== 'string' || !b.venue_id) return c.json({ error: 'Choose a venue.' }, 400);
+  if (typeof b.closed_on !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.closed_on)) return c.json({ error: 'Choose a date.' }, 400);
+  if (!reason) return c.json({ error: 'Say why it was closed, e.g. "Deepavali".' }, 400);
+  if (reason.length > 200) return c.json({ error: 'Keep the reason under 200 characters.' }, 400);
+  const { error } = await supabaseAdmin.from('venue_closures').upsert(
+    { venue_id: b.venue_id, closed_on: b.closed_on, reason, created_by: user.id },
+    { onConflict: 'venue_id,closed_on' },
+  );
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
+});
+
+app.delete('/admin/api/closures/:id', async (c) => {
+  const user = await requireOwner(c);
+  if (!user) return c.json({ error: 'Admin access required' }, 403);
+  const { error } = await supabaseAdmin.from('venue_closures').delete().eq('id', c.req.param('id'));
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
 });
 
 /**

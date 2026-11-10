@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase.js';
 import { selectAll } from '../lib/paged.js';
 import { explainIngestError, describeStatus } from '../lib/explain-error.js';
 import { isExpectedClosure } from './closures.js';
+import { readClosures } from '../lib/venue-closures-read.js';
 import { resolutionFor } from './resolved.js';
 
 /** How far back a failure keeps showing in the watchdog before it is history. */
@@ -69,12 +70,14 @@ export async function checkDataGaps(lookbackDays: number = 3): Promise<{
   }
 
   const missing: Array<{ venue: string; slug: string; date: string; missing: string[] }> = [];
+  // One-off closures in the window (migration 067): a listed day is shut, not missing.
+  const oneOff = await readClosures(venues.map(v => v.id), dates[dates.length - 1], dates[0]);
 
   for (const venue of venues) {
     for (const date of dates) {
       // A venue that is shut has no data to be missing. Reporting it as a gap
       // every week is the same noise as logging the empty file as an error.
-      if (isExpectedClosure(venue.closed_weekdays as number[] | null, date)) continue;
+      if (isExpectedClosure(venue.closed_weekdays as number[] | null, date, oneOff.get(venue.id))) continue;
 
       const gaps: string[] = [];
 

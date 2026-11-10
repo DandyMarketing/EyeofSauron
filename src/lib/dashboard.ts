@@ -46,7 +46,8 @@ import { fetchAccountMap, resolveAccount } from './account-map.js';
 export type { VenueWeek };
 export { rollUp };
 import { getClosedWeekdays } from '../ingest/revel.js';
-import { weekdayOf } from '../ingest/closures.js';
+import { readClosures } from './venue-closures-read.js';
+import { isShutOn } from './venue-closures.js';
 
 
 /**
@@ -330,6 +331,9 @@ export async function buildDashboard(
     .gt('holiday_date', day).lte('holiday_date', addDays(day, SERVICE_FORWARD));
   const momentsP = Promise.all(venues.map(v => getDayMoments(v.id, day)));
   const closedP = Promise.all(venues.map(v => getClosedWeekdays(v.id)));
+  // One-off closures (migration 067) across everything the strip and the
+  // forecast panel can show: from this week's Monday to five nights ahead.
+  const oneOffP = readClosures(ids, addDays(day, -forecastBack(day)), addDays(day, SERVICE_FORWARD));
 
   /**
    * THE LAST DAY WE ACTUALLY HAVE, before any window is built.
@@ -378,7 +382,7 @@ export async function buildDashboard(
    * awaiting them in sequence would make the slowest page in the app out of the
    * one people open most.
    */
-  const [currentRows, priorRows, coversCurrent, coversPrior, coversService, todayMoments, closedWeekdays] = await Promise.all([
+  const [currentRows, priorRows, coversCurrent, coversPrior, coversService, todayMoments, closedWeekdays, oneOff] = await Promise.all([
     readOperations(ids, window.current.start, window.current.end),
     readOperations(ids, window.prior.start, window.prior.end),
     Promise.all(venues.map(v => getCovers(v.id, window.current.start, window.current.end))),
@@ -400,6 +404,7 @@ export async function buildDashboard(
      */
     momentsP,
     closedP,
+    oneOffP,
   ]);
   timings.core = { ms: since() };
 
@@ -488,14 +493,13 @@ export async function buildDashboard(
      * upcoming date -- which is what the live panel did. `serviceDays` picks
      * the right one of the two per day, and labels which it used.
      */
-    const shut = new Set(closedWeekdays[i]);
     const service = serviceDays(
       Array.from({ length: SERVICE_BACK + 1 + SERVICE_FORWARD }, (_, d) => {
         const date = addDays(window.today, d - SERVICE_BACK);
         const c = coversService[i].get(date);
         return {
           date,
-          closed: shut.has(weekdayOf(date)),
+          closed: isShutOn(date, closedWeekdays[i], oneOff.get(v.id)),
           completed: c?.covers ?? 0,
           expected: c?.expected_covers ?? 0,
           moments: date === window.today ? todayMoments[i].moments : undefined,
@@ -592,10 +596,9 @@ export async function buildDashboard(
    * Monday listed here reads as it did on the strip two days ago.
    */
   const earlier = venues.map((v, i) => {
-    const shut = new Set(closedWeekdays[i]);
     return Array.from({ length: forecastBack(window.today) - SERVICE_BACK }, (_, d) => {
       const date = addDays(window.today, d - forecastBack(window.today));
-      return { date, booked: 0, closed: shut.has(weekdayOf(date)), actual: coversService[i].get(date)?.covers ?? 0 };
+      return { date, booked: 0, closed: isShutOn(date, closedWeekdays[i], oneOff.get(v.id)), actual: coversService[i].get(date)?.covers ?? 0 };
     });
   });
   const forecast = forecastInputs ? assembleForecast(venues, out, day, forecastInputs, holidays, earlier) : null;

@@ -1029,6 +1029,20 @@ is worse than a wrong figure: a figure can be checked against the dashboard,
 an action that never happened sends somebody looking for it. The prompt rule
 is a hint; the Report an issue button is what caught it.
 
+### 3.11 "Not comparable", when the venue was simply shut
+**Symptom.** 10 Nov 2026: a Diwali-week comparison across the venues called
+Fat Prince "not comparable" against last year, with no reason anyone could act on.
+**Root cause.** Fat Prince had no Revel sales and no completed bookings on
+Deepavali itself, Mon 20 Oct 2025. Monday is not in its `closed_weekdays`, and
+nothing recorded a one-off closure, so the empty day was indistinguishable from
+a missing file -- the comparison correctly refused it and could not say why.
+**Fix.** `venue_closures` (migration 067), listed by an owner in Settings ->
+Closures, read through one rule (`isShutOn()`) by the ingest, the watchdog, the
+daily report, the dashboard and the tools, which now return each closure with
+its reason so the answer can say "closed for Deepavali".
+**Recurs?** **Every customer.** Holiday closures and buyouts happen everywhere;
+a regular weekly pattern is never the whole calendar.
+
 ---
 
 ## 4. Security

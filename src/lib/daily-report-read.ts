@@ -8,6 +8,7 @@ import { supabaseAdmin } from '../auth/session.js';
 import { getCovers } from './covers.js';
 import { sgtToday } from './dashboard-window.js';
 import { getClosedWeekdays } from '../ingest/revel.js';
+import { closedDatesFor } from './venue-closures-read.js';
 import { selectAll } from './paged.js';
 import { addDays, composeVenueReport, type SalesDay, type VenueDailyReport } from './daily-report.js';
 
@@ -29,7 +30,7 @@ export async function buildDailyReport(
   const to = today;
 
   return Promise.all(venues.map(async v => {
-    const [sales, covers, closedWeekdays] = await Promise.all([
+    const [sales, covers, closedWeekdays, closedDates] = await Promise.all([
       selectAll(() => supabaseAdmin
         .from('daily_operations')
         .select('business_date, gross_sales, net_sales, item_discounts, order_discounts, total_transactions')
@@ -38,6 +39,7 @@ export async function buildDailyReport(
         .lte('business_date', to)),
       getCovers(v.id, from, to),
       getClosedWeekdays(v.id),
+      closedDatesFor(v.id, from, to),
     ]);
     // A failed read must not become a quiet day in a message nobody can query.
     if (sales.error) throw new Error(`daily report: ${v.name}: ${sales.error.message}`);
@@ -48,6 +50,6 @@ export async function buildDailyReport(
     let last: string | null = null;
     for (const r of rows) if (r.business_date < today && (!last || r.business_date > last)) last = r.business_date;
 
-    return composeVenueReport({ venue: v, today, closedWeekdays, rows, covers, lastDataDate: last });
+    return composeVenueReport({ venue: v, today, closedWeekdays, closedDates, rows, covers, lastDataDate: last });
   }));
 }

@@ -26,10 +26,10 @@
  * calendar pass for trade. A monthly budget will sit beside it when one exists.
  */
 
+import { isShutOn } from './venue-closures.js';
 import { salesFiguresOf } from './sales.js';
 import type { CoversSummary } from './covers.js';
 import { dashboardWindow, movement, periodWindow, weekendDays } from './dashboard-window.js';
-import { weekdayOf } from '../ingest/closures.js';
 
 export interface Span { start: string; end: string }
 export interface Comparison { current: Span; prior: Span; days: number }
@@ -79,15 +79,17 @@ export type DayStatus = 'ok' | 'closed' | 'late' | 'no_data';
  */
 export function reportDay(
   yesterday: string, lastDataDate: string | null, closedWeekdays: number[],
+  /** One-off closures (migration 067): a listed day is shut, not a late file. */
+  closedDates?: ReadonlySet<string> | ReadonlyMap<string, string>,
 ): { day: string | null; status: DayStatus } {
   if (!lastDataDate) return { day: null, status: 'no_data' };
   if (lastDataDate >= yesterday) return { day: yesterday, status: 'ok' };
 
-  const shut = new Set(closedWeekdays);
+  const shut = (date: string) => isShutOn(date, closedWeekdays, closedDates);
   let d = yesterday;
-  for (let i = 0; i < 7 && d > lastDataDate && shut.has(weekdayOf(d)); i++) d = addDays(d, -1);
+  for (let i = 0; i < 7 && d > lastDataDate && shut(d); i++) d = addDays(d, -1);
   if (lastDataDate >= d) {
-    return { day: yesterday, status: shut.has(weekdayOf(yesterday)) ? 'closed' : 'ok' };
+    return { day: yesterday, status: shut(yesterday) ? 'closed' : 'ok' };
   }
   return { day: lastDataDate, status: 'late' };
 }
@@ -197,15 +199,17 @@ export function composeVenueReport(input: {
   venue: { id: string; name: string; slug: string };
   today: string;
   closedWeekdays: number[];
+  /** One-off closures (migration 067), date -> reason. */
+  closedDates?: ReadonlyMap<string, string>;
   rows: SalesDay[];
   covers: Map<string, CoversSummary>;
   lastDataDate: string | null;
 }): VenueDailyReport {
-  const { venue, today, closedWeekdays, rows, covers, lastDataDate } = input;
-  const { day, status } = reportDay(addDays(today, -1), lastDataDate, closedWeekdays);
+  const { venue, today, closedWeekdays, closedDates, rows, covers, lastDataDate } = input;
+  const { day, status } = reportDay(addDays(today, -1), lastDataDate, closedWeekdays, closedDates);
   const w = day ? reportWindows(day) : null;
 
-  const closedTonight = closedWeekdays.includes(weekdayOf(today));
+  const closedTonight = isShutOn(today, closedWeekdays, closedDates);
   const sevenRoomsSeen = covers.size > 0;
   const tonight = {
     closed: closedTonight,

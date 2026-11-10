@@ -36,7 +36,10 @@ export function weekdayOf(businessDate: string): number {
 export function isExpectedClosure(
   closedWeekdays: number[] | null | undefined,
   businessDate: string,
+  /** One-off closures (migration 067): a listed date is shut whatever its weekday. */
+  closedDates?: ReadonlySet<string> | ReadonlyMap<string, string> | null,
 ): boolean {
+  if (closedDates?.has(businessDate)) return true;
   if (!closedWeekdays || closedWeekdays.length === 0) return false;
   return closedWeekdays.includes(weekdayOf(businessDate));
 }
@@ -70,8 +73,9 @@ export function classifyIngestFailure<T extends string>(
   closedWeekdays: number[] | null | undefined,
   businessDate: string,
   fallbackStatus: T,
+  closedDates?: ReadonlySet<string> | ReadonlyMap<string, string> | null,
 ): T | 'closed' {
-  if (isEmptyReportError(message) && isExpectedClosure(closedWeekdays, businessDate)) {
+  if (isEmptyReportError(message) && isExpectedClosure(closedWeekdays, businessDate, closedDates)) {
     return 'closed';
   }
   return fallbackStatus;

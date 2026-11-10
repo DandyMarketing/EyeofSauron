@@ -23,6 +23,21 @@ import { normaliseChannel, channelAlerts, describeAlert, lastCompleteMonth, BASE
 import { rankComparable, previousOccurrence, comparabilityCaveats, type EventLike, type Criteria } from '../lib/events.js';
 import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } from '../lib/labour.js';
 import { chooseGrouping, bucketDays, DAILY_HARD_MAX, type DayRow } from '../lib/ops-buckets.js';
+import { readClosures } from '../lib/venue-closures-read.js';
+import { closuresIn, CLOSURE_NOTE } from '../lib/venue-closures.js';
+
+/**
+ * One-off closures in a range, for a tool's reply (migration 067). A day the
+ * team recorded as shut -- Deepavali, a private event -- has no row at all, and
+ * without this the model can only call the gap "not comparable".
+ */
+async function closuresFor(venueIds: string[], from: string, to: string) {
+  const index = await readClosures(venueIds, from, to);
+  return (id: string) => {
+    const list = closuresIn(index.get(id), from, to);
+    return list.length > 0 ? list : undefined;
+  };
+}
 
 async function getVenueId(slug: string): Promise<string> {
   const { data, error } = await supabase
@@ -1388,7 +1403,12 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   if ('single' in dateFilter) {
     const { data, error } = await query().maybeSingle();
     if (error) return JSON.stringify({ error: error.message });
-    if (!data) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No operations data found for this venue and date.' });
+    if (!data) {
+      const shut = (await closuresFor([venueId], dateFilter.single, dateFilter.single))(venueId);
+      return JSON.stringify(shut
+        ? { venue: input.venue_slug, date: dateLabel(dateFilter), closed: true, closed_reason: shut[0].reason, closure_note: CLOSURE_NOTE }
+        : { venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No operations data found for this venue and date.' });
+    }
 
     // Covers come from SevenRooms, revenue from Revel. See src/lib/covers.ts.
     const coversMap = await getCovers(venueId, dateFilter.single, dateFilter.single);
@@ -1449,7 +1469,11 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
   if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date_range: dateLabel(dateFilter), message: 'No operations data found for this venue and date range.' });
 
   // Covers come from SevenRooms, revenue from Revel. See src/lib/covers.ts.
-  const coversMap = await getCovers(venueId, dateFilter.start, dateFilter.end);
+  const [coversMap, closuresOf] = await Promise.all([
+    getCovers(venueId, dateFilter.start, dateFilter.end),
+    closuresFor([venueId], dateFilter.start, dateFilter.end),
+  ]);
+  const oneOffClosures = closuresOf(venueId);
 
   const totals = {
     days: data.length,
@@ -1577,6 +1601,10 @@ async function queryDailyOperations(input: Record<string, any>): Promise<string>
     closed_days_note: closedDays.length > 0
       ? 'These dates had zero sales and zero transactions — the venue was closed. avg_daily_gross already excludes them. Describe them as closures, never as weak trading days.'
       : undefined,
+    // Days the team recorded as shut. They have no row at all, so they are in
+    // neither the totals nor trading_days.
+    one_off_closures: oneOffClosures,
+    one_off_closures_note: oneOffClosures ? CLOSURE_NOTE : undefined,
     totals: {
       ...totals,
       // The split as a share, computed here rather than left to the model:
@@ -1636,6 +1664,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     input,
   );
 
+  const range = 'single' in dateFilter ? { start: dateFilter.single, end: dateFilter.single } : dateFilter;
+  const closuresOf = await closuresFor(targetVenues.map(v => v.id), range.start, range.end);
   const results = [];
   for (const venue of targetVenues) {
     const { data: rows } = await selectAll(() => applyDateFilter(supabase
@@ -1702,6 +1732,8 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
       venue: venue.name,
       slug: venue.slug,
       days: rows.length,
+      // Days the team recorded as shut: not in `days`, and not a data gap.
+      one_off_closures: closuresOf(venue.id),
       gross_sales: businessGross,
       food_bev_sales: grossSales,
       net_sales: netSales,
@@ -1730,6 +1762,7 @@ async function compareVenues(input: Record<string, any>): Promise<string> {
     covers_source: 'sevenrooms',
     revenue_source: 'revel',
     venues: results,
+    one_off_closures_note: results.some(r => r.one_off_closures) ? CLOSURE_NOTE : undefined,
     figure_definitions: FIGURE_DEFINITIONS,
   });
 }
@@ -2914,9 +2947,11 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
    * all along. See `compareTill` for the full account.
    */
   const venueIds = venues.map(v => v.id);
-  const [currentTill, priorTill] = await Promise.all([
+  const [currentTill, priorTill, closedNow, closedThen] = await Promise.all([
     tillTotalsFor(venueIds, input.start_date, input.end_date),
     tillTotalsFor(venueIds, prior.start, prior.end),
+    closuresFor(venueIds, input.start_date, input.end_date),
+    closuresFor(venueIds, prior.start, prior.end),
   ]);
   const tillError =
     'error' in currentTill ? currentTill.error : 'error' in priorTill ? priorTill.error : null;
@@ -2926,13 +2961,20 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
     const current = mine.find(r => r.period === 'current');
     const before = mine.find(r => r.period === 'prior');
 
+    const closures = (closedNow(v.id) || closedThen(v.id))
+      ? { period: closedNow(v.id), compared_with: closedThen(v.id), note: CLOSURE_NOTE }
+      : undefined;
+
     if (!current || !before) {
       // A venue with no rows in one of the periods is a data gap, and saying so
-      // beats reporting a hundred-percent fall.
+      // beats reporting a hundred-percent fall -- unless the team recorded it shut.
       return {
         venue: v.name,
         slug: v.slug,
-        error: 'No data for one of the two periods. Check the ingest before reading this as a change.',
+        error: closures
+          ? 'No trading in one of the two periods: the venue was closed (see closures).'
+          : 'No data for one of the two periods. Check the ingest before reading this as a change.',
+        closures,
       };
     }
 
@@ -2961,6 +3003,7 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
       slug: v.slug,
       ...decomposition,
       till,
+      closures,
     };
   });
 

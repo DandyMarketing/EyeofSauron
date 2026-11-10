@@ -946,6 +946,18 @@ report steps over `closed_weekdays` before judging a file late -- otherwise
 every Monday would report Firangi's Sunday as missing. A genuinely late file
 cuts the windows to the last day there is, and the message says so.
 
+**One-off closures are listed too** (migration 067 `venue_closures`, Khai, 10
+Nov 2026). Fat Prince had no sales and no bookings on Deepavali, Mon 20 Oct
+2025, which is not its closed weekday, so a Diwali comparison could only call
+it "not comparable". An owner now lists such days with a reason in Settings ->
+Closures, and ONE rule, `isShutOn()` (`src/lib/venue-closures.ts`), reads
+weekday and listed date together for the ingest (an empty file is a closure),
+the missing-file watchdog, the daily report (not "late"; today "closed"), the
+dashboard strip and forecast, and the tools (`query_daily_operations`,
+`compare_venues`, `explain_revenue_change` return each closure and its reason).
+It never hides data: a listed day that traded still counts. Fail-soft before
+the migration runs.
+
 **No personal or payroll data over WhatsApp either.** Messages to a business
 pass through Meta's servers, so they are not end-to-end encrypted to us -- the
 same reason as Telegram.

@@ -1282,6 +1282,7 @@ const TABS = [
   { id: 'connections', label: 'Connections', load: loadConnections },
   { id: 'accounting',  label: 'Accounting',  load: loadAccounting },
   { id: 'knowledge',   label: 'Knowledge',   load: loadKnowledge },
+  { id: 'closures',    label: 'Closures',    load: loadClosures },
   { id: 'issues',      label: 'Issues',      load: loadReports },
 ];
 
@@ -1716,6 +1717,73 @@ async function toggleReport(row) {
     try { await navigator.clipboard.writeText(data.markdown); toast('success', 'Copied. Paste it into your chat with Claude.'); }
     catch { toast('error', 'Could not copy. Your browser blocked the clipboard.'); }
   });
+}
+
+/**
+ * Closures (migration 067, Khai, 10 Nov 2026): days a venue was or will be shut
+ * beyond its regular closed weekday -- a public holiday, a private event, a
+ * renovation -- and why. Sauron then says "Fat Prince was closed for Deepavali"
+ * where it could only say "not comparable", the dashboard shows the night as
+ * closed, and the daily report and the ingest watchdog stop calling the empty
+ * day a missing file. It never hides data: a listed day that traded still counts.
+ */
+async function loadClosures(panel) {
+  const [data] = await Promise.all([api('GET', '/admin/api/closures'), loadVenues()]);
+  panel.innerHTML = '';
+  const section = el('div', 'section');
+  const venueOpts = venues.map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
+  const nameOf = id => (venues.find(v => v.id === id) || {}).name || 'Unknown venue';
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const when = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-SG',
+    { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+  let html = '<h2>Closures</h2>' +
+    '<p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Days a venue was shut, or will be, that are not its usual closed day: a public holiday, a private event, a renovation. ' +
+    'Sauron then explains the day instead of calling a comparison "not comparable", the dashboard shows the night as closed, and the daily report stops treating it as a missing file. ' +
+    'If a listed day did trade, its sales still count.</p>' +
+    '<div class="invite-form">' +
+      '<select id="closure-venue" style="min-width:140px">' + venueOpts + '</select>' +
+      '<input type="date" id="closure-date">' +
+      '<input type="text" id="closure-reason" maxlength="200" placeholder="Why, e.g. Deepavali, private event, renovation" style="flex:2;min-width:220px">' +
+      '<button class="btn" id="closure-add">Add</button>' +
+    '</div><div id="closure-msg" style="font-size:14px;margin-top:8px"></div>';
+
+  if (data.error) {
+    html += '<div class="empty" style="margin-top:12px">' + esc(data.error) + '</div>';
+  } else {
+    const list = data.closures || [];
+    const row = c => '<div class="file-item" style="margin-bottom:6px">' +
+      '<span style="color:var(--accent);font-size:13px;flex-shrink:0;min-width:110px">' + esc(nameOf(c.venue_id)) + '</span>' +
+      '<span style="flex-shrink:0;min-width:130px">' + esc(when(c.closed_on)) + '</span>' +
+      '<span class="fname">' + esc(c.reason) + '</span>' +
+      '<button class="fremove" data-closure="' + c.id + '" title="Remove">&times;</button></div>';
+    const ahead = list.filter(c => c.closed_on >= today).reverse();
+    const past = list.filter(c => c.closed_on < today);
+    html += '<h3 style="margin-top:20px">Coming up</h3>' +
+      (ahead.length ? ahead.map(row).join('') : '<div style="color:var(--text-muted);font-size:14px">None listed.</div>') +
+      '<h3 style="margin-top:20px">Past</h3>' +
+      (past.length ? past.map(row).join('') : '<div style="color:var(--text-muted);font-size:14px">None listed.</div>');
+  }
+  section.innerHTML = html;
+  panel.appendChild(section);
+
+  const msg = section.querySelector('#closure-msg');
+  section.querySelector('#closure-add').addEventListener('click', async () => {
+    const body = {
+      venue_id: section.querySelector('#closure-venue').value,
+      closed_on: section.querySelector('#closure-date').value,
+      reason: section.querySelector('#closure-reason').value.trim(),
+    };
+    const r = await api('POST', '/admin/api/closures', body);
+    if (r.error) { msg.textContent = r.error; msg.style.color = 'var(--danger, #b42318)'; return; }
+    loadClosures(panel);
+  });
+  section.querySelectorAll('[data-closure]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Remove this closure?')) return;
+    const r = await api('DELETE', '/admin/api/closures/' + b.dataset.closure);
+    if (r.error) { msg.textContent = r.error; return; }
+    loadClosures(panel);
+  }));
 }
 
 async function loadKnowledge(panel) {
