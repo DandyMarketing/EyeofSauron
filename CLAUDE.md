@@ -1017,6 +1017,18 @@ be measured is blank and "to fill", never zero. Every line carries a BASIS --
 our data, source, proposal, to fill -- the rule the planner follows. Each
 formula is written with its result so a phone's preview shows the figures.
 
+**A custom date range, never the default view** (Khai, 13 Nov 2026). A
+**Custom** chip after the four periods opens a From/To picker (up to 366 days).
+It is compared by WEEKDAY, Khai's choice of two, switchable beside the dates:
+the same length just before, moved back by whole weeks, or the same dates a
+year earlier, 364 days back (`customWindow()` in `dashboard-window.ts`;
+`period=custom&from=&to=&compare=`, validated by `customRangeError()`). It
+moves exactly what the chips move: headline figures, venue table, chart,
+period costs and Export. The strip, forecast, Weekly Recommends, retention and
+the monthly P&L stay put. Never stored: a reload opens on the usual period.
+Over 62 days the chart draws Monday-Sunday WEEKS, with part-weeks faded,
+explained, and never called the biggest.
+
 **The dashboard exports too** (12 Oct 2026, "make it choosable"): an Export
 button by the period chips opens a choice of period and format. Excel is
 `GET /api/dashboard/export` -- built from the same payload `/api/dashboard`

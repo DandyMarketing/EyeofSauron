@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import {
   dashboardWindow, daysSinceMonday, movement, sgtToday,
   periodWindow, defaultPeriod, isPeriodKind, weekendDays, forecastBack,
+  customWindow, customRangeError,
 } from './dashboard-window.js';
 
 describe('the window is like-for-like by weekday', () => {
@@ -339,4 +340,40 @@ test('the forecast panel keeps every night of this week so far, and never fewer 
   assert.equal(forecastBack('2026-11-04'), 2);  // Wednesday: Monday and Tuesday
   assert.equal(forecastBack('2026-11-05'), 3);  // Thursday: Monday to Wednesday
   assert.equal(forecastBack('2026-11-08'), 6);  // Sunday: the whole week
+});
+
+// --- custom ranges (Khai, 13 Nov 2026) ---------------------------------------
+const dsm = daysSinceMonday;
+
+test('a custom range against the previous period moves back by whole weeks, no overlap', () => {
+  // Wed 1 Oct - Fri 10 Oct 2026: ten days, so two weeks back.
+  const w = customWindow({ start: '2026-10-01', end: '2026-10-10', compare: 'previous' }, '2026-11-13');
+  assert.equal(w.kind, 'custom');
+  assert.equal(w.days, 10);
+  assert.deepEqual(w.prior, { start: '2026-09-17', end: '2026-09-26' });
+  assert.equal(dsm(w.prior.start), dsm(w.current.start));
+  assert.ok(w.prior.end < w.current.start);
+});
+
+test('a custom range against last year is 364 days back: same weekdays', () => {
+  const w = customWindow({ start: '2026-11-02', end: '2026-11-08', compare: 'last_year' }, '2026-11-13');
+  assert.deepEqual(w.prior, { start: '2025-11-03', end: '2025-11-09' });
+  assert.equal(dsm(w.prior.start), dsm(w.current.start));
+});
+
+test('a range running past today is cut to today and says so', () => {
+  const w = customWindow({ start: '2026-11-01', end: '2026-11-30', compare: 'previous' }, '2026-11-13', '2026-11-12');
+  assert.equal(w.current.end, '2026-11-13');
+  assert.equal(w.days, 13);
+  assert.ok(w.warnings.some(x => /Cut to 2026-11-13/.test(x)));
+  assert.ok(w.warnings.some(x => /runs to 2026-11-12/.test(x)));
+});
+
+test('bad custom ranges are refused with a reason', () => {
+  assert.match(customRangeError('2026-10-10', '2026-10-01', 'previous', '2026-11-13')!, /after the end/);
+  assert.match(customRangeError('x', '2026-10-01', 'previous', '2026-11-13')!, /start and an end/);
+  assert.match(customRangeError('2026-12-01', '2026-12-05', 'previous', '2026-11-13')!, /future/);
+  assert.match(customRangeError('2024-01-01', '2026-01-01', 'previous', '2026-11-13')!, /366 days or fewer/);
+  assert.match(customRangeError('2026-10-01', '2026-10-05', 'bogus', '2026-11-13')!, /Unknown comparison/);
+  assert.equal(customRangeError('2026-10-01', '2026-10-05', 'last_year', '2026-11-13'), null);
 });

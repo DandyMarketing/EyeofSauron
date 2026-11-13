@@ -8,7 +8,7 @@ import { HourlyCache } from './lib/hourly-cache.js';
 
 const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
 const recommendationsCache = new HourlyCache<any[]>();
-import { isPeriodKind } from './lib/dashboard-window.js';
+import { isPeriodKind, customRangeError, type PeriodKind, type CustomRange, type CustomCompare } from './lib/dashboard-window.js';
 import { buildDailyReport } from './lib/daily-report-read.js';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
@@ -2390,6 +2390,26 @@ async function venuesInScope(user: { isOwner: boolean; venues: Array<{ venue_id:
  * than widened -- "no venues" must never be read as "no restriction", which is
  * BUILD_LOG 4.3 word for word.
  */
+/**
+ * The period a dashboard request asks for: one of the named periods, or
+ * `period=custom&from=&to=&compare=` (Khai, 13 Nov 2026). User input, so it is
+ * VALIDATED and refused with a reason, never defaulted -- one period drawn
+ * under another's label is what this page has had to be fixed for twice.
+ */
+function dashboardPeriod(c: any): { period: PeriodKind | CustomRange | undefined } | { error: string } {
+  const requested = c.req.query('period');
+  if (requested === undefined) return { period: undefined };
+  if (isPeriodKind(requested)) return { period: requested };
+  if (requested !== 'custom') return { error: `Unknown period "${requested}".` };
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const compare = c.req.query('compare') ?? 'previous';
+  const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+  const why = customRangeError(from, to, compare, today);
+  if (why) return { error: why };
+  return { period: { start: from, end: to, compare: compare as CustomCompare } };
+}
+
 app.get('/api/dashboard', async (c) => {
   const user = await requireAuth(c);
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
@@ -2412,10 +2432,9 @@ app.get('/api/dashboard', async (c) => {
    * period under another one's label, which is the single thing this page has
    * had to be fixed for twice.
    */
-  const requested = c.req.query('period');
-  if (requested !== undefined && !isPeriodKind(requested)) {
-    return c.json({ error: 'bad_period', message: `Unknown period "${requested}".` }, 400);
-  }
+  const asked = dashboardPeriod(c);
+  if ('error' in asked) return c.json({ error: 'bad_period', message: asked.error }, 400);
+  const requested = asked.period;
 
   try {
     const timings: DashboardTimings = {};
@@ -2483,12 +2502,10 @@ app.get('/api/dashboard/export', async (c) => {
   if (scoped.length === 0) {
     return c.json({ error: 'no_venues', message: 'Your account is not assigned to a venue yet. Ask an owner to add you.' }, 403);
   }
-  const requested = c.req.query('period');
-  if (requested !== undefined && !isPeriodKind(requested)) {
-    return c.json({ error: 'bad_period', message: `Unknown period "${requested}".` }, 400);
-  }
+  const asked = dashboardPeriod(c);
+  if ('error' in asked) return c.json({ error: 'bad_period', message: asked.error }, 400);
   try {
-    const payload = await buildDashboard(scoped, undefined, requested);
+    const payload = await buildDashboard(scoped, undefined, asked.period);
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const wb = await buildDashboardWorkbook(payload, today);
     const buf = await wb.xlsx.writeBuffer();

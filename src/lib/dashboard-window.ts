@@ -186,8 +186,11 @@ export function weekendDays(start: string, end: string): number {
 }
 
 export interface PeriodWindow extends DashboardWindow {
-  kind: PeriodKind;
+  /** 'custom' for a range the reader picked (customWindow). */
+  kind: PeriodKind | 'custom';
   label: string;
+  /** Only on a custom range: what it is compared against. */
+  compare?: 'previous' | 'last_year';
   /**
    * The last business date that actually has sales in the warehouse.
    *
@@ -354,6 +357,75 @@ export function periodWindow(
     prior: { start: priorStart, end: priorEnd },
     days: Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1,
     thin: false,
+    warnings,
+  };
+}
+
+/**
+ * A date range the reader picks (Khai, 13 Nov 2026): "a date range selector to
+ * filter out different date ranges but that is not the default view". The page
+ * always opens on defaultPeriod(); this exists only once somebody asks for it.
+ *
+ * COMPARED LIKE FOR LIKE, by WEEKDAY. Two choices, Khai's: the same number of
+ * days just before (`previous`), or the same dates a year earlier
+ * (`last_year`). Either way the comparison is moved back by WHOLE WEEKS -- the
+ * previous period by the smallest number of weeks that does not overlap, last
+ * year by 52 weeks (364 days, since 365 compares a Saturday with a Sunday) --
+ * so Mondays sit against Mondays and both sides hold the same weekends. The
+ * weekend warnings the month periods need cannot arise here.
+ */
+export type CustomCompare = 'previous' | 'last_year';
+export const MAX_CUSTOM_DAYS = 366;
+
+export interface CustomRange { start: string; end: string; compare: CustomCompare }
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A reason the range cannot be used, or null when it can. */
+export function customRangeError(start: unknown, end: unknown, compare: unknown, today: string = sgtToday()): string | null {
+  if (typeof start !== 'string' || typeof end !== 'string' || !DATE_RE.test(start) || !DATE_RE.test(end)
+    || Number.isNaN(Date.parse(`${start}T00:00:00Z`)) || Number.isNaN(Date.parse(`${end}T00:00:00Z`))) {
+    return 'Choose a start and an end date.';
+  }
+  if (start > end) return 'The start date is after the end date.';
+  if (start > today) return 'The range starts in the future, where there is no trade yet.';
+  if (compare !== undefined && compare !== 'previous' && compare !== 'last_year') return `Unknown comparison "${String(compare)}".`;
+  const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+  if (days > MAX_CUSTOM_DAYS) return `Choose ${MAX_CUSTOM_DAYS} days or fewer; this range is ${days}.`;
+  return null;
+}
+
+const shortDate = (d: string) => new Date(`${d}T00:00:00Z`)
+  .toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+export function customWindow(range: CustomRange, today: string = sgtToday(), dataThrough?: string | null): PeriodWindow {
+  // A range reaching past today stops at today: there is no trade to show.
+  const end = range.end > today ? today : range.end;
+  const start = range.start;
+  const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000) + 1;
+  const weeksBack = range.compare === 'last_year' && days <= 364 ? 52 : Math.ceil(days / 7);
+  const shift = -7 * weeksBack;
+  const warnings: string[] = [];
+  if (range.end > today) warnings.push(`Cut to ${end}: the range you chose runs into the future.`);
+  if (dataThrough && dataThrough < end) {
+    warnings.push(
+      `The warehouse runs to ${dataThrough}, so the last ${Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${dataThrough}T00:00:00Z`)) / 86400_000)} day(s) of this range have no sales yet ` +
+      '(Revel delivers overnight). The comparison still counts those dates, so the movement reads low.',
+    );
+  }
+  if (range.compare === 'last_year' && days > 364) {
+    warnings.push('Longer than a year, so it is compared with the same length just before it rather than last year.');
+  }
+  return {
+    today,
+    kind: 'custom',
+    label: `${shortDate(start)} – ${shortDate(end)}`,
+    compare: range.compare,
+    data_through: dataThrough ?? null,
+    current: { start, end },
+    prior: { start: addDays(start, shift), end: addDays(end, shift) },
+    days,
+    thin: days <= 2,
     warnings,
   };
 }

@@ -30,7 +30,7 @@ import {
   BACKTEST_DAYS, TRAINING_WEEKS,
   type PickupData, type BacktestRecord, type CoverForecast,
 } from './forecast.js';
-import { periodWindow, movement, defaultPeriod, forecastBack, type PeriodKind, type PeriodWindow } from './dashboard-window.js';
+import { periodWindow, customWindow, movement, defaultPeriod, forecastBack, type PeriodKind, type PeriodWindow, type CustomRange } from './dashboard-window.js';
 import { rollUp, type VenueWeek } from './dashboard-rollup.js';
 import {
   lastCompleteMonth, retentionShares, sumCounts, inPlainWords, depthFor, sumDepth, type ReturningDepth,
@@ -277,7 +277,8 @@ const orThrow = <T>(name: string, p: Promise<T | null>) =>
 export async function buildDashboard(
   venues: Array<{ id: string; name: string; slug: string }>,
   today?: string,
-  period?: PeriodKind,
+  /** A named period, or a range the reader picked (customWindow). */
+  period?: PeriodKind | CustomRange,
   timings: DashboardTimings = {},
 ): Promise<DashboardPayload> {
   if (venues.length === 0) {
@@ -369,7 +370,9 @@ export async function buildDashboard(
   const dataThrough: string | null = await dataThroughC.value;
   timings.data_through = { ms: since(), cache: dataThroughC.state };
 
-  const window = periodWindow(period ?? defaultPeriod(day), day, dataThrough);
+  const window = typeof period === 'object'
+    ? customWindow(period, day, dataThrough)
+    : periodWindow(period ?? defaultPeriod(day), day, dataThrough);
   const periodCostsC = track('period_costs', periodCostsCache.get(
     `${window.current.start}|${window.current.end}|${day}|${scope}`, token,
     () => orThrow('period_costs', buildPeriodCosts(venues, window.current.start, window.current.end, day)),

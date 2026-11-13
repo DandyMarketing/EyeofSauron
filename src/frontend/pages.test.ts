@@ -800,8 +800,11 @@ test('an unknown period is rejected by the API rather than defaulted', () => {
   // would render one period under another one's label — the single thing this
   // page has had to be fixed for twice.
   const server = readFileSync('src/server.ts', 'utf8');
-  assert.match(server, /!isPeriodKind\(requested\)/);
+  assert.match(server, /if \(isPeriodKind\(requested\)\) return \{ period: requested \};/);
+  assert.match(server, /if \(requested !== 'custom'\) return \{ error: `Unknown period/);
   assert.match(server, /bad_period/);
+  // A custom range is validated too, never trusted (customRangeError).
+  assert.match(server, /const why = customRangeError\(from, to, compare, today\);\s*if \(why\) return \{ error: why \};/);
 });
 
 test('a comparison the figures cannot explain is shown, not buried', () => {
@@ -887,7 +890,10 @@ test('a long period switches layout instead of overlapping', () => {
 
   assert.match(fn, /const dense = days\.length > 10;/, 'the layout no longer adapts to the number of days');
   assert.match(fn, /\[0, 0\.5, 1\]\.forEach/, 'a dense chart has no gridlines, so it has no scale at all');
-  assert.match(fn, /i % 7 === 0/, 'a dense chart labels every day, which is unreadable at 390px');
+  assert.match(fn, /const every = byWeek \? [^:]+ : 7;/, 'a dense chart labels every day, which is unreadable at 390px');
+  assert.match(fn, /i % every === 0/);
+  // A long custom range is drawn by week, never as hundreds of slivers.
+  assert.match(fn, /const byWeek = v\.daily\.length > CHART_DAILY_MAX;/);
 });
 
 test('a closed day is never drawn as a zero bar', () => {

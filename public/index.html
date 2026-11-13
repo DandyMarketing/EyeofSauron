@@ -490,25 +490,33 @@
     border: 1px solid var(--border); background: var(--surface); color: var(--text);
   }
   .export-chip:hover { border-color: var(--accent); color: var(--accent); }
-  #export-overlay { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }
-  #export-sheet {
+  :is(#export-overlay, #range-overlay) { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }
+  :is(#export-sheet, #range-sheet) {
     position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(360px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px; box-shadow: 0 10px 30px rgba(46,42,37,0.15);
   }
-  #export-sheet h3 { font-size: 16px; margin-bottom: 10px; }
-  #export-sheet .ex-label { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 6px; }
-  #export-sheet .ex-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-  #export-sheet .ex-opt {
+  :is(#export-sheet, #range-sheet) h3 { font-size: 16px; margin-bottom: 10px; }
+  :is(#export-sheet, #range-sheet) .ex-label { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 10px 0 6px; }
+  :is(#export-sheet, #range-sheet) .ex-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  :is(#export-sheet, #range-sheet) .ex-opt {
     padding: 7px 12px; border-radius: 8px; font-size: 14px; cursor: pointer;
     border: 1px solid var(--border); background: var(--bg); color: var(--text-muted);
   }
-  #export-sheet .ex-opt.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
-  #export-sheet .ex-hint { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
-  #export-sheet .ex-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  #export-sheet .ex-row button { padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
-  #export-sheet .ex-row .ex-go { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
-  #export-sheet .ex-msg { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
+  :is(#export-sheet, #range-sheet) .ex-opt.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
+  :is(#export-sheet, #range-sheet) .ex-hint { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
+  :is(#export-sheet, #range-sheet) .ex-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  :is(#export-sheet, #range-sheet) .ex-row button { padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
+  :is(#export-sheet, #range-sheet) .ex-row .ex-go { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  :is(#export-sheet, #range-sheet) .ex-msg { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
+  #range-sheet .rg-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #range-sheet .rg-dates label { font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; }
+  #range-sheet input[type=date] { font: inherit; font-size: 15px; padding: 7px 8px; border-radius: 8px; width: 100%; box-sizing: border-box;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); color-scheme: light dark; }
+  .cmp-switch { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; flex-wrap: wrap; }
+  .cmp-switch button { font: inherit; font-size: 13px; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-muted); }
+  .cmp-switch button.on { border-color: var(--accent); color: var(--accent); background: rgba(176,96,42,0.08); }
 
   /*
    * PDF = the dashboard as it looks, through the browser's print. The ask bar,
@@ -517,7 +525,7 @@
    */
   @media print {
     @page { margin: 10mm; }
-    header nav, .periods, .askbar, .ask-sheet, #export-sheet, #export-overlay, .export-chip { display: none !important; }
+    header nav, .periods, .askbar, .ask-sheet, #export-sheet, #export-overlay, #range-sheet, #range-overlay, .export-chip, .cmp-switch { display: none !important; }
     body { padding-bottom: 0 !important; }
     main { max-width: none; }
     .tile, .panel, table { break-inside: avoid; page-break-inside: avoid; }
@@ -602,6 +610,12 @@ let token = null;
 let payload = null;
 let selected = null;
 let period = null;   // null until the server tells us what it opened on
+/**
+ * A range the reader picked with Custom (Khai, 13 Nov 2026), or null. Never
+ * stored: the page always opens on its usual period, so a custom range lasts
+ * until the page is reloaded and is never what someone lands on.
+ */
+let custom = null;   // { start, end, compare: 'previous' | 'last_year' }
 
 (async function init() {
   // Both at once. The config is two public strings and the client is 60 KB;
@@ -665,8 +679,15 @@ let period = null;   // null until the server tells us what it opened on
   render(data, recData);
 })();
 
+function periodQuery(kind) {
+  if (kind === 'custom' && custom) {
+    return '?period=custom&from=' + custom.start + '&to=' + custom.end + '&compare=' + custom.compare;
+  }
+  return kind ? '?period=' + encodeURIComponent(kind) : '';
+}
+
 function fetchDashboard(kind) {
-  const q = kind ? '?period=' + encodeURIComponent(kind) : '';
+  const q = periodQuery(kind);
   return fetch('/api/dashboard' + q, { headers: { Authorization: 'Bearer ' + token } })
     .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
     .catch(e => ({ ok: false, status: 0, body: { message: e.message } }));
@@ -765,13 +786,20 @@ function draw(recData) {
    * the arrow trustworthy -- against a whole previous week it would show a fall
    * every day except Sunday.
    */
-  const comparison = w.kind === 'last_week' ? 'against the week before'
+  const comparison = w.kind === 'custom'
+    ? (w.compare === 'last_year' ? 'against the same weekdays a year earlier (' : 'against the same weekdays just before (') +
+      fmtRange(w.prior.start, w.prior.end) + ')' +
+      '<span class="cmp-switch" role="group" aria-label="Compare with">' +
+        '<button type="button" data-cmp="previous" class="' + (w.compare !== 'last_year' ? 'on' : '') + '">Previous period</button>' +
+        '<button type="button" data-cmp="last_year" class="' + (w.compare === 'last_year' ? 'on' : '') + '">Last year</button>' +
+      '</span>'
+    : w.kind === 'last_week' ? 'against the week before'
     : w.kind === 'last_month' ? 'against the month before'
     : w.kind === 'mtd' ? 'against the same ' + w.days + ' days of last month'
     : 'against the same ' + w.days + ' days last week';
 
   const windowLine =
-    '<div class="window">' + esc(w.label) + ' · <strong>' + fmtRange(w.current.start, w.current.end) + '</strong> · ' +
+    '<div class="window">' + esc(w.kind === 'custom' ? 'Custom range' : w.label) + ' · <strong>' + fmtRange(w.current.start, w.current.end) + '</strong> · ' +
     (w.thin
       ? '<span class="thin">too few days to read as a trend</span>'
       : w.days + ' days ' + comparison) +
@@ -847,8 +875,14 @@ function draw(recData) {
 
   document.querySelectorAll('.venue-chip').forEach(b =>
     b.addEventListener('click', () => { selected = b.dataset.slug; draw(recData); }));
-  document.querySelectorAll('.period-chip').forEach(b =>
+  document.querySelectorAll('.period-chip[data-period]').forEach(b =>
     b.addEventListener('click', () => switchPeriod(b.dataset.period, recData)));
+  document.getElementById('custom-open')?.addEventListener('click', () => openRange(recData));
+  document.querySelectorAll('.cmp-switch button').forEach(b =>
+    b.addEventListener('click', () => {
+      if (!custom || b.dataset.cmp === custom.compare) return;
+      applyRange({ ...custom, compare: b.dataset.cmp }, recData);
+    }));
   lastRecData = recData;
   document.getElementById('export-open')?.addEventListener('click', openExport);
 
@@ -909,6 +943,9 @@ function periodChips() {
   return '<div class="periods">' + PERIODS.map(p =>
     '<button class="period-chip' + (p[0] === period ? ' on' : '') + '" data-period="' + p[0] + '">' +
     p[1] + '</button>').join('') +
+    // Custom: opens the date picker. Lit, with its dates, while a range is shown.
+    '<button class="period-chip' + (period === 'custom' ? ' on' : '') + '" id="custom-open" type="button">' +
+    (period === 'custom' && custom ? '📅 ' + esc(fmtRange(custom.start, custom.end)) : '📅 Custom') + '</button>' +
     '<button class="export-chip" id="export-open" type="button" aria-label="Export">⤓ Export</button></div>';
 }
 
@@ -937,7 +974,8 @@ function openExport() {
     '<button type="button" class="ex-opt' + (o[0] === current ? ' on' : '') + '" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>';
   sheet.innerHTML =
     '<h3>Export the dashboard</h3>' +
-    '<div class="ex-label">Period</div>' + opts('period', PERIODS, exPeriod) +
+    '<div class="ex-label">Period</div>' + opts('period',
+      period === 'custom' && custom ? [...PERIODS, ['custom', fmtRange(custom.start, custom.end)]] : PERIODS, exPeriod) +
     '<div class="ex-label">Format</div>' + opts('format', [['xlsx', 'Excel'], ['pdf', 'PDF']], exFormat) +
     '<div class="ex-hint" id="ex-hint"></div>' +
     '<div class="ex-row"><button type="button" class="ex-cancel">Cancel</button><button type="button" class="ex-go">Export</button></div>' +
@@ -973,7 +1011,7 @@ function openExport() {
         setTimeout(() => window.print(), 300);
         return;
       }
-      const res = await fetch('/api/dashboard/export?period=' + encodeURIComponent(exPeriod), {
+      const res = await fetch('/api/dashboard/export' + periodQuery(exPeriod), {
         headers: { Authorization: 'Bearer ' + token },
       });
       if (!res.ok) {
@@ -996,6 +1034,87 @@ function openExport() {
   });
 }
 
+/* --- custom range ------------------------------------------------------------ */
+
+/** YYYY-MM-DD in Singapore, for the date pickers' limits and defaults. */
+function sgDate(offsetDays = 0) {
+  return new Date(Date.now() + 8 * 3600_000 + offsetDays * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The date picker behind Custom (Khai, 13 Nov 2026). Native date inputs, which
+ * phones turn into their own calendar. Opens on the range already shown, or
+ * on the period on screen, so changing one end is one tap.
+ */
+function openRange(recData) {
+  document.getElementById('range-overlay')?.remove();
+  document.getElementById('range-sheet')?.remove();
+  const w = payload && payload.window;
+  const start0 = custom ? custom.start : (w ? w.current.start : sgDate(-7));
+  const end0 = custom ? custom.end : (w ? w.current.end : sgDate(-1));
+  let cmp = custom ? custom.compare : 'previous';
+  const overlay = document.createElement('div');
+  overlay.id = 'range-overlay';
+  const sheet = document.createElement('div');
+  sheet.id = 'range-sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', 'Choose a date range');
+  const today = sgDate();
+  sheet.innerHTML =
+    '<h3>Choose a date range</h3>' +
+    '<div class="rg-dates">' +
+      '<label>From<input type="date" id="rg-from" value="' + start0 + '" max="' + today + '"></label>' +
+      '<label>To<input type="date" id="rg-to" value="' + end0 + '" max="' + today + '"></label>' +
+    '</div>' +
+    '<div class="ex-label">Compare with</div>' +
+    '<div class="ex-opts" data-name="cmp">' +
+      '<button type="button" class="ex-opt' + (cmp === 'previous' ? ' on' : '') + '" data-v="previous">Previous period</button>' +
+      '<button type="button" class="ex-opt' + (cmp === 'last_year' ? ' on' : '') + '" data-v="last_year">Same dates last year</button>' +
+    '</div>' +
+    '<div class="ex-hint">Both line up by weekday, so Mondays are compared with Mondays. Up to 366 days. ' +
+      'The dashboard goes back to its usual view next time you open it.</div>' +
+    '<div class="ex-msg" id="rg-msg"></div>' +
+    '<div class="ex-row"><button type="button" class="ex-cancel">Cancel</button><button type="button" class="ex-go">Show</button></div>';
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  const close = () => { overlay.remove(); sheet.remove(); };
+  overlay.addEventListener('click', close);
+  sheet.querySelector('.ex-cancel').addEventListener('click', close);
+  sheet.querySelector('.ex-opts').addEventListener('click', e => {
+    const b = e.target.closest('.ex-opt');
+    if (!b) return;
+    cmp = b.dataset.v;
+    sheet.querySelectorAll('.ex-opt').forEach(x => x.classList.toggle('on', x === b));
+  });
+  sheet.querySelector('.ex-go').addEventListener('click', async (e) => {
+    const from = document.getElementById('rg-from').value;
+    const to = document.getElementById('rg-to').value;
+    const msg = document.getElementById('rg-msg');
+    if (!from || !to) { msg.textContent = 'Choose both dates.'; return; }
+    if (from > to) { msg.textContent = 'The start date is after the end date.'; return; }
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Loading…';
+    const err = await applyRange({ start: from, end: to, compare: cmp }, recData);
+    if (err) { msg.textContent = err; btn.disabled = false; btn.textContent = 'Show'; return; }
+    close();
+  });
+}
+
+/** Load a custom range; returns an error message, or null when it is drawn. */
+async function applyRange(range, recData) {
+  const before = custom;
+  custom = range;
+  const res = await fetchDashboard('custom');
+  if (!res.ok) {
+    custom = before;
+    return (res.body && (res.body.message || res.body.error)) || 'Could not load that range.';
+  }
+  period = 'custom';
+  payload = res.body;
+  draw(recData);
+  return null;
+}
+
 async function switchPeriod(kind, recData) {
   if (kind === period) return;
   period = kind;
@@ -1003,6 +1122,7 @@ async function switchPeriod(kind, recData) {
   // and the second press is the one nobody meant.
   document.querySelectorAll('.period-chip').forEach(b =>
     b.classList.toggle('on', b.dataset.period === kind));
+  if (kind !== 'custom') custom = null;
 
   const res = await fetchDashboard(kind);
   if (!res.ok) return;
@@ -1058,21 +1178,53 @@ function tile(label, value, deltaHtml, hint) {
 const FOOD_FILL = 'var(--accent)';
 const BEV_FILL = '#2a8780';
 
+/**
+ * A long custom range drawn by WEEK (Monday to Sunday): a year of daily bars is
+ * 366 slivers on a phone. A week where every day was closed stays a gap.
+ */
+const CHART_DAILY_MAX = 62;
+function weeksOf(daily) {
+  const out = new Map();
+  for (const d of daily) {
+    const dt = new Date(d.date + 'T00:00:00Z');
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+    const key = dt.toISOString().slice(0, 10);
+    const w = out.get(key) || { date: key, gross_sales: null, food_sales: null, beverage_sales: null, n: 0 };
+    w.n++;
+    if (d.gross_sales !== null) {
+      w.gross_sales = (w.gross_sales || 0) + d.gross_sales;
+      w.food_sales = (w.food_sales || 0) + (d.food_sales || 0);
+      w.beverage_sales = (w.beverage_sales || 0) + (d.beverage_sales || 0);
+    }
+    out.set(key, w);
+  }
+  // A week the range cuts short is a PART-week: fewer days, a shorter bar.
+  return [...out.values()].map(w => ({ ...w, partial: w.n < 7 }));
+}
+
 function chartPanel(v) {
-  const days = v.daily;
+  const byWeek = v.daily.length > CHART_DAILY_MAX;
+  const days = byWeek ? weeksOf(v.daily) : v.daily;
   if (!days.length) return '';
 
   const dense = days.length > 10;
   const W = 320, H = dense ? 120 : 128;
-  const padX = 16, padTop = dense ? 10 : 16, padBottom = 18;
+  const padTop = dense ? 10 : 16, padBottom = 18;
   const plot = H - padTop - padBottom;
 
   const totals = days.map(d => d.gross_sales).filter(x => x !== null);
   const max = Math.max(...totals, 1);
-  const bw = (W - padX * 2) / days.length;
 
   /** Compact money for a bar label: 5,120 -> 5.1k. Space is the constraint. */
   const k = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n));
+
+  /**
+   * Room for the scale's widest label, which sits LEFT of the bars. A fixed 16
+   * clipped "49.0k" to "9.0k" -- a week's total, or any group day over $10k,
+   * then read as a tenth of itself. About 4px a character at font size 7.
+   */
+  const padX = dense ? Math.max(16, k(max).length * 4 + 4) : 16;
+  const bw = (W - padX * 2) / days.length;
 
   let svg = '';
 
@@ -1106,10 +1258,11 @@ function chartPanel(v) {
       // Beverage on top, food beneath it: food is the larger half at every
       // venue here, so the moving segment is the one the eye can follow.
       const bevH = Math.max(0, h - foodH);
+      const op = d.partial ? '0.4' : '0.9';
       svg += '<rect x="' + x + '" y="' + top + '" width="' + w + '" height="' + bevH +
-             '" fill="' + BEV_FILL + '" opacity="0.9"></rect>';
+             '" fill="' + BEV_FILL + '" opacity="' + op + '"></rect>';
       svg += '<rect x="' + x + '" y="' + (top + bevH) + '" width="' + w + '" height="' + foodH +
-             '" fill="' + FOOD_FILL + '" opacity="0.9"></rect>';
+             '" fill="' + FOOD_FILL + '" opacity="' + op + '"></rect>';
 
       if (!dense) {
         svg += '<text x="' + mid + '" y="' + (top - 4) + '" text-anchor="middle" ' +
@@ -1143,12 +1296,14 @@ function chartPanel(v) {
     // X labels thin out rather than overlap: 31 weekday letters are unreadable,
     // so a dense chart labels every seventh day, which is also where the weeks
     // begin.
-    if (!dense || i % 7 === 0 || i === days.length - 1) {
+    const every = byWeek ? Math.max(1, Math.ceil(days.length / 7)) : 7;
+    if (!dense || i % every === 0 || (!byWeek && i === days.length - 1)) {
       const date = new Date(d.date + 'T00:00:00Z');
       svg += '<text x="' + mid + '" y="' + (H - 5) + '" text-anchor="middle" ' +
              'font-size="' + (dense ? 8 : 10) + '" fill="var(--text-muted)">' +
-             esc(dense ? String(date.getUTCDate())
-                       : date.toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' })) +
+             esc(byWeek ? date.toLocaleDateString('en-SG', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+                 : dense ? String(date.getUTCDate())
+                 : date.toLocaleDateString('en-SG', { weekday: 'narrow', timeZone: 'UTC' })) +
              '</text>';
     }
   });
@@ -1161,23 +1316,28 @@ function chartPanel(v) {
    * stacks. Both figures are real and neither is computed in the browser beyond
    * picking a maximum.
    */
-  const traded = days.filter(d => d.gross_sales !== null && d.gross_sales > 0);
+  // A part-week is never the "biggest week": it is short by construction.
+  const traded = days.filter(d => d.gross_sales !== null && d.gross_sales > 0 && !d.partial);
   const best = traded.reduce((a, d) => (!a || d.gross_sales > a.gross_sales ? d : a), null);
   const bevTop = traded.reduce((a, d) => {
     const share = (d.beverage_sales ?? 0) / d.gross_sales;
     return !a || share > (a.beverage_sales ?? 0) / a.gross_sales ? d : a;
   }, null);
 
-  const dayName = d => new Date(d.date + 'T00:00:00Z')
-    .toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const dayName = d => (byWeek ? 'the week of ' : '') + new Date(d.date + 'T00:00:00Z')
+    .toLocaleDateString('en-SG', { weekday: byWeek ? 'short' : 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
   let story = '';
+  const parts = days.filter(d => d.partial).length;
   if (best) {
-    story = 'Biggest day ' + esc(dayName(best)) + ' at ' + money(best.gross_sales) + '.';
+    story = (byWeek ? 'Biggest week was ' : 'Biggest day ') + esc(dayName(best)) + ' at ' + money(best.gross_sales) + '.';
     if (bevTop && bevTop.gross_sales > 0) {
       story += ' Beverage ran highest on ' + esc(dayName(bevTop)) + ' at ' +
                pct((bevTop.beverage_sales / bevTop.gross_sales) * 100) + ' of sales.';
     }
+  }
+  if (byWeek && parts) {
+    story += ' Faded bars are part-weeks the range cuts short, so they are lower by construction.';
   }
 
   /**
@@ -1197,7 +1357,7 @@ function chartPanel(v) {
       '<span><i style="background:' + BEV_FILL + '"></i>Beverage<b>' + sharePct(periodBev) + '</b></span>' +
     '</div>';
 
-  return '<div class="chart"><h2>Sales by day, food and beverage</h2>' + legend +
+  return '<div class="chart"><h2>Sales by ' + (byWeek ? 'week' : 'day') + ', food and beverage</h2>' + legend +
          '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Food and beverage sales by day">' + svg + '</svg>' +
          (story ? '<p class="figure-note" style="padding:6px 0 0">' + story + '</p>' : '') +
          explain('Bars are food + beverage, before discounts and excluding service charge \u2014 the basis the mix is measured on. ' +
