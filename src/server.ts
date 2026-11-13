@@ -8,6 +8,7 @@ import { HourlyCache } from './lib/hourly-cache.js';
 
 const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
 const recommendationsCache = new HourlyCache<any[]>();
+import { saveUpload, listFiles, deleteFile, documentsFor, attachFiles, purgeExpiredFiles } from './lib/file-store.js';
 import { isPeriodKind, customRangeError, type PeriodKind, type CustomRange, type CustomCompare } from './lib/dashboard-window.js';
 import { buildDailyReport } from './lib/daily-report-read.js';
 import { cors } from 'hono/cors';
@@ -630,6 +631,41 @@ async function saveTurn(
   }
 }
 
+// --- Uploaded documents (069, Khai, 13 Nov 2026) ---
+
+/**
+ * Upload a document to Query or Plan. Read at once; only its TEXT is kept,
+ * with the conversation, for 30 days. `conversation_id` when the conversation
+ * already exists; otherwise the page sends the returned id with its next
+ * question and the server attaches it once that conversation is saved.
+ */
+app.post('/api/files', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const body = await c.req.parseBody().catch(() => null);
+  const f = body?.['file'];
+  if (!(f instanceof File)) return c.json({ error: 'No file came through. Please choose it again.' }, 400);
+  const cid = typeof body?.['conversation_id'] === 'string' && body['conversation_id'] ? String(body['conversation_id']) : null;
+  const r = await saveUpload(user.id, { name: f.name, bytes: Buffer.from(await f.arrayBuffer()) }, cid);
+  if (!r.ok) return c.json({ error: r.error }, (r.status ?? 400) as 400 | 404);
+  return c.json({ file: r.file });
+});
+
+app.get('/api/conversations/:id/files', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  return c.json({ files: await listFiles(user.id, c.req.param('id')) });
+});
+
+app.delete('/api/files/:id', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const ok = await deleteFile(user.id, c.req.param('id'));
+  return ok ? c.json({ ok: true }) : c.json({ error: 'Could not remove that file.' }, 400);
+});
+
 // --- AI query endpoint (auth required) ---
 
 /**
@@ -668,10 +704,12 @@ app.post('/ask/stream', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string }>();
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string; file_ids?: string[] }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+  // Files uploaded to this conversation, and any uploaded just now (069).
+  const documents = await documentsFor(user.id, body.conversation_id, body.file_ids);
 
   /**
    * Which venues a progress label may NAME. Labels only; not a boundary.
@@ -729,9 +767,10 @@ app.post('/ask/stream', async (c) => {
       const result = await askSauron(
         body.question, queryHistory(body.history), venueFilter, 'chat',
         effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL, undefined,
-        push, venueNames,
+        push, venueNames, documents,
       );
       const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
+      await attachFiles(user.id, conversationId, body.file_ids);
       push({ kind: 'done', result: { ...forClient(result), conversation_id: conversationId } });
     } catch (e: any) {
       // Logged for the same reason /ask logs: this used to be invisible in
@@ -756,11 +795,12 @@ app.post('/ask', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string }>();
+  const body = await c.req.json<{ question: string; history?: ChatMessage[]; model?: string; conversation_id?: string; file_ids?: string[] }>();
   if (!body.question) return c.json({ error: 'Missing "question" field' }, 400);
 
   try {
     const venueFilter = user.isOwner ? undefined : user.venues.map(v => v.slug);
+    const documents = await documentsFor(user.id, body.conversation_id, body.file_ids);
     // WHO and WHAT are independent: the filter decides which venues, the role
     // decides which kinds of data. Both are enforced server-side in the tool
     // layer, never by what the model was offered.
@@ -781,9 +821,11 @@ app.post('/ask', async (c) => {
     const result = await askSauron(
       body.question, queryHistory(body.history), venueFilter, 'chat',
       effectiveRole(user), undefined, body.model || QUERY_DEFAULT_MODEL,
+      undefined, undefined, undefined, documents,
     );
     // After the answer exists, never before. See saveTurn.
     const conversationId = await saveTurn(user, body.conversation_id, body.question, result);
+    await attachFiles(user.id, conversationId, body.file_ids);
     return c.json({ ...forClient(result), conversation_id: conversationId });
   } catch (e: any) {
     /**
@@ -827,7 +869,7 @@ app.post('/api/plan', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
 
-  const body = await c.req.json<{ message: string; history?: ChatMessage[]; conversation_id?: string; board_open?: string[] }>();
+  const body = await c.req.json<{ message: string; history?: ChatMessage[]; conversation_id?: string; board_open?: string[]; file_ids?: string[] }>();
   if (!body.message) return c.json({ error: 'Missing "message" field' }, 400);
 
   try {
@@ -839,12 +881,15 @@ app.post('/api/plan', async (c) => {
     // not ours from the moment it comes up. Names only -- no figures.
     const ours = await venuesInScope({ isOwner: true, venues: [] });
     const venuesNote = ours.length ? `\n\n[OUR VENUES: ${ours.map(v => v.name).join(', ')}. Any other space is not ours.]` : '';
+    const documents = await documentsFor(user.id, body.conversation_id, body.file_ids);
     const result = await askSauron(
       body.message + boardNote(body.board_open) + venuesNote, body.history ?? [], venueFilter, 'chat',
       effectiveRole(user), undefined, undefined, EVENT_AGENT_PROMPT,
+      undefined, undefined, documents,
     );
     // Saved like a chat, listed apart from them. Saving never fails the answer.
     const conversationId = await saveTurn(user, body.conversation_id, body.message, result, 'plan');
+    await attachFiles(user.id, conversationId, body.file_ids);
     return c.json({ ...forClient(result), conversation_id: conversationId });
   } catch (e: any) {
     console.error(`[plan] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
@@ -4095,4 +4140,9 @@ serve({ fetch: app.fetch, port }, async () => {
   // not touch it, and a degraded app beats a dead one. The point is that the
   // deploy log says so at 15:12 rather than a user finding out at 15:59.
   await warnSchema();
+
+  // Uploaded documents expire after 30 days (069). Expiry is also enforced on
+  // read, so this only keeps the table from holding what is no longer used.
+  void purgeExpiredFiles();
+  setInterval(() => { void purgeExpiredFiles(); }, 6 * 3600_000).unref();
 });

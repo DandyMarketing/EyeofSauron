@@ -25,6 +25,7 @@
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/board-suggest.js">
 <link rel="modulepreload" href="/report-issue.js">
+<link rel="modulepreload" href="/attachments.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -495,7 +496,10 @@
   <footer>
     <!-- The planner's open question, pinned while you type. Tap to jump to it. -->
     <button id="pending-q" type="button" hidden><span class="pq-label">Answering</span><span class="pq-text"></span></button>
+    <!-- Documents attached to this plan (PDF, Excel/CSV, Word): /attachments.js -->
+    <div id="attach-row" class="attach-row" hidden></div>
     <div class="composer">
+      <button id="attach" type="button" aria-label="Attach a file"></button>
       <textarea id="input" rows="1" placeholder="Describe your event idea…"></textarea>
       <button id="send">Send</button>
       <!-- Beside Send (Khai, 12 Oct 2026); says "not ready" rather than drafting a half plan. -->
@@ -538,6 +542,8 @@ const INTRO_HTML = thread.innerHTML;
  * id, so an abandoned first message never leaves an empty plan behind.
  */
 let conversationId = null;
+/** Documents attached to this plan; set once signed in (/attachments.js). */
+let attach = null;
 /** The left sidebar of saved plans; set once signed in. */
 let sidebar = null;
 
@@ -581,6 +587,16 @@ let sidebar = null;
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();
   window.setNavOwner(!!me.isOwner, true);
+  // Documents attached to this plan (Khai, 13 Nov 2026).
+  import('/attachments.js').then(m => {
+    attach = m.createAttachments({
+      token: () => token,
+      conversationId: () => conversationId,
+      button: document.getElementById('attach'),
+      row: document.getElementById('attach-row'),
+    });
+    if (conversationId) attach.load(conversationId);
+  }).catch(e => console.warn('[attach] could not load:', e));
   // A report this person sent that is now resolved: "fixed, try it again".
   import('/report-issue.js')
     .then(m => m.showReportUpdates({ token, page: 'plan', input: '#input', before: '#thread' }))
@@ -661,6 +677,9 @@ function setBusy(on) {
 async function send() {
   const message = input.value.trim();
   if (!message || busy) return;
+  // A file still being read would miss this message; wait for it.
+  if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
+  input.placeholder = 'Describe your event idea…';
 
   input.value = '';
   input.style.height = 'auto';
@@ -678,7 +697,7 @@ async function send() {
       // sees it too. Only when that reading is of THIS conversation as it
       // stands; a stale or missing one sends nothing rather than a wrong list.
       body: JSON.stringify({
-        message, history, conversation_id: conversationId,
+        message, history, conversation_id: conversationId, file_ids: attach ? attach.pendingIds() : [],
         board_open: lastProgress && lastProgressKey === progressKey()
           ? (lastProgress.open || []).filter(o => o.blocking).map(o => o.partial ? { key: o.key, missing: o.partial.missing } : o.key) : [],
       }),
@@ -708,6 +727,7 @@ async function send() {
     addExcelLink(pending, message);
     addReportLink(pending, { question: message, answer: data.answer || '' });
     refreshProgress();
+    attach?.sent();
     if (data.conversation_id && data.conversation_id !== conversationId) {
       conversationId = data.conversation_id;
       // A new plan: list it now. The cheap model's title lands a second
@@ -1699,6 +1719,7 @@ function renderProgress(p) {
 
 function startNewPlan() {
   conversationId = null;
+  attach?.reset();
   history = [];
   progressSeq++;
   lastProgress = null; lastProgressKey = '';
@@ -1731,6 +1752,7 @@ async function openPlan(id) {
   }
 
   conversationId = id;
+  attach?.load(id);
   // A different plan: its board starts from its own first reading, and a
   // slow reading of the plan just left is dropped rather than carried over.
   lastProgress = null; lastProgressKey = ''; progressSeq++;

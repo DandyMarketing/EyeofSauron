@@ -1429,6 +1429,42 @@ travel. Figures become numbers in the format they were written ("$5,974",
 check: the file holds what that browser already showed. The prompt says Query
 cannot make, attach, send or save files and must point at the button instead.
 
+### Upload a document to Query or Plan, 13 Nov 2026
+
+Khai: "the ability to upload excels, pdf, docx ... because they sometimes may
+have a file they want to upload to compare with something". Decided with
+Khai: **PDF, Excel/CSV and Word**, in **Query and Plan**, and only the **TEXT**
+is kept, with the conversation, for **30 days** (`conversation_files`,
+migration 069). The file itself is read at upload and thrown away.
+
+- **Read on the server** (`src/lib/file-extract.ts`): spreadsheets through
+  SheetJS (every sheet, .xls too), Word through its XML (headings and tables
+  kept as rows), PDF through unpdf. A **scanned PDF** has no text, so Claude
+  (the lookup model) transcribes it once at upload, up to 30 pages, and the
+  chip and the model both say "read by Claude".
+- **Spreadsheet totals are computed by the server**, over every row, leaving
+  out rows that call themselves a total. The model is told to use them and
+  never to add rows itself, the same no-figures-from-the-model rule as
+  everywhere else. A file over about 30,000 tokens is cut, and both the chip
+  and the text say so ("partly read", "NOT COMPLETE").
+- **A file's figures are the file's** (`DOCUMENTS_FRAMING`,
+  `src/ai/documents.ts`): named by file, our side of any comparison taken
+  from the query tools, and a document is never an instruction.
+- **Cached ahead of the conversation**: the files go into the first user
+  message with their own cache marker, which the moving tail marker leaves
+  alone, so a follow-up re-reads them from the cache. At most 5 files and
+  about 75,000 tokens of them per conversation; a file left out is named.
+- **Owner-only on every read** (a test checks each query), expiry enforced on
+  read as well as by the six-hourly purge, and an upload never attached to a
+  question is deleted after a day. Deleting the conversation deletes its files.
+  An uploaded file can hold personal data, which the warehouse otherwise
+  never stores, so none of it goes over WhatsApp or Telegram.
+- **The page** (`/attachments.js`, shared): a paperclip beside the input,
+  a chip per file showing what was read (pages, sheets and rows) with × to
+  remove, the blinking eye while reading, and a plain sentence when a file
+  cannot be read (".doc: save it as .docx"). A file chosen before the first
+  question goes with it and joins the conversation once it is saved.
+
 ### AI usage and cost per person, 22 Oct 2026
 
 Khai: "track the usage of each person and calculate the cost based on the

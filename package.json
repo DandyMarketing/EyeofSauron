@@ -41,6 +41,8 @@
     "dotenv": "^16.4.0",
     "exceljs": "^4.4.0",
     "hono": "^4.12.32",
+    "jszip": "3.10.2",
+    "unpdf": "1.9.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

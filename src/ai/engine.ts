@@ -31,6 +31,7 @@ import {
   type WebSource,
 } from './web-search.js';
 import { recordUsage, newRunId } from '../lib/ai-usage.js';
+import { documentBlockText, DOCUMENTS_FRAMING, type UploadedDocument } from './documents.js';
 
 const client = new Anthropic();
 
@@ -162,10 +163,12 @@ const MAX_PAUSE_CONTINUATIONS = 4;
  * A request allows four cache_control breakpoints; an agentic loop would want
  * one per round. So exactly one travels with the conversation's tail.
  */
-function moveCacheBreakpoint(messages: Anthropic.MessageParam[]): void {
+function moveCacheBreakpoint(messages: Anthropic.MessageParam[], keep?: WeakSet<object>): void {
   for (const message of messages) {
     if (!Array.isArray(message.content)) continue;
     for (const block of message.content as any[]) {
+      // The uploaded files' marker stays put: they are the same every round.
+      if (keep?.has(block)) continue;
       if (block && typeof block === 'object' && 'cache_control' in block) {
         delete block.cache_control;
       }
@@ -261,6 +264,13 @@ export async function askSauron(
    * venue's name. See progress.ts.
    */
   venueNames?: VenueNames | null,
+  /**
+   * Documents the person uploaded to this conversation (Khai, 13 Nov 2026),
+   * as the text extracted from them -- never the file. Sent ahead of the
+   * conversation with their own cache marker, so a follow-up question re-reads
+   * them from the cache rather than paying for them again.
+   */
+  documents: UploadedDocument[] = [],
 ): Promise<QueryResult> {
   /**
    * Progress reporting that cannot hurt the answer.
@@ -337,6 +347,7 @@ export async function askSauron(
   if (notesText) {
     volatileSystem += `\n${KNOWLEDGE_FRAMING}\n\n${notesText}`;
   }
+  if (documents.length) volatileSystem += `\n\n${DOCUMENTS_FRAMING}`;
 
   const systemBlocks = (extra?: string): Anthropic.Messages.TextBlockParam[] => [
     { type: 'text', text: systemOverride ?? stableSystem, cache_control: { type: 'ephemeral' } },
@@ -347,6 +358,26 @@ export async function askSauron(
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user', content: question },
   ];
+
+  /**
+   * The uploaded files go INTO the first user message, ahead of what was said,
+   * so they sit at the front of the conversation: the same bytes every round
+   * and every follow-up, which is what a prefix cache needs. Their marker is
+   * pinned -- the moving tail marker strips every other one each round.
+   */
+  const pinnedBlocks = new WeakSet<object>();
+  if (documents.length) {
+    const first = messages[0];
+    const said = typeof first.content === 'string' ? [{ type: 'text' as const, text: first.content }] : first.content;
+    const docBlocks: Anthropic.Messages.TextBlockParam[] = documents.map(d => ({
+      type: 'text',
+      text: documentBlockText(d),
+    }));
+    const lastDoc = docBlocks[docBlocks.length - 1] as any;
+    lastDoc.cache_control = { type: 'ephemeral' };
+    pinnedBlocks.add(lastDoc);
+    first.content = [...docBlocks, ...(said as any[])];
+  }
 
   /**
    * Our query tools plus Anthropic's server-side web search.
@@ -828,7 +859,7 @@ export async function askSauron(
      * would miss and silently pay full price -- visible as cache_hit dropping
      * in the usage line, which is why that is logged on every call.
      */
-    moveCacheBreakpoint(messages);
+    moveCacheBreakpoint(messages, pinnedBlocks);
     messages.push({ role: 'user', content: toolResults });
     markLastBlockForCaching(messages);
 

@@ -24,6 +24,7 @@
 <link rel="modulepreload" href="/terms-gate.js">
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/report-issue.js">
+<link rel="modulepreload" href="/attachments.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -832,7 +833,10 @@
       </select>
       <span id="model-note"></span>
     </div>
+    <!-- Documents attached to this chat (PDF, Excel/CSV, Word): /attachments.js -->
+    <div id="attach-row" class="attach-row" style="max-width:780px" hidden></div>
     <div class="input-row">
+      <button id="attach" type="button" aria-label="Attach a file"></button>
       <textarea id="question" rows="1" placeholder="Ask about your venues..." autofocus></textarea>
       <button id="send" title="Send">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -959,6 +963,7 @@ let myVenues = [];
   authToken = session.access_token;
   // How much of this week's brief is new to this person (menu badge).
   import('/brief-badge.js').then(m => m.briefBadge(authToken));
+  startAttachments();
   sidebar = window.ConvSidebar.mount({
     aside: document.getElementById('conv-sidebar'),
     header: document.querySelector('header'),
@@ -1508,7 +1513,7 @@ async function askStreaming(question, progress) {
   const res = await fetch('/ask/stream', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
+    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId, file_ids: attach ? attach.pendingIds() : [] }),
   });
 
   // 401 and 403 are real answers about this person, not a broken route, so they
@@ -1555,7 +1560,7 @@ async function askPlain(question) {
   const res = await fetch('/ask', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId }),
+    body: JSON.stringify({ question, history, model: modelSelect.value, conversation_id: conversationId, file_ids: attach ? attach.pendingIds() : [] }),
   });
 
   if (!res.ok) {
@@ -1578,8 +1583,26 @@ async function askPlain(question) {
  */
 let conversationId = null;
 
+/**
+ * Documents attached to this chat (Khai, 13 Nov 2026). Loaded once there is a
+ * token; until then the paperclip does nothing and questions carry no files.
+ */
+let attach = null;
+function startAttachments() {
+  import('/attachments.js').then(m => {
+    attach = m.createAttachments({
+      token: () => authToken,
+      conversationId: () => conversationId,
+      button: document.getElementById('attach'),
+      row: document.getElementById('attach-row'),
+    });
+    if (conversationId) attach.load(conversationId);
+  }).catch(e => console.warn('[attach] could not load:', e));
+}
+
 function startNewChat() {
   conversationId = null;
+  attach?.reset();
   history = [];
   // Back to how the app looks when you open it, chips and all.
   chat.innerHTML = WELCOME_HTML;
@@ -1612,6 +1635,7 @@ async function openConversation(id) {
   }
 
   conversationId = id;
+  attach?.load(id);
   sidebar?.refresh();
   history = [];
 
@@ -1668,6 +1692,9 @@ async function openConversation(id) {
 async function send() {
   const question = input.value.trim();
   if (!question || busy) return;
+  // A file still being read would miss this question; wait for it.
+  if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
+  input.placeholder = 'Ask about your venues...';
 
   busy = true;
   sendBtn.disabled = true;
@@ -1713,6 +1740,7 @@ async function send() {
     if (data.conversation_id) {
       const isNew = conversationId !== data.conversation_id;
       conversationId = data.conversation_id;
+      attach?.sent();
       // A new thread: list it now, and again once the cheap model's title has
       // had a moment to land.
       if (isNew) { sidebar?.refresh(); setTimeout(() => sidebar?.refresh(), 4000); }
