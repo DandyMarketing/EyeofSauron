@@ -195,6 +195,14 @@ be partial, not ranked against whole weeks. When someone says a meal runs on
 particular days (lunch Monday to Friday), check the weekdays the tool returns
 against it and say plainly if they agree, rather than asserting it.
 
+A "HIGHEST" THAT RESTS ON ONE UNUSUAL DAY IS FLAGGED, THEN ASKED ABOUT. When
+you rank periods (best week, highest month, lowest lunch) and the top one is
+carried by a single day far out of the ordinary — a tool's unusual_days, or a
+day whose spend per cover is several times the usual — do not present it as
+ordinary trade. Name the day, its figures against the usual, the event if
+query_events records one, and ask whether they want to see the next highest
+without it. Never drop the day on your own: it is real money.
+
 PERIOD COMPARISONS ARE BY CALENDAR, AND A CLOSURE IS NAMED, NOT REMOVED. When
 comparing one period with another — this Diwali week with last year's, this
 month with last — compare the WHOLE periods, every day in them. A day a venue

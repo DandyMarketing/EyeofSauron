@@ -25,7 +25,20 @@ import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } fro
 import { chooseGrouping, bucketDays, DAILY_HARD_MAX, type DayRow } from '../lib/ops-buckets.js';
 import { readClosures } from '../lib/venue-closures-read.js';
 import { closuresIn, CLOSURE_NOTE } from '../lib/venue-closures.js';
-import { bucketMealPeriods, type HourRow } from '../lib/meal-period-buckets.js';
+import { bucketMealPeriods, unusualMealDays, type HourRow } from '../lib/meal-period-buckets.js';
+
+/**
+ * Said whenever a meal-period result holds a day far out of the ordinary
+ * (Khai, 13 Nov 2026): Sauron, not the reader, should notice that the top
+ * week is a private event, say so, and offer the ranking without it.
+ */
+const UNUSUAL_DAYS_NOTE =
+  'These days took far more than that meal usually does -- most often a private event, buyout or large booking, not ordinary trade. ' +
+  'If one sits inside the period you are about to call highest (or that drives any comparison), say so plainly BEFORE presenting it as the answer: ' +
+  'name the date and weekday, its sales, covers and spend per cover against the usual, and that it is likely an event. ' +
+  'Check query_events for that date and name the event if one is recorded; if none is, say it is not recorded rather than guessing what it was. ' +
+  'Then ASK whether they would like to see the next highest without it (sales_without_unusual_days has the figure for each period). ' +
+  'Never remove the day silently: it is real money.';
 
 /**
  * One-off closures in a range, for a tool's reply (migration 067). A day the
@@ -2017,8 +2030,12 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
     const range = 'single' in dateFilter
       ? { from: dateFilter.single, to: dateFilter.single }
       : { from: dateFilter.start ?? sortedAll[0], to: dateFilter.end ?? sortedAll[sortedAll.length - 1] };
-    const buckets = bucketMealPeriods(data as HourRow[], byShift, input.group_by, range, meal ?? undefined);
+    const unusual = unusualMealDays(data as HourRow[], byShift, input.group_by)
+      .filter(u => !meal || u.meal_period.toLowerCase() === meal);
+    const buckets = bucketMealPeriods(data as HourRow[], byShift, input.group_by, range, meal ?? undefined, unusual);
     return JSON.stringify({
+      unusual_days: unusual.length ? unusual : undefined,
+      unusual_days_note: unusual.length ? UNUSUAL_DAYS_NOTE : undefined,
       venue: input.venue_slug,
       date: dateLabel(dateFilter),
       grouping: input.group_by,
@@ -2073,6 +2090,11 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
   const coversMap = await getCovers(venueId, sortedDates[0], sortedDates[sortedDates.length - 1]);
   const coversByPeriod: Record<string, number> = {};
   let coversDatesMatched = 0;
+  const shiftsByDate = new Map<string, Record<string, number>>();
+  for (const [date, c] of coversMap) shiftsByDate.set(date, c.by_shift);
+  const unusual = unusualMealDays(data as HourRow[], shiftsByDate, 'week')
+    .filter(u => !meal || u.meal_period.toLowerCase() === meal)
+    .map(({ in_bucket, ...u }) => u);
   for (const [date, c] of coversMap) {
     if (!salesDates.has(date)) continue;
     coversDatesMatched++;
@@ -2113,6 +2135,8 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
     avg_check_basis: 'avg_check here is Revel\'s HOURLY report sales ÷ bills for that meal period. It is NOT the dashboard\'s average check (net sales ÷ bills) and must not be compared with it or with query_sales. Compare meal periods with each other only, and say which basis you used.',
     total_sales: totalSales,
     periods: result,
+    unusual_days: unusual.length ? unusual : undefined,
+    unusual_days_note: unusual.length ? UNUSUAL_DAYS_NOTE : undefined,
   });
 }
 
