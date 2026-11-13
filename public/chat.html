@@ -987,6 +987,10 @@ let myVenues = [];
       const body = await res.json();
       myVenues = body.venues || [];
       window.setNavOwner(!!body.isOwner, true);
+      // A report this person sent that is now resolved: "fixed, try it again".
+      import('/report-issue.js')
+        .then(m => m.showReportUpdates({ token: authToken, page: 'chat', input: '#question', before: '#chat' }))
+        .catch(() => {});
     })
     .catch(() => { /* the header degrades; the chat does not depend on it */ });
 

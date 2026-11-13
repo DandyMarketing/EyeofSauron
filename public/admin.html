@@ -1695,11 +1695,15 @@ async function toggleReport(row) {
     '<div class="r-block r-review">' +
       '<div class="m-label">Review</div>' +
       '<div class="role-actions"><select class="r-status-pick">' + Object.entries(REPORT_STATUS).map(([v, l]) => '<option value="' + v + '"' + (v === r.status ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +
-      '<textarea class="r-notes" placeholder="Notes: the cause, the fix, what was decided">' + esc(r.admin_notes || '') + '</textarea>' +
+      '<textarea class="r-notes" placeholder="Notes: the cause, the fix, what was decided (admins only)">' + esc(r.admin_notes || '') + '</textarea>' +
+      '<div class="m-label" style="margin-top:10px">Reply to ' + esc(r.reporter_name || r.reporter_email || 'the reporter') + '</div>' +
+      '<textarea class="r-reply" maxlength="2000" placeholder="Shown to them in Query or Plan once this is Fixed or Will not fix, e.g. Weeks now run Monday to Sunday. Please ask again.">' + esc(r.reporter_reply || '') + '</textarea>' +
+      '<div class="muted" style="font-size:13px">' + (r.reporter_seen_at ? 'They saw the update on ' + esc(new Date(r.reporter_seen_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.'
+        : RESOLVED.includes(r.status) ? 'Waiting for them to open Query or Plan.' : 'They are told when you set Fixed or Will not fix and save.') + '</div>' +
       '<div class="m-account"><button class="btn btn-small r-save">Save</button><button class="btn btn-small btn-outline r-copy">Copy for Claude</button></div>' +
     '</div>';
   box.querySelector('.r-save').addEventListener('click', async () => {
-    const res = await api('PATCH', '/admin/api/reports/' + r.id, { status: box.querySelector('.r-status-pick').value, admin_notes: box.querySelector('.r-notes').value });
+    const res = await api('PATCH', '/admin/api/reports/' + r.id, { status: box.querySelector('.r-status-pick').value, admin_notes: box.querySelector('.r-notes').value, reporter_reply: box.querySelector('.r-reply').value });
     if (res.error) { toast('error', res.error); return; }
     toast('success', 'Saved');
     const pill = row.querySelector('.r-status');

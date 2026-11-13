@@ -1357,7 +1357,18 @@ what they expected. The server SNAPSHOTS the conversation into `issue_reports`
 (migration 061) so a later rename or delete cannot change what was reported.
 Decided with Khai: admins hear through the **Issues** tab's badge on the admin
 console (called Reports until 13 Oct 2026; Khai: it records faults,
-wrong answers and errors, and "report" already means the daily figures); the reporter gets a thank-you and nothing more.
+wrong answers and errors, and "report" already means the daily figures).
+
+**The reporter hears back** (Khai, 13 Nov 2026: "so they know it has been
+corrected and can re-test it"; migration 068). Each report has a **Reply to
+the reporter** box beside the private admin notes. Once it is saved as Fixed
+or Will not fix, the reporter sees a notice at the top of Query or Plan, with
+the reply and, for a fix, **Try it again**, which puts their question back in
+the box. Dismissing it marks it seen on every device. It shows again only
+when something changes for them: newly resolved, or a different reply. Admin
+notes are never shown (`/api/my-reports/updates`, `showReportUpdates()` in
+`/report-issue.js`). In-app was chosen over email, which would need a sending
+service.
 
 **Every answer now saves its tool trace** (`conversation_messages.tool_trace`):
 each data tool's input, an excerpt of what it RETURNED, and how long it took --

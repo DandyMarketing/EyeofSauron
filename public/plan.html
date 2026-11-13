@@ -581,6 +581,10 @@ let sidebar = null;
   if (!meRes.ok) { window.location.href = '/login.html'; return; }
   const me = await meRes.json();
   window.setNavOwner(!!me.isOwner, true);
+  // A report this person sent that is now resolved: "fixed, try it again".
+  import('/report-issue.js')
+    .then(m => m.showReportUpdates({ token, page: 'plan', input: '#input', before: '#thread' }))
+    .catch(() => {});
 
   document.getElementById('logout-link').addEventListener('click', async (e) => {
     e.preventDefault();

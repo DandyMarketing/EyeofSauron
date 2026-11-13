@@ -8,8 +8,8 @@
  * error"). The server snapshots the SAVED conversation with each answer's tool
  * trace; this page also sends the WHOLE conversation as it is on screen,
  * because what failed is often what was never saved -- an answer that errored,
- * or a chat whose first answer never came back. Nothing comes back but a
- * thank-you: the review is for the admins (decided with Khai).
+ * or a chat whose first answer never came back. The review is for the admins;
+ * the reporter hears back when it is resolved (showReportUpdates, below).
  */
 
 const KINDS = [
@@ -84,6 +84,17 @@ function injectStyles() {
     #ri-sheet button .eye-busy { margin-right: 4px; vertical-align: -3px; }
     #ri-sheet .ri-msg { font-size: 13px; margin-top: 8px; color: var(--error); }
     #ri-sheet .ri-done { color: var(--success); font-size: 15px; line-height: 1.5; }
+    .ri-update { margin: 10px auto; max-width: 760px; box-sizing: border-box; padding: 12px 14px;
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+      border-left: 4px solid var(--success); border-radius: 10px; font-size: 15px; line-height: 1.5; }
+    .ri-update.wont { border-left-color: var(--text-muted); }
+    .ri-update .ri-u-head { font-weight: 600; }
+    .ri-update .ri-u-q { color: var(--text-muted); font-size: 14px; margin-top: 2px; overflow-wrap: anywhere; }
+    .ri-update .ri-u-reply { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ri-update .ri-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+    .ri-update button { border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer;
+      border: 1px solid var(--border); background: transparent; color: var(--text); }
+    .ri-update button.ri-retry { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   `;
   document.head.appendChild(style);
 }
@@ -154,4 +165,62 @@ export function openReport(ctx) {
       btn.disabled = false; btn.textContent = 'Send report';
     }
   });
+}
+
+/**
+ * "Your report has been fixed -- try it again" (Khai, 13 Nov 2026; migration
+ * 068). When an admin marks a report Fixed or Will not fix, the person who sent
+ * it sees one notice per report at the top of Query or Plan, with the admin's
+ * reply (never the private notes). "Try it again" puts the reported question
+ * back in the box for them to send; either button stops the notice showing,
+ * on every device. Nothing here can break the page: a failed fetch shows
+ * nothing.
+ * @param {{ token: string, page: 'chat'|'plan', input: string, before: string }} ctx
+ */
+export async function showReportUpdates(ctx) {
+  let updates = [];
+  try {
+    const res = await fetch('/api/my-reports/updates', { headers: { Authorization: 'Bearer ' + ctx.token } });
+    if (!res.ok) return;
+    updates = (await res.json()).updates || [];
+  } catch { return; }
+  if (!updates.length) return;
+  injectStyles();
+  const anchor = document.querySelector(ctx.before);
+  if (!anchor) return;
+  const day = iso => new Date(iso).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
+  for (const u of updates) {
+    if (document.querySelector('.ri-update[data-id="' + u.id + '"]')) continue;
+    const fixed = u.status === 'fixed';
+    const q = u.question || u.comment || '';
+    const box = document.createElement('div');
+    box.className = 'ri-update' + (fixed ? '' : ' wont');
+    box.dataset.id = u.id;
+    box.setAttribute('role', 'status');
+    box.innerHTML =
+      '<div class="ri-u-head">' + (fixed
+        ? 'The issue you reported on ' + esc(day(u.created_at)) + ' has been fixed.'
+        : 'The admins have reviewed the issue you reported on ' + esc(day(u.created_at)) + '.') + '</div>' +
+      (q ? '<div class="ri-u-q">You asked: “' + esc(q.length > 160 ? q.slice(0, 157) + '…' : q) + '”</div>' : '') +
+      (u.reporter_reply ? '<div class="ri-u-reply">' + esc(u.reporter_reply) + '</div>' : (fixed ? '<div class="ri-u-reply">Please ask it again to check.</div>' : '')) +
+      '<div class="ri-row">' +
+        '<button type="button" class="ri-dismiss">' + (fixed ? 'Dismiss' : 'OK') + '</button>' +
+        (fixed && u.question && u.page === ctx.page ? '<button type="button" class="ri-retry">Try it again</button>' : '') +
+      '</div>';
+    const seen = () => {
+      box.remove();
+      fetch('/api/my-reports/' + u.id + '/seen', { method: 'POST', headers: { Authorization: 'Bearer ' + ctx.token } }).catch(() => {});
+    };
+    box.querySelector('.ri-dismiss').addEventListener('click', seen);
+    box.querySelector('.ri-retry')?.addEventListener('click', () => {
+      const input = document.querySelector(ctx.input);
+      if (input) {
+        input.value = u.question;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+      }
+      seen();
+    });
+    anchor.parentNode.insertBefore(box, anchor);
+  }
 }

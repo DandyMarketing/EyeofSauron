@@ -1960,6 +1960,42 @@ app.post('/api/report', async (c) => {
   return c.json({ ok: true, id: data.id });
 });
 
+/**
+ * The reporter's own resolved reports they have not yet dismissed (migration
+ * 068, Khai, 13 Nov 2026): shown in Query and Plan as "fixed -- try it
+ * again". Only the reporter's own rows, only what is meant for them: the
+ * question, the status and the admin's REPLY, never admin_notes. Fails soft to
+ * an empty list before the migration, so the pages never break over it.
+ */
+app.get('/api/my-reports/updates', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  // row-cap: one person's unseen resolved reports; a handful at most.
+  const { data, error } = await supabaseAdmin.from('issue_reports')
+    .select('id, created_at, page, kind, comment, question, status, reporter_reply, resolved_at')
+    .eq('user_id', user.id)
+    .in('status', ['fixed', 'wont_fix'])
+    .is('reporter_seen_at', null)
+    .order('resolved_at', { ascending: false })
+    .limit(20);
+  if (error) {
+    if (!/reporter_seen_at|reporter_reply/.test(error.message)) console.error(`[report] updates for ${user.email ?? user.id}: ${error.message}`);
+    return c.json({ updates: [] });
+  }
+  return c.json({ updates: data ?? [] });
+});
+
+app.post('/api/my-reports/:id/seen', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const { error } = await supabaseAdmin.from('issue_reports')
+    .update({ reporter_seen_at: new Date().toISOString() })
+    .eq('id', c.req.param('id'))
+    .eq('user_id', user.id);
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ ok: true });
+});
+
 app.get('/admin/api/reports', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
@@ -1980,6 +2016,8 @@ app.get('/admin/api/reports/:id', async (c) => {
   return c.json({ report: data, markdown: reportMarkdown(data as StoredReport) });
 });
 
+const RESOLVED_STATUSES: unknown[] = ['fixed', 'wont_fix'];
+
 app.patch('/admin/api/reports/:id', async (c) => {
   const user = await requireOwner(c);
   if (!user) return c.json({ error: 'Admin access required' }, 403);
@@ -1990,6 +2028,20 @@ app.patch('/admin/api/reports/:id', async (c) => {
     patch.resolved_at = body.status === 'fixed' || body.status === 'wont_fix' ? new Date().toISOString() : null;
   }
   if (typeof body?.admin_notes === 'string') patch.admin_notes = body.admin_notes.slice(0, 8000);
+  // What the REPORTER reads (068). The notice comes back only when something
+  // changed for them -- newly resolved, or a different reply -- never because
+  // an admin re-saved their own notes on a report already resolved.
+  if (typeof body?.reporter_reply === 'string') {
+    patch.reporter_reply = body.reporter_reply.trim().slice(0, 2000) || null;
+    // row-cap: one report by id.
+    const { data: before } = await supabaseAdmin.from('issue_reports')
+      .select('status, reporter_reply').eq('id', c.req.param('id')).maybeSingle();
+    const resolvedNow = patch.status ? RESOLVED_STATUSES.includes(patch.status as string) : RESOLVED_STATUSES.includes(before?.status);
+    const wasResolved = RESOLVED_STATUSES.includes(before?.status);
+    if (resolvedNow && (!wasResolved || (before?.reporter_reply ?? null) !== patch.reporter_reply)) patch.reporter_seen_at = null;
+    // Re-saving an unchanged resolution keeps the date it was resolved.
+    if (wasResolved && patch.status === before?.status) delete patch.resolved_at;
+  }
   if (Object.keys(patch).length === 0) return c.json({ error: 'Nothing to change.' }, 400);
   const { error } = await supabaseAdmin.from('issue_reports').update(patch).eq('id', c.req.param('id'));
   if (error) return c.json({ error: error.message }, 500);
