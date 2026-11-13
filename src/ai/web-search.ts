@@ -97,6 +97,36 @@ export function isMissingContainerError(e: any): boolean {
 }
 
 /**
+ * Whether a 400 is dynamic filtering's sandbox trying to call one of OUR tools.
+ *
+ * Issue 20a11db4 (3 Nov 2026): asked to redo fourteen weeks of lunch sales,
+ * the model wrote code inside the web search's code execution sandbox that
+ * called query_meal_period_sales in a loop. Our tools are callable directly
+ * only (no `allowed_callers`), so the API refused the whole request:
+ *
+ *   400 invalid_request_error: Code execution requested a client tool that is
+ *   not included in this request's code execution tool function definitions.
+ *
+ * and the manager saw that JSON instead of an answer. Opening our tools to the
+ * sandbox (programmatic tool calling) would change the loop's whole contract
+ * for the sake of one shape of question; the engine instead retries the round
+ * without the search tool, which takes the sandbox away and leaves the model
+ * calling tools the ordinary way. Grouped tools (group_by on the meal-period
+ * tool) remove the reason to loop in the first place.
+ */
+export function isCodeExecutionCallerError(e: any): boolean {
+  const status = e?.status ?? e?.response?.status;
+  if (status !== 400) return false;
+  let detail = '';
+  try {
+    detail = `${e?.message ?? ''} ${JSON.stringify(e?.error ?? {})}`;
+  } catch {
+    detail = String(e?.message ?? '');
+  }
+  return /code execution requested a client tool/i.test(detail);
+}
+
+/**
  * A hard ceiling on searches per request, enforced by Anthropic rather than by
  * asking the model nicely.
  *

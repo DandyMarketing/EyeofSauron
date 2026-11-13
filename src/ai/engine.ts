@@ -24,6 +24,7 @@ import {
   consultedPages,
   nextContainerId,
   isMissingContainerError,
+  isCodeExecutionCallerError,
   joinText,
   mergeSources,
   EXTERNAL_CONTEXT_FRAMING,
@@ -563,6 +564,20 @@ export async function askSauron(
         );
         console.error('[engine] Answering from the warehouse only. Fix the tool config in src/ai/web-search.ts.');
         r = await call(build(queryTools));
+      } else if (isCodeExecutionCallerError(e)) {
+        /**
+         * The search sandbox tried to call one of our tools from code. Retried
+         * once: without the search tool when no search has run this turn (no
+         * sandbox, so the model calls tools directly); otherwise as it was,
+         * because dropping the tool after a search fails for a different reason.
+         */
+        const dropSearch = !opts.tools && !containerId;
+        if (dropSearch) searchDisabled = true;
+        console.error(
+          `[engine] code execution tried to call a client tool — retrying ${dropSearch ? 'without web search' : 'once as is'}: ` +
+          `${String((e as any)?.message ?? e).slice(0, 200)}`,
+        );
+        r = await call(build(activeTools()));
       } else {
         /**
          * No retry, but never silently. This failure threw away three complete

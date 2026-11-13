@@ -324,13 +324,23 @@ export const queryTools: Tool[] = [
   },
   {
     name: 'query_meal_period_sales',
-    description: 'Query sales breakdown by meal period (lunch/brunch/dinner) for a venue. Returns, per meal period: sales, transactions (BILLS, not people), covers (PEOPLE, from SevenRooms), avg_check (revenue per bill), avg_spend_per_cover (revenue per person) and avg_party_size. avg_spend_per_cover is the metric that matters for comparing venues or meal periods — avg_check rises simply because parties are bigger, so quoting it alone misleads. Lead with spend per cover, quote avg check alongside. Never call a transaction count a cover count. If covers are null, SevenRooms data is missing for those dates — say so rather than falling back to avg_check as if it were the same thing. Derived from hourly sales data. Use this to answer questions about lunch vs dinner performance, brunch sales on weekends, or meal period trends. Note: Fat Prince Saturday/Sunday lunch is labelled "brunch", Firangi Superstar Saturday lunch is labelled "brunch".',
+    description: 'Query sales breakdown by meal period (lunch/brunch/dinner) for a venue. Returns, per meal period: sales, transactions (BILLS, not people), covers (PEOPLE, from SevenRooms), avg_check (revenue per bill), avg_spend_per_cover (revenue per person) and avg_party_size. avg_spend_per_cover is the metric that matters for comparing venues or meal periods — avg_check rises simply because parties are bigger, so quoting it alone misleads. Lead with spend per cover, quote avg check alongside. Never call a transaction count a cover count. If covers are null, SevenRooms data is missing for those dates — say so rather than falling back to avg_check as if it were the same thing. Derived from hourly sales data. Use this to answer questions about lunch vs dinner performance, brunch sales on weekends, or meal period trends. Note: Fat Prince Saturday/Sunday lunch is labelled "brunch", Firangi Superstar Saturday lunch is labelled "brunch". ' +
+      'FOR ANYTHING BY WEEK OR MONTH ("highest lunch week", "lunch by month") make ONE call with the whole range and group_by — never one call per week. A week is a calendar week, Monday to Sunday; never build weeks yourself from the first date that has data. If a range returns nothing, the reply says the earliest date that exists; start there instead of searching back.',
     input_schema: {
       type: 'object' as const,
       properties: {
         venue_slug: {
           type: 'string',
           description: 'Venue identifier: "neon-pigeon", "fat-prince", or "super-firangi"',
+        },
+        group_by: {
+          type: 'string',
+          enum: ['week', 'month'],
+          description: 'Return the range as calendar weeks (Monday–Sunday) or calendar months, each with its meal periods, and partial ones marked. Omit for one total over the range.',
+        },
+        meal_period: {
+          type: 'string',
+          description: 'Only this meal period: "lunch", "brunch" or "dinner". Omit for all.',
         },
         business_date: {
           type: 'string',

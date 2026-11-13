@@ -25,6 +25,7 @@ import { aggregateLabour, withoutCost, type LabourRow, type LabourGrouping } fro
 import { chooseGrouping, bucketDays, DAILY_HARD_MAX, type DayRow } from '../lib/ops-buckets.js';
 import { readClosures } from '../lib/venue-closures-read.js';
 import { closuresIn, CLOSURE_NOTE } from '../lib/venue-closures.js';
+import { bucketMealPeriods, type HourRow } from '../lib/meal-period-buckets.js';
 
 /**
  * One-off closures in a range, for a tool's reply (migration 067). A day the
@@ -1984,11 +1985,58 @@ async function queryMealPeriodSales(input: Record<string, any>): Promise<string>
     .select('business_date, meal_period, transactions, items, sales')
     .eq('venue_id', venueId), dateFilter));
   if (error) return JSON.stringify({ error: error.message });
-  if (!data || data.length === 0) return JSON.stringify({ venue: input.venue_slug, date: dateLabel(dateFilter), message: 'No hourly sales data found. This data comes from the Hourly Sales Report.' });
+  if (!data || data.length === 0) {
+    // Say where the data DOES start, so the next call is one call rather than
+    // a month-by-month search back to 2022 (issue 20a11db4 made twelve).
+    // row-cap: one row, the earliest date.
+    const { data: first } = await supabase
+      .from('hourly_sales')
+      .select('business_date')
+      .eq('venue_id', venueId)
+      .order('business_date', { ascending: true })
+      .limit(1);
+    const earliest = first?.[0]?.business_date ?? null;
+    return JSON.stringify({
+      venue: input.venue_slug,
+      date: dateLabel(dateFilter),
+      message: 'No hourly sales data found. This data comes from the Hourly Sales Report.',
+      earliest_hourly_date: earliest,
+      note: earliest
+        ? `Meal-period figures for this venue begin ${earliest}. Nothing earlier exists; do not search further back.`
+        : 'This venue has no hourly sales data at all.',
+    });
+  }
+
+  const meal = typeof input.meal_period === 'string' && input.meal_period.trim() ? input.meal_period.trim().toLowerCase() : null;
+
+  if (input.group_by === 'week' || input.group_by === 'month') {
+    const sortedAll = [...new Set<string>(data.map((r: any) => r.business_date))].sort();
+    const coversMap = await getCovers(venueId, sortedAll[0], sortedAll[sortedAll.length - 1]);
+    const byShift = new Map<string, Record<string, number>>();
+    for (const [date, c] of coversMap) byShift.set(date, c.by_shift);
+    const range = 'single' in dateFilter
+      ? { from: dateFilter.single, to: dateFilter.single }
+      : { from: dateFilter.start ?? sortedAll[0], to: dateFilter.end ?? sortedAll[sortedAll.length - 1] };
+    const buckets = bucketMealPeriods(data as HourRow[], byShift, input.group_by, range, meal ?? undefined);
+    return JSON.stringify({
+      venue: input.venue_slug,
+      date: dateLabel(dateFilter),
+      grouping: input.group_by,
+      meal_period_filter: meal ?? undefined,
+      data_starts: sortedAll[0],
+      data_ends: sortedAll[sortedAll.length - 1],
+      grouping_note: input.group_by === 'week'
+        ? 'Each week is a CALENDAR week, Monday to Sunday, named by its Monday. Label weeks by calendar_start–calendar_end, never by the data\'s own first day. A partial week is not a whole week: say so beside it and do not rank it against whole weeks. weekdays shows which days each meal traded.'
+        : 'Each month is a calendar month. A partial month is not a whole month: say so beside it and do not rank it against whole months.',
+      avg_check_basis: 'Sales here are Revel\'s HOURLY report sales for the meal period. They are not the dashboard\'s net sales and must not be compared with query_sales.',
+      buckets,
+    });
+  }
 
   const periods = new Map<string, { period: string; transactions: number; items: number; sales: number; days: Set<string> }>();
 
   for (const row of data) {
+    if (meal && String(row.meal_period).toLowerCase() !== meal) continue;
     const key = row.meal_period;
     const existing = periods.get(key);
     if (existing) {
