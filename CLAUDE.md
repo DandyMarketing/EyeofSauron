@@ -956,7 +956,11 @@ the missing-file watchdog, the daily report (not "late"; today "closed"), the
 dashboard strip and forecast, and the tools (`query_daily_operations`,
 `compare_venues`, `explain_revenue_change` return each closure and its reason).
 It never hides data: a listed day that traded still counts. Fail-soft before
-the migration runs.
+the migration runs. **A comparison is by calendar** (Khai, 13 Nov 2026): the
+whole week against the whole week, a closed day counting as the nothing it
+traded, and the closure named beside the result -- venue, date, reason, how
+many fewer trading days. Never drop days to match the periods, never "not
+comparable" (`CLOSURE_NOTE` and the system prompt).
 
 **No personal or payroll data over WhatsApp either.** Messages to a business
 pass through Meta's servers, so they are not end-to-end encrypted to us -- the

@@ -2972,7 +2972,7 @@ async function explainRevenueChange(input: Record<string, any>): Promise<string>
         venue: v.name,
         slug: v.slug,
         error: closures
-          ? 'No trading in one of the two periods: the venue was closed (see closures).'
+          ? 'No trading in one of the two periods: the venue was closed for all of it (see closures). Report the comparison as the other period against nothing, naming the closure and its reason -- not as missing data and not as "not comparable".'
           : 'No data for one of the two periods. Check the ingest before reading this as a change.',
         closures,
       };

@@ -62,9 +62,19 @@ export function closuresIn(
 /**
  * Said beside the figures whenever a range holds a listed closure: the day has
  * no sales because the venue was shut, and the reader must hear it as that.
+ *
+ * A comparison is by CALENDAR (Khai, 13 Nov 2026): the whole week against the
+ * whole week, a closed day counting as the nothing it traded, with the closure
+ * named beside the result. The first version said to compare only the days both
+ * periods traded, which is the "not comparable" answer by another route -- it
+ * drops the day that explains the movement.
  */
 export const CLOSURE_NOTE =
   'The venue was CLOSED on these dates for the reason given (recorded by the team in Settings). ' +
-  'They have no sales or covers because nobody traded, not because data is missing. Say so plainly, ' +
-  'leave them out of averages, and when comparing periods compare only the days both traded -- a ' +
-  'closed day against an open one is not growth or decline.';
+  'They have no sales or covers because nobody traded, not because data is missing. ' +
+  'COMPARE THE WHOLE PERIODS ANYWAY: a comparison is by calendar -- the whole week against the whole ' +
+  'week, the whole month against the whole month -- with each closed day counting as the nothing it ' +
+  'traded. Never drop a day to make the periods match, and never call the comparison "not comparable". ' +
+  'Beside the result, name the closure specifically: which venue, which date and weekday, the reason, ' +
+  'and that the period had that many fewer trading days, so the reader sees how much of the movement ' +
+  'the closure explains.';
