@@ -854,8 +854,11 @@ complete resos").
 **Cancellation notice** (issue b3c6181c, Josh, 17 Nov 2026: "how many
 cancelled within 24 hours?", which Sauron said it could not tell).
 `query_reservations` returns `cancellation_notice`: cancelled bookings and
-covers by notice before the slot (within 24h, 24-72h, over 72h), from
-`slot_local` minus `source_updated_at` (`src/lib/cancellation-notice.ts`).
+covers by notice before the slot, TO THE MINUTE and grouped by DAY (Khai, 21
+Nov 2026: "down to the min ... 2 days 3 days etc"): within 24 hours, 1-2
+days ... 6-7 days, over 7 days, the median notice, and each cancellation
+inside 24 hours listed with its exact notice ("45m"). From `slot_local` minus
+`source_updated_at` (`src/lib/cancellation-notice.ts`).
 SevenRooms does not stamp the cancellation itself, so it is dated by the
 booking's LAST change, the same reading as `cover_pickup`. An edit after
 cancelling makes the notice look shorter, so within 24h can only be slightly
