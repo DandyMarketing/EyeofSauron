@@ -851,6 +851,16 @@ green inside the range, amber outside; today's stays grey.
 Last year's pattern (the hollow dot) shows on those nights too, as it would
 have read the day before (Khai: "still include the last year figure even on
 complete resos").
+**Cancellation notice** (issue b3c6181c, Josh, 17 Nov 2026: "how many
+cancelled within 24 hours?", which Sauron said it could not tell).
+`query_reservations` returns `cancellation_notice`: cancelled bookings and
+covers by notice before the slot (within 24h, 24-72h, over 72h), from
+`slot_local` minus `source_updated_at` (`src/lib/cancellation-notice.ts`).
+SevenRooms does not stamp the cancellation itself, so it is dated by the
+booking's LAST change, the same reading as `cover_pickup`. An edit after
+cancelling makes the notice look shorter, so within 24h can only be slightly
+over-counted; a change dated after the slot is counted apart, never as a late
+cancellation.
 - **Phase 4**: multi-tenant productization (PDPA, hard data isolation).
 
 ### Deferred: read-only SQL query tool

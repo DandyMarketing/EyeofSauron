@@ -26,6 +26,7 @@ import { chooseGrouping, bucketDays, DAILY_HARD_MAX, type DayRow } from '../lib/
 import { readClosures } from '../lib/venue-closures-read.js';
 import { closuresIn, CLOSURE_NOTE } from '../lib/venue-closures.js';
 import { bucketMealPeriods, unusualMealDays, type HourRow } from '../lib/meal-period-buckets.js';
+import { cancellationNotice } from '../lib/cancellation-notice.js';
 
 /**
  * Said whenever a meal-period result holds a day far out of the ordinary
@@ -1101,7 +1102,7 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
     for (let offset = 0; ; offset += 1000) {
       const { data } = await supabase
         .from('reservations')
-        .select('business_date, party_size, status_simple, shift_category, arrival_time, is_walk_in, is_vip, booked_by, duration_min, seated_at, left_at')
+        .select('business_date, party_size, status_simple, shift_category, arrival_time, is_walk_in, is_vip, booked_by, duration_min, seated_at, left_at, slot_local, source_updated_at')
         .eq('venue_id', venue.id)
         .gte('business_date', range.from)
         .lte('business_date', range.to)
@@ -1287,6 +1288,8 @@ async function queryReservations(input: Record<string, any>): Promise<string> {
       cancelled_bookings: cancelled.length,
       cancelled_covers: covers(r => r.status_simple === 'Canceled'),
       cancellation_rate_pct: rows.length > 0 ? Number((cancelled.length / rows.length * 100).toFixed(1)) : null,
+      // How much notice each cancellation gave (issue b3c6181c, 17 Nov 2026).
+      cancellation_notice: cancelled.length ? cancellationNotice(cancelled) : undefined,
       // Average party size must sit on the same basis as the headline covers
       // figure. Dividing booked covers (which include cancellations) by total
       // bookings reported an average for guests who are not coming -- a fully
