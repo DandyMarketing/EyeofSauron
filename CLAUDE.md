@@ -1503,6 +1503,18 @@ reply is a starting position the person edits, never the decision itself.
 a word. Any failure answers `{suggestion: null}` and logs `[suggest]`, so the
 page shows nothing rather than an error.
 
+**Questions can be queued** (Khai, same day: "queue the queries"). While an
+answer is being written, Send stays open ("Queue" in Plan) and what is sent
+joins a numbered list above the box, each line with × to remove it -- Khai's
+choice of visible and removable, not editable -- and the page sends them one
+at a time as each answer finishes (`public/queue.js`, both pages, at most 10).
+**An answer that errors PAUSES the queue** ("Paused after an error",
+Resume, or an empty Send) rather than firing the rest into the same fault; a
+good answer resumes it. **Changing conversation empties it**: a question
+queued for one chat must never go into another. In Plan the brief being
+written counts as busy too, and the queue goes when it is done. A file still
+being read holds the queue until it is.
+
 ### AI usage and cost per person, 22 Oct 2026
 
 Khai: "track the usage of each person and calculate the cost based on the

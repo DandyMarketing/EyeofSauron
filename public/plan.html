@@ -27,6 +27,7 @@
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="modulepreload" href="/attachments.js">
 <link rel="modulepreload" href="/suggest.js">
+<link rel="modulepreload" href="/queue.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -547,6 +548,16 @@ const INTRO_HTML = thread.innerHTML;
 let conversationId = null;
 /** The suggested next reply; set once signed in (/suggest.js). */
 let suggest = null;
+/** Messages typed while the planner is still answering (/queue.js). */
+let queue = null;
+/** Send the next queued message once nothing is running. */
+function drainQueue() {
+  if (busy || !queue || !queue.size() || queue.isPaused()) return;
+  // A file still being read would miss the message; look again shortly.
+  if (attach?.busy()) { setTimeout(drainQueue, 500); return; }
+  const next = queue.next();
+  if (next) send(next);
+}
 /** Documents attached to this plan; set once signed in (/attachments.js). */
 let attach = null;
 /** The left sidebar of saved plans; set once signed in. */
@@ -602,6 +613,9 @@ let sidebar = null;
     });
     if (conversationId) attach.load(conversationId);
   }).catch(e => console.warn('[attach] could not load:', e));
+  import('/queue.js').then(m => {
+    queue = m.createQueue({ before: document.querySelector('footer .composer'), onResume: drainQueue });
+  }).catch(e => console.warn('[queue] could not load:', e));
   // A suggested reply to the planner's question after each answer (/suggest.js).
   import('/suggest.js').then(m => {
     suggest = m.createSuggest({ input, page: 'plan', token: () => token, before: document.querySelector('footer .composer') });
@@ -678,21 +692,36 @@ function addExcelLink(el, question) {
 
 function setBusy(on) {
   busy = on;
-  sendBtn.disabled = on;
+  // Send stays open while the planner works: what is sent then is queued.
   draftBtn.disabled = on || history.length === 0;
-  sendBtn.textContent = on ? '…' : 'Send';
+  sendBtn.textContent = on ? 'Queue' : 'Send';
+  input.placeholder = on ? 'Queue your next reply…' : 'Describe your event idea…';
+  // Whatever just finished (an answer, the brief), the next queued message goes.
+  if (!on) setTimeout(drainQueue, 0);
 }
 
-async function send() {
-  const message = input.value.trim();
-  if (!message || busy) return;
+async function send(queued) {
+  // From the queue (a string), or typed (Enter, or the button's click event).
+  const fromQueue = typeof queued === 'string';
+  const message = fromQueue ? queued : input.value.trim();
+  if (!message) {
+    // An empty Send on a paused queue resumes it.
+    if (queue?.isPaused()) { queue.resume(); drainQueue(); }
+    return;
+  }
+  // Still answering: the message waits its turn, visibly (/queue.js).
+  if (busy) {
+    if (queue && !fromQueue) {
+      if (queue.add(message)) { input.value = ''; input.style.height = 'auto'; }
+      else input.placeholder = 'The queue is full. Wait for an answer, then send.';
+    }
+    return;
+  }
   // A file still being read would miss this message; wait for it.
-  if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
-  input.placeholder = 'Describe your event idea…';
+  if (!fromQueue && attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
   suggest?.clear();
 
-  input.value = '';
-  input.style.height = 'auto';
+  if (!fromQueue) { input.value = ''; input.style.height = 'auto'; }
   markAnswered();
   addMessage('You', 'planner', '<p>' + escapeHtml(message).replace(/\n/g, '<br>') + '</p>');
   setBusy(true);
@@ -717,6 +746,7 @@ async function send() {
     if (!res.ok || data.error) {
       pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(data.error || 'Request failed') + '</div>';
       addReportLink(pending, { question: message, error: data.error || 'Request failed' });
+      queue?.pause();
       setBusy(false);
       return;
     }
@@ -739,6 +769,7 @@ async function send() {
     if (data.answer && data.answer.trim()) suggest?.after(message, data.answer);
     refreshProgress();
     attach?.sent();
+    queue?.resume();   // a good answer picks a paused queue back up
     if (data.conversation_id && data.conversation_id !== conversationId) {
       conversationId = data.conversation_id;
       // A new plan: list it now. The cheap model's title lands a second
@@ -749,6 +780,7 @@ async function send() {
   } catch (e) {
     pending.querySelector('.bubble').innerHTML = '<div class="err">' + escapeHtml(String(e.message || e)) + '</div>';
     addReportLink(pending, { question: message, error: String(e.message || e) });
+    queue?.pause();
   }
 
   setBusy(false);
@@ -1733,6 +1765,7 @@ function startNewPlan() {
   conversationId = null;
   attach?.reset();
   suggest?.clear();
+  queue?.clear();
   history = [];
   progressSeq++;
   lastProgress = null; lastProgressKey = '';
@@ -1767,6 +1800,7 @@ async function openPlan(id) {
   conversationId = id;
   attach?.load(id);
   suggest?.clear();
+  queue?.clear();
   // A different plan: its board starts from its own first reading, and a
   // slow reading of the plan just left is dropped rather than carried over.
   lastProgress = null; lastProgressKey = ''; progressSeq++;

@@ -26,6 +26,7 @@
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="modulepreload" href="/attachments.js">
 <link rel="modulepreload" href="/suggest.js">
+<link rel="modulepreload" href="/queue.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -966,6 +967,7 @@ let myVenues = [];
   import('/brief-badge.js').then(m => m.briefBadge(authToken));
   startAttachments();
   startSuggest();
+  startQueue();
   sidebar = window.ConvSidebar.mount({
     aside: document.getElementById('conv-sidebar'),
     header: document.querySelector('header'),
@@ -1590,6 +1592,28 @@ let conversationId = null;
  * token; until then the paperclip does nothing and questions carry no files.
  */
 let attach = null;
+/** Questions typed while an answer is being written (/queue.js). */
+let queue = null;
+function startQueue() {
+  import('/queue.js').then(m => {
+    queue = m.createQueue({ before: document.querySelector('.input-row'), onResume: drainQueue });
+  }).catch(e => console.warn('[queue] could not load:', e));
+}
+/** Send the next queued question once nothing is running. */
+function drainQueue() {
+  if (busy || !queue || !queue.size() || queue.isPaused()) return;
+  // A file still being read would miss the question; look again shortly.
+  if (attach?.busy()) { setTimeout(drainQueue, 500); return; }
+  const next = queue.next();
+  if (next) send(next);
+}
+/** The end of every answer, good or failed. A failure pauses the queue. */
+function finishTurn(ok) {
+  busy = false;
+  input.placeholder = 'Ask about your venues...';
+  if (ok) queue?.resume(); else queue?.pause();
+  drainQueue();
+}
 /** The suggested next message after each answer (/suggest.js). */
 let suggest = null;
 function startSuggest() {
@@ -1613,6 +1637,7 @@ function startNewChat() {
   conversationId = null;
   attach?.reset();
   suggest?.clear();
+  queue?.clear();
   history = [];
   // Back to how the app looks when you open it, chips and all.
   chat.innerHTML = WELCOME_HTML;
@@ -1647,6 +1672,7 @@ async function openConversation(id) {
   conversationId = id;
   attach?.load(id);
   suggest?.clear();
+  queue?.clear();
   sidebar?.refresh();
   history = [];
 
@@ -1700,21 +1726,35 @@ async function openConversation(id) {
 }
 
 
-async function send() {
-  const question = input.value.trim();
-  if (!question || busy) return;
+async function send(queued) {
+  // From the queue (a string), or typed (Enter, or the button's click event).
+  const fromQueue = typeof queued === 'string';
+  const question = fromQueue ? queued : input.value.trim();
+  if (!question) {
+    // An empty Send on a paused queue resumes it.
+    if (queue?.isPaused()) { queue.resume(); drainQueue(); }
+    return;
+  }
+  // Still answering: the question waits its turn, visibly (/queue.js).
+  if (busy) {
+    if (queue && !fromQueue) {
+      if (queue.add(question)) { input.value = ''; autoResize(); }
+      else input.placeholder = 'The queue is full. Wait for an answer, then send.';
+    }
+    return;
+  }
   // A file still being read would miss this question; wait for it.
-  if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
-  input.placeholder = 'Ask about your venues...';
+  if (!fromQueue && attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
   suggest?.clear();
 
   busy = true;
-  sendBtn.disabled = true;
-  input.value = '';
-  autoResize();
+  // Send stays open while answering: what is sent now is queued.
+  input.placeholder = 'Queue your next question…';
+  if (!fromQueue) { input.value = ''; autoResize(); }
 
   addMessage('user', question);
   const progress = createProgress();
+  let ok = false;
 
   try {
     /**
@@ -1738,8 +1778,7 @@ async function send() {
 
     if (outcome.fatal) {
       addErrorMessage('Error: ' + outcome.fatal, question);
-      busy = false;
-      sendBtn.disabled = false;
+      finishTurn(false);
       return;
     }
 
@@ -1827,14 +1866,14 @@ async function send() {
     if (history.length > 20) {
       history = history.slice(-20);
     }
+    ok = true;
 
   } catch (e) {
     progress.remove();
     addErrorMessage('Network error. Check your connection and try again.', question);
   }
 
-  busy = false;
-  sendBtn.disabled = false;
+  finishTurn(ok);
   input.focus();
 }
 </script>
