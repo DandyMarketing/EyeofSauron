@@ -26,7 +26,16 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = 'attach-css';
   style.textContent = `
-    .attach-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 auto 8px; max-width: 860px; }
+    .attach-row { position: relative; display: flex; flex-wrap: wrap; gap: 6px; margin: 0 auto 8px; max-width: 860px; }
+    .att-pop { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; box-sizing: border-box;
+      width: min(440px, 100%); max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+      padding: 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface);
+      box-shadow: 0 10px 28px rgba(46,42,37,0.18); }
+    .att-pop .att-chip { width: 100%; }
+    .att-pop .att-chip .att-name { flex: 1; min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+    .att-pop .att-chip .att-meta { white-space: normal; text-align: right; }
+    .att-pop-head { font-size: 13px; font-weight: 600; color: var(--text); padding: 0 2px 2px; }
+    .att-pop-sub { display: block; font-weight: 400; color: var(--text-muted); }
     .attach-row[hidden] { display: none; }
     .att-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; box-sizing: border-box;
       padding: 5px 6px 5px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
@@ -122,16 +131,36 @@ export function createAttachments(opts) {
     const open = files.filter(f => !sent.includes(f));
     let html = '';
     if (sent.length) {
-      html += '<button type="button" class="att-summary" aria-expanded="' + expanded + '">' +
+      html += '<button type="button" class="att-summary" aria-haspopup="true" aria-expanded="' + expanded + '">' +
         '<span class="att-clip">' + CLIP + '</span>' + sent.length + (sent.length === 1 ? ' file' : ' files') + ' in this chat' +
-        '<span class="att-caret">' + (expanded ? '▴' : '▾') + '</span></button>';
-      if (expanded) html += sent.map(chipHtml).join('');
+        '<span class="att-caret">' + (expanded ? '▾' : '▴') + '</span></button>';
+      /**
+       * A PULL-UP LIST over the chat (Khai, 23 Nov 2026: "use a pull up list
+       * on click"), not an inline list that pushes the box down -- so opening
+       * it never moves anything, on a phone least of all.
+       */
+      if (expanded) {
+        html += '<div class="att-pop" role="dialog" aria-label="Files in this chat">' +
+          '<div class="att-pop-head">Files in this chat<span class="att-pop-sub">kept 30 days · Sauron reads them for every question</span></div>' +
+          sent.map(chipHtml).join('') + '</div>';
+      }
     }
     html += open.map(chipHtml).join('');
     opts.row.innerHTML = html;
-    opts.row.querySelector('.att-summary')?.addEventListener('click', () => { expanded = !expanded; draw(); });
-    opts.row.querySelectorAll('.att-x').forEach(b => b.addEventListener('click', () => remove(b.closest('.att-chip').dataset.key)));
+    opts.row.querySelector('.att-summary')?.addEventListener('click', (e) => { e.stopPropagation(); expanded = !expanded; draw(); });
+    opts.row.querySelectorAll('.att-x').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      remove(b.closest('.att-chip').dataset.key);
+    }));
   }
+
+  // The list closes on a tap anywhere else, and on Escape.
+  document.addEventListener('click', (e) => {
+    if (expanded && !e.target.closest?.('.att-pop')) { expanded = false; draw(); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (expanded && e.key === 'Escape') { expanded = false; draw(); }
+  });
 
   async function upload(file) {
     const key = 'k' + (++seq);

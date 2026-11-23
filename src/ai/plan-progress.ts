@@ -89,14 +89,16 @@ export const DECISION_HINTS: Record<string, string> = {
 };
 
 // Short, because six sit side by side under the bar on a phone and longer
-// names were cut to "The camp..." and "Running t...".
+// names were cut to "The camp..." and "Running t...". Plain business words
+// (Khai, 23 Nov 2026: "rephrase these to make it easier to understand"),
+// ten characters at most.
 export const STAGE_LABELS: Record<Stage, string> = {
-  point: 'Point',
-  shape: 'Shape',
-  money: 'Money',
-  campaign: 'Campaign',
-  running: 'The night',
-  follow_through: 'Follow-up',
+  point: 'Purpose',
+  shape: 'Format',
+  money: 'Finance',
+  campaign: 'Marketing',
+  running: 'On the day',
+  follow_through: 'Post event',
 };
 
 const KEYS = PLAYBOOK.map(r => r.key);

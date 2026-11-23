@@ -353,11 +353,13 @@
   .pg-count b { color: var(--accent); }
   .pg-next { color: var(--text-muted); font-size: 13px; text-align: right; }
   .pg-next span { color: var(--text); }
-  .pg-bar { display: flex; gap: 4px; }
-  .pg-seg { flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .pg-stagegrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px 4px; }
+  .pg-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; color: var(--text-muted); }
+  .pg-cell span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pg-seg { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
   .pg-seg i { display: block; height: 100%; background: var(--success); }
-  .pg-stages { display: flex; gap: 4px; font-size: 13px; color: var(--text-muted); }
-  .pg-stages span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Six across left each label 52 px on a phone, and cut "Marketing" short. */
+  @media (max-width: 560px) { .pg-stagegrid { grid-template-columns: repeat(3, 1fr); } }
   .pg-body {
     padding: 4px 12px 12px; font-size: 14px; border-top: 1px solid var(--border);
     /* Opened inside a sticky footer it must not swallow the conversation. */
@@ -1483,7 +1485,7 @@ async function prepareDraft(force) {
     if (p && blocking.length > 0) {
       const el = addMessage('Planner', 'agent',
         '<div class="not-ready"><p><strong>The brief is not ready yet.</strong> ' +
-        p.counts.settled + ' of ' + p.counts.applicable + ' decided; these still need settling:</p>' +
+        p.counts.settled + ' of ' + p.counts.applicable + ' decisions made; these still need settling:</p>' +
         // What is missing, not just which decision -- so a wrong reading can be
         // seen to be wrong, and a right one says exactly what to do.
         '<ul>' + blocking.map(o => {
@@ -1688,11 +1690,12 @@ function renderProgress(p) {
   const done = p.settled || [], open = p.open || [], wait = p.waiting_on || [];
   box.innerHTML =
     '<details' + (progressOpen ? ' open' : '') + '><summary>' +
-      '<div class="pg-head"><span class="pg-count"><b>' + p.counts.settled + '</b> of ' + p.counts.applicable + ' decided</span>' +
+      '<div class="pg-head"><span class="pg-count"><b>' + p.counts.settled + '</b> of ' + p.counts.applicable + ' decisions made</span>' +
         (p.next ? '<span class="pg-next">Next: <span>' + escapeHtml(p.next.label) + '</span></span>' : '<span class="pg-next">Ready for the brief</span>') +
       '</div>' +
-      '<div class="pg-bar">' + (p.stages || []).map(seg).join('') + '</div>' +
-      '<div class="pg-stages">' + (p.stages || []).map(s => '<span>' + escapeHtml(s.label) + '</span>').join('') + '</div>' +
+      // Each stage is ONE cell, its bar over its label, so a phone can lay
+      // them out three to a row and no label is cut off (23 Nov 2026).
+      '<div class="pg-stagegrid">' + (p.stages || []).map(s => '<div class="pg-cell">' + seg(s) + '<span>' + escapeHtml(s.label) + '</span></div>').join('') + '</div>' +
     '</summary><div class="pg-body">' +
       (done.length ? '<h4>Decided</h4>' + done.map(d => d.by_you
         ? row('done', '✓', d.label + ' (by you)', d.summary === 'Marked as decided by you' ? '' : d.summary, btn(d.key, false, 'Undo'))
