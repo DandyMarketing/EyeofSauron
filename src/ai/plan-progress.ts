@@ -98,7 +98,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   money: 'Finance',
   campaign: 'Marketing',
   running: 'On the day',
-  follow_through: 'Post event',
+  follow_through: 'Wrap-up',
 };
 
 const KEYS = PLAYBOOK.map(r => r.key);
