@@ -57,7 +57,7 @@ export function cleanEventNumbers(d: Record<string, unknown>): { values: Record<
  */
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TEXT_FIELDS = ['name', 'occasion', 'concept_type', 'partner', 'format', 'demographic', 'concept', 'usp',
-  'venue_fit', 'baseline_basis', 'ad_plan', 'abort_condition', 'brief'];
+  'venue_fit', 'baseline_basis', 'ad_plan', 'abort_condition', 'brief', 'kv_brief'];
 
 export function cleanDraft(raw: unknown): { draft: Record<string, any>; notes: string[] } {
   const d: Record<string, any> = raw && typeof raw === 'object' ? { ...(raw as any) } : {};

@@ -317,6 +317,23 @@ export const PLAYBOOK: PlaybookRow[] = [
     blocking_when: 'the event has a campaign, printed menus or partners',
   },
   {
+    // Khai, 23 Nov 2026: the plan now writes a creative brief for the graphic
+    // designer, and a brief with no direction is a request to guess. Asked
+    // here so the KV brief can carry the answer; not blocking, because "let
+    // the designer propose" is a legitimate answer and the brief says so.
+    key: 'look_and_feel',
+    stage: 'campaign',
+    decision: 'The look of the key visual: the mood, two or three references (past posts, other brands, a feeling), colours or finishes, and anything to avoid -- enough that the designer is not guessing.',
+    ask: 'What should the key visual feel like? Any references -- a past post of ours, another brand, a mood -- and anything it must NOT look like?',
+    weak: '"Make it look nice." Or "the designer knows", and the first draft comes back wrong and costs a week.',
+    challenge:
+      'A DESIGNER GIVEN NO DIRECTION GUESSES, and the guess costs a round of revisions the campaign cannot spare. Get the mood in a few words, two or three references, and one thing to avoid. Tie it to the selling point already agreed: the visual is how the guest sees the USP before reading a word. If the person genuinely wants the designer to propose, that is an answer -- say it goes in the brief as "designer to propose, two routes".',
+    measurable: false,
+    sharpen_with: ['query_top_posts', 'query_post_patterns'],
+    blocking: false,
+    applies_when: 'the event has a key visual or any artwork',
+  },
+  {
     key: 'launch_and_takedown',
     stage: 'campaign',
     decision: 'The day comms go live -- website pop-up, Google Business Profile, Chope, LinkTree, scheduled stories -- and the day they come down after the event, each with an owner.',

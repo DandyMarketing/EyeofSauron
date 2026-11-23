@@ -47,12 +47,13 @@ import { EVENT_AGENT_PROMPT, eventDraftTool, eventPnlTool } from './ai/event-age
 import { progressTool, summariseProgress, planTranscript, decisionGuide, boardNote, cleanPrevious, withPrevious, parseStored, applyManual, toggleManual } from './ai/plan-progress.js';
 import { buildEventPnlWorkbook, computePnl } from './lib/event-pnl.js';
 import { briefDocx, briefMondayHtml } from './lib/brief-doc.js';
+import { kvBriefTool, cleanKvBrief, kvBriefMarkdown } from './lib/kv-brief.js';
 import { buildDashboardWorkbook } from './lib/dashboard-export.js';
 import { buildAnswerWorkbook, exportFileName, invalidExport } from './lib/answer-export.js';
 import { venueRates } from './lib/event-rates.js';
 import { cleanEventNumbers, cleanDraft, taskDue } from './lib/event-fields.js';
 import { draftStage } from './lib/draft-stages.js';
-import { groupTitle, buildItems, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, readWorkstreams, workstreamOf, workstreams, briefItems, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, pnlUpdateHtml, type PlannerTask } from './lib/monday-plan.js';
+import { groupTitle, buildItems, EXTRA_PARENTS, titleTool, titlePrompt, TITLE_SYSTEM, readTitles, readWorkstreams, workstreamOf, workstreams, briefItems, sanitiseItems, sanitiseUpdates, planChanges, alreadyPosted, attachTargets, kvTarget, pnlUpdateHtml, type PlannerTask } from './lib/monday-plan.js';
 import { listPlanningBoards, readBoardForPlan, readPeople, readInactiveNames, createGroupWithItems, updateItems, itemUpdateTexts, postUpdateWithFile } from './lib/monday-client.js';
 import { modelFor, isModelFeatureError } from './ai/model-policy.js';
 import { prettyVenue } from './ai/progress.js';
@@ -1007,6 +1008,31 @@ async function pnlPass(user: SessionUser, history: ChatMessage[]): Promise<{ pnl
 }
 
 /**
+ * The creative brief for the graphic designer's key visual (Khai, 23 Nov
+ * 2026), from the same transcript, started at the same moment as the brief
+ * and the P&L so it adds no wait. Never throws: a failed KV brief is a note on
+ * the draft, never a lost one. Returned as markdown, the one text the page,
+ * the Word file and Monday all use.
+ */
+async function kvPass(user: SessionUser, history: ChatMessage[]): Promise<{ kv: string | null; ms: number }> {
+  const t0 = Date.now();
+  try {
+    const base = await draftRequest(user, history);
+    const r = await withEffortFallback({
+      ...base,
+      tools: [kvBriefTool() as any],
+      tool_choice: { type: 'tool' as const, name: 'record_kv_brief' },
+    }, p => anthropic.messages.create(p));
+    const call = r.content.find((b: any) => b.type === 'tool_use') as any;
+    const kv = cleanKvBrief(call?.input?.kv);
+    return { kv: kv ? kvBriefMarkdown(kv) : null, ms: Date.now() - t0 };
+  } catch (e: any) {
+    console.error(`[plan/draft] KV brief pass failed for ${user.email ?? user.id}: ${e?.message ?? e}`);
+    return { kv: null, ms: Date.now() - t0 };
+  }
+}
+
+/**
  * Finish a fresh draft: the P&L from its own pass, then every field checked
  * against its kind of cell. Shared by both draft routes. If there is no P&L,
  * the draft SAYS so rather than the download button quietly not being there.
@@ -1015,6 +1041,7 @@ async function finishDraft(
   user: SessionUser, input: any, stopReason: string | null,
   pnl: Promise<{ pnl: any | null; ms: number }>, onStage?: (label: string) => void,
   timing?: { started: number; briefMs: number },
+  kvBrief?: Promise<{ kv: string | null; ms: number }>,
 ) {
   const notes: string[] = [];
   if (stopReason === 'max_tokens') {
@@ -1023,12 +1050,16 @@ async function finishDraft(
   onStage?.('Finishing the P&L');
   const p = await pnl;
   let d = { ...input, ...(p.pnl ? { pnl: p.pnl } : {}) };
+  onStage?.('Finishing the key visual brief');
+  const k = kvBrief ? await kvBrief : { kv: null, ms: 0 };
+  if (k.kv) d = { ...d, kv_brief: k.kv };
+  else if (kvBrief) notes.push('No key visual brief in this draft: it could not be written from this conversation. Prepare the brief again, or settle the look and the formats with the planner first.');
   if (!hasPnl(d)) {
     notes.push('No P&L in this draft: the conversation never set out the revenue lines (rooms, times, covers and prices). Settle them with the planner, then prepare the brief again.');
   }
   // How long each half took, so "faster" is measured rather than felt.
   if (timing) {
-    console.log(`[plan/draft] ${user.email ?? user.id}: brief ${(timing.briefMs / 1000).toFixed(1)}s, P&L ${(p.ms / 1000).toFixed(1)}s (in parallel), total ${((Date.now() - timing.started) / 1000).toFixed(1)}s, effort ${modelFor('planning', process.env).effort}`);
+    console.log(`[plan/draft] ${user.email ?? user.id}: brief ${(timing.briefMs / 1000).toFixed(1)}s, P&L ${(p.ms / 1000).toFixed(1)}s, KV brief ${(k.ms / 1000).toFixed(1)}s (in parallel), total ${((Date.now() - timing.started) / 1000).toFixed(1)}s, effort ${modelFor('planning', process.env).effort}`);
   }
   const checked = cleanDraft(d);
   return { ...checked.draft, _notes: [...notes, ...checked.notes] };
@@ -1055,11 +1086,12 @@ app.post('/api/plan/draft', async (c) => {
   try {
     const started = Date.now();
     const pnl = pnlPass(user, history);
+    const kv = kvPass(user, history);
     const structured = await withEffortFallback(await draftRequest(user, history), p => anthropic.messages.create(p));
     const briefMs = Date.now() - started;
     const call = structured.content.find((b: any) => b.type === 'tool_use') as any;
     if (!call?.input) return c.json({ error: 'Could not build a draft from this conversation.' }, 422);
-    return c.json({ draft: await finishDraft(user, call.input, structured.stop_reason ?? null, pnl, undefined, { started, briefMs }) });
+    return c.json({ draft: await finishDraft(user, call.input, structured.stop_reason ?? null, pnl, undefined, { started, briefMs }, kv) });
   } catch (e: any) {
     console.error(`[plan/draft] failed for ${user.email ?? user.id}: ${e?.stack ?? e?.message ?? e}`);
     return c.json({ error: humanApiError(e) }, 500);
@@ -1099,6 +1131,7 @@ app.post('/api/plan/draft-stream', async (c) => {
       // The P&L starts now, beside the brief, not after it.
       const started = Date.now();
       const pnl = pnlPass(user, history);
+      const kv = kvPass(user, history);
       let last = '';
       const msg = await withEffortFallback(await draftRequest(user, history), p => {
         const s = anthropic.messages.stream(p);
@@ -1115,7 +1148,7 @@ app.post('/api/plan/draft-stream', async (c) => {
         // The P&L from its own pass, then every field checked against its
         // kind of cell, before the person sees it.
         const draft = await finishDraft(user, call.input, msg.stop_reason ?? null, pnl,
-          label => push({ kind: 'stage', label }), { started, briefMs });
+          label => push({ kind: 'stage', label }), { started, briefMs }, kv);
         push({ kind: 'done', draft });
       }
     } catch (e: any) {
@@ -1296,18 +1329,23 @@ app.post('/api/plan/brief-docx', async (c) => {
   const gated = requireTerms(c, user);
   if (gated) return gated;
   const d = await c.req.json<any>().catch(() => null);
-  if (!d?.brief || typeof d.brief !== 'string') return c.json({ error: 'This draft has no brief text yet.' }, 400);
+  // kind 'kv': the designer's key visual brief, built the same way (Khai, 23 Nov 2026).
+  const kv = d?.kind === 'kv';
+  const text = kv ? d?.kv_brief : d?.brief;
+  if (!text || typeof text !== 'string') return c.json({ error: kv ? 'This draft has no key visual brief.' : 'This draft has no brief text yet.' }, 400);
   try {
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-    const buf = await briefDocx(d.brief.slice(0, 100_000), {
-      title: String(d.name || 'Event brief'),
+    // The KV brief's own "# Key visual brief: ..." line becomes the file's title.
+    const buf = await briefDocx((kv ? text.replace(/^# [^\n]*\n+/, '') : text).slice(0, 100_000), {
+      title: kv ? `Key visual brief: ${String(d.name || 'event')}` : String(d.name || 'Event brief'),
+      kind: kv ? 'Creative brief for the designer' : undefined,
       subtitle: d.start_date ? (d.start_date === d.end_date || !d.end_date ? d.start_date : `${d.start_date} to ${d.end_date}`) : undefined,
       generatedOn: today,
     });
     return new Response(new Uint8Array(buf), {
       headers: {
         'Content-Type': DOCX_TYPE,
-        'Content-Disposition': `attachment; filename="${safeFileName(d.name, 'Event')}_Brief.docx"`,
+        'Content-Disposition': `attachment; filename="${safeFileName(d.name, 'Event')}_${kv ? 'KV_Brief' : 'Brief'}.docx"`,
         'Cache-Control': 'no-store',
       },
     });
@@ -1416,7 +1454,15 @@ app.post('/api/events', async (c) => {
     pnl: d.pnl ?? null,
     other_spaces: spaces.length ? spaces : null,
   };
-  let { data: created, error } = await supabaseAdmin.from('events').insert(withBrief).select('id').single();
+  // The designer's KV brief (migration 071), kept like the brief: before the
+  // migration runs it is left off rather than costing the event its brief.
+  const kvBriefText = typeof d.kv_brief === 'string' && d.kv_brief.trim() ? d.kv_brief.slice(0, 100_000) : null;
+  let { data: created, error } = await supabaseAdmin.from('events')
+    .insert((kvBriefText ? { ...withBrief, kv_brief: kvBriefText } : withBrief) as typeof withBrief).select('id').single();
+  if (error && /kv_brief/.test(error.message)) {
+    console.error(`[events] KV brief not stored (is migration 071 applied?): ${error.message}`);
+    ({ data: created, error } = await supabaseAdmin.from('events').insert(withBrief).select('id').single());
+  }
   if (error && /\b(brief|pnl|other_spaces)\b/.test(error.message)) {
     console.error(`[events] brief/pnl/other spaces not stored (are migrations 056 and 057 applied?): ${error.message}`);
     ({ data: created, error } = await supabaseAdmin.from('events').insert(eventRow).select('id').single());
@@ -1753,7 +1799,7 @@ app.post('/api/plan/monday/preview', async (c) => {
 type SendBody = {
   event_id?: string;
   venues?: Array<{ slug: string; board_id: string; group_title: string; items: unknown; updates?: unknown }>;
-  attach?: { brief?: boolean; pnl?: boolean };
+  attach?: { brief?: boolean; pnl?: boolean; kv?: boolean };
   draft?: any;
 };
 
@@ -1837,7 +1883,7 @@ async function sendPlanToMonday(
      * beside the group, never undoes it: the tasks are the point, and a
      * missing file is put right by downloading it and dropping it in.
      */
-    const attached: { brief?: string; pnl?: string } = {};
+    const attached: { brief?: string; pnl?: string; kv?: string } = {};
     const targets = attachTargets(items.map(i => i.name));
     const d = body.draft ?? {};
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
@@ -1851,7 +1897,9 @@ async function sendPlanToMonday(
       if (idx === null) return { id: undefined, revised: false };
       const made = r.item_ids[idx];
       if (made) return { id: made, revised: false };
-      const there = onBoard.find(i => i.name.trim().toLowerCase() === items[idx].name.trim().toLowerCase());
+      const same = (i: { name: string }) => i.name.trim().toLowerCase() === items[idx].name.trim().toLowerCase();
+      // A sub-item too: the KV brief goes on a task, which is one.
+      const there = onBoard.find(same) ?? onBoard.flatMap(i => i.subitems ?? []).find(same);
       return { id: there?.id, revised: !!there };
     };
     const post = async (id: string, revised: boolean, html: string, file: { name: string; type: string; data: Buffer | ArrayBuffer }) => {
@@ -1884,9 +1932,32 @@ async function sendPlanToMonday(
         } catch (e: any) { attached.pnl = `Not attached: ${e?.message ?? e}`; }
       }
     }
+    /**
+     * The designer's KV brief onto the task that requests the key visual
+     * (Khai, 23 Nov 2026), with its Word file, so whoever owns that task hands
+     * the designer the brief from where they already work. No such task: the
+     * Event brief item, and the result says where it went.
+     */
+    if (body.attach?.kv) {
+      const kvIdx = kvTarget(items.map(i => i.name));
+      const t = targetId(kvIdx ?? targets.brief);
+      const where = kvIdx === null ? ' (on Event brief: no key visual task in this group)' : '';
+      if (typeof d.kv_brief !== 'string' || !d.kv_brief.trim()) attached.kv = 'Not attached: the draft had no key visual brief.';
+      else if (!t.id) attached.kv = 'Not attached: there is no key visual task or Event brief item in this group.';
+      else {
+        say({ stage: 'Attaching the KV brief' });
+        try {
+          const kvText = d.kv_brief.slice(0, 100_000).replace(/^# [^\n]*\n+/, '');
+          const doc = await briefDocx(kvText, { title: `Key visual brief: ${issued.ev.name}`, generatedOn: today, kind: 'Creative brief for the designer' });
+          const res = await post(t.id, t.revised, briefMondayHtml(kvText, `Key visual brief: ${issued.ev.name}`),
+            { name: `${safeFileName(issued.ev.name, 'Event')}_KV_Brief.docx`, type: DOCX_TYPE, data: doc });
+          attached.kv = res + where;
+        } catch (e: any) { attached.kv = `Not attached: ${e?.message ?? e}`; }
+      }
+    }
     say({ stage: 'Done' });
 
-    console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}, ${changed.updated} changed${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}${changed.error ? ` -- ${changed.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}`);
+    console.log(`[plan/monday] ${user.email ?? user.id} ${existing ? 'finished' : 'sent'} "${title}" on ${board.name} (${board.id}): ${r.created} made, ${r.skipped} already there, of ${items.length}, ${changed.updated} changed${r.notes.length ? `; ${r.notes.length} without people` : ''}${r.error ? ` -- ${r.error}` : ''}${changed.error ? ` -- ${changed.error}` : ''}; brief ${attached.brief ?? 'not asked'}; P&L ${attached.pnl ?? 'not asked'}; KV brief ${attached.kv ?? 'not asked'}`);
     return {
       slug: v.slug, venue: venue.name, board: board.name, group_title: title,
       url: account ? `https://${account}.monday.com/boards/${board.id}` : null,

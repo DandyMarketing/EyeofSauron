@@ -403,3 +403,12 @@ test('the note carries the full task, the date and who it is for -- escaped', ()
   assert.match(html, /Due 2026-11-17/);
   assert.match(html, /For: Lukasz Kononowicz, salvin/);
 });
+
+test('the KV brief goes on the task that requests the key visual, not one that merely mentions it', async () => {
+  const { kvTarget } = await import('./monday-plan.js');
+  assert.equal(kvTarget(['Venue & build', 'Deliver key visual in all sizes', 'Request key visual', 'Book the DJ']), 2);
+  assert.equal(kvTarget(['Share KVs with GR and Ops', 'Book the DJ']), 0, 'any KV task when none requests it');
+  assert.equal(kvTarget(['Submit KV request']), 0);
+  assert.equal(kvTarget(['Book the DJ', 'Event brief']), null);
+  assert.equal(kvTarget(['Kvass tasting']), null, 'a word that merely starts with kv is not one');
+});

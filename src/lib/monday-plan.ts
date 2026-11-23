@@ -686,6 +686,22 @@ export function attachTargets(names: string[]): { brief: number | null; pnl: num
   return { brief: find(/^event brief$|concept\s*(&|and)\s*mechanic/), pnl: find(/financial forecast/) };
 }
 
+/**
+ * Where the designer's KV brief goes (Khai, 23 Nov 2026): the task about the
+ * key visual -- the planner always writes one ("Request key visual") -- and,
+ * of several, the one about REQUESTING or briefing it, since that is the task
+ * whose owner hands the brief to the designer. Null when the group has none;
+ * the send then puts it on the Event brief item and says so.
+ */
+export function kvTarget(names: string[]): number | null {
+  const kv = /key\s*visual|\bkvs?\b/i;
+  const ask = /request|brief|submit/i;
+  const first = names.findIndex(n => kv.test(n) && ask.test(n));
+  if (first >= 0) return first;
+  const any = names.findIndex(n => kv.test(n));
+  return any >= 0 ? any : null;
+}
+
 /** The Financial Forecast update: the headline figures, with where each rate came from. */
 export function pnlUpdateHtml(
   title: string,

@@ -1240,6 +1240,29 @@ waits on the stream: a closed page only stops the progress messages -- and
 **Keep working** shrinks it to a badge above the message box, so Plan stays
 usable; tapping the badge opens it again. The results open when it finishes.
 
+**A creative brief for the designer's key visual** (Khai, 23 Nov 2026: "you
+should also create a creative brief for the graphic designer to do the KV
+design"). Its sections are the team's OWN request form -- the archived 2024
+"Graphic Designer Requests" board asked for concept, USP/marketing angle,
+event date and time, formats from a fixed list with sizes, handles and
+hashtags, print copies and a due date -- plus mood and references, copy lines
+and the approver, decided with Khai. Written by its own forced-tool pass
+(`record_kv_brief`, `src/lib/kv-brief.ts`) started BESIDE the brief and the P&L,
+so it adds no wait, under the draft's rule: nothing that was not settled; a
+copy line or date the conversation only suggested is marked *(proposal)*, and
+what is missing is listed under "Still to settle" rather than filled.
+`cleanKvBrief()` is the control: an unknown format becomes Other with its name
+kept, a date that is not a date moves to the open points. One markdown text
+feeds the draft (folded, "Key visual brief for the designer"), the Word file
+(`/api/plan/brief-docx` with `kind: 'kv'`), the PDF and Monday. On Send to
+Monday a third tick puts it, with the Word file, on the task that REQUESTS the
+key visual (`kvTarget()`), or on Event brief when the group has none, and says
+which. Stored on the event at Create (migration 071, `events.kv_brief`;
+fail-soft before it runs). The planner gained a **Look & feel** row (mood,
+references, what to avoid; not blocking -- "designer to propose" is an answer).
+The Instagram story is written 1080 x 1920: the old form said 1920 x 1080,
+which is landscape.
+
 **Not built:** reading Done / Stuck back into the brief.
 
 ### The look: warm light, Inter, settled 13 Oct 2026
