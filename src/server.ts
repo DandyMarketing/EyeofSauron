@@ -8,6 +8,7 @@ import { HourlyCache } from './lib/hourly-cache.js';
 
 const venuesCache = new HourlyCache<Array<{ id: string; name: string; slug: string }>>();
 const recommendationsCache = new HourlyCache<any[]>();
+import { SUGGEST_MODEL, suggestPrompt, cleanSuggestion, type SuggestPage } from './ai/suggest.js';
 import { saveUpload, listFiles, deleteFile, documentsFor, attachFiles, purgeExpiredFiles } from './lib/file-store.js';
 import { isPeriodKind, customRangeError, type PeriodKind, type CustomRange, type CustomCompare } from './lib/dashboard-window.js';
 import { buildDailyReport } from './lib/daily-report-read.js';
@@ -68,6 +69,8 @@ import { monthWindow, summariseUsage, type SummaryRow } from './lib/ai-usage-sum
 // Metered: every call through this client is the planner's, and is costed to
 // whoever is signed in (src/lib/ai-usage.ts).
 const anthropic = metered(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }), 'plan_other');
+// The suggested next message (23 Nov 2026), costed as its own purpose.
+const suggester = metered(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }), 'suggest');
 import { socialFreshness } from './lib/social-freshness.js';
 import { rlsAudit } from './lib/rls-audit.js';
 import { probeStaffAny } from './lib/staffany-probe.js';
@@ -664,6 +667,43 @@ app.delete('/api/files/:id', async (c) => {
   if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
   const ok = await deleteFile(user.id, c.req.param('id'));
   return ok ? c.json({ ok: true }) : c.json({ error: 'Could not remove that file.' }, 400);
+});
+
+/**
+ * The suggested next message after an answer (Khai, 23 Nov 2026). Called by
+ * the page once the answer is on screen, so it never slows the answer. Never
+ * fails the page: anything that goes wrong is no suggestion.
+ */
+app.post('/api/suggest', async (c) => {
+  const user = await requireAuth(c);
+  if (!user) return c.json({ error: 'Not authenticated. Please log in.' }, 401);
+  const gated = requireTerms(c, user);
+  if (gated) return gated;
+  const body = await c.req.json().catch(() => null) as { page?: string; question?: string; answer?: string } | null;
+  const page: SuggestPage = body?.page === 'plan' ? 'plan' : 'chat';
+  // Costed to the page it helps (ai_usage.feature allows query/plan/system);
+  // the purpose 'suggest' still tells it apart there.
+  setFeature(page === 'plan' ? 'plan' : 'query');
+  const question = typeof body?.question === 'string' ? body.question : '';
+  const answer = typeof body?.answer === 'string' ? body.answer : '';
+  if (!answer.trim()) return c.json({ suggestion: null });
+  const p = suggestPrompt(page, question, answer);
+  try {
+    const r = await suggester.messages.create({
+      model: SUGGEST_MODEL,
+      max_tokens: 400,
+      // A one-line suggestion needs no deliberation; low effort, no thinking.
+      thinking: { type: 'disabled' },
+      output_config: { effort: 'low' },
+      system: p.system,
+      messages: [{ role: 'user', content: p.user }],
+    } as any);
+    const text = (r.content as any[]).filter(b => b.type === 'text').map(b => b.text).join('');
+    return c.json({ suggestion: cleanSuggestion(text) });
+  } catch (e: any) {
+    console.warn(`[suggest] no suggestion for ${user.email ?? user.id}: ${String(e?.message ?? e).slice(0, 200)}`);
+    return c.json({ suggestion: null });
+  }
 });
 
 // --- AI query endpoint (auth required) ---

@@ -1484,6 +1484,25 @@ file containing a NUL byte refused as not text.
   (Khai, 23 Nov 2026: the full chips staying after reading looked weird and
   would pile up); only files reading, waiting to go, or in error show in full.
 
+### A suggested next message, 23 Nov 2026
+
+Khai: "suggest answers in the chat like how claude does it now ... then
+pressing tab fills in". After each answer in Query and Plan, ONE suggestion:
+in Query the follow-up question they would likely ask, in Plan a reply to the
+planner's question. On a computer it is the empty box's grey placeholder
+("Tab ⇥  ..." -- the hint first, so a long suggestion's "…" never cuts it) and
+Tab fills it; on a phone, which has no Tab, it is a chip above the box and a
+tap fills it. **It only fills the box, never sends**, and it goes the moment
+the next message starts (`public/suggest.js`, one module for both pages).
+Written by **Haiku 5.5** (`SAURON_MODEL_SUGGEST`), thinking off, low effort,
+about US$0.0005 each, recorded in `ai_usage` under the page it helps, purpose
+`suggest` (`POST /api/suggest`, `src/ai/suggest.ts`). The prompt forbids a figure,
+date or name the exchange did not contain -- a hint; in Plan a suggested
+reply is a starting position the person edits, never the decision itself.
+`cleanSuggestion()` is the control on shape: one line, 120 characters, cut at
+a word. Any failure answers `{suggestion: null}` and logs `[suggest]`, so the
+page shows nothing rather than an error.
+
 ### AI usage and cost per person, 22 Oct 2026
 
 Khai: "track the usage of each person and calculate the cost based on the

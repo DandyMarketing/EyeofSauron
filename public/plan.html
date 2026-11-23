@@ -26,6 +26,7 @@
 <link rel="modulepreload" href="/board-suggest.js">
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="modulepreload" href="/attachments.js">
+<link rel="modulepreload" href="/suggest.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -544,6 +545,8 @@ const INTRO_HTML = thread.innerHTML;
  * id, so an abandoned first message never leaves an empty plan behind.
  */
 let conversationId = null;
+/** The suggested next reply; set once signed in (/suggest.js). */
+let suggest = null;
 /** Documents attached to this plan; set once signed in (/attachments.js). */
 let attach = null;
 /** The left sidebar of saved plans; set once signed in. */
@@ -599,6 +602,10 @@ let sidebar = null;
     });
     if (conversationId) attach.load(conversationId);
   }).catch(e => console.warn('[attach] could not load:', e));
+  // A suggested reply to the planner's question after each answer (/suggest.js).
+  import('/suggest.js').then(m => {
+    suggest = m.createSuggest({ input, page: 'plan', token: () => token, before: document.querySelector('footer .composer') });
+  }).catch(e => console.warn('[suggest] could not load:', e));
   // A report this person sent that is now resolved: "fixed, try it again".
   import('/report-issue.js')
     .then(m => m.showReportUpdates({ token, page: 'plan', input: '#input', before: '#thread' }))
@@ -682,6 +689,7 @@ async function send() {
   // A file still being read would miss this message; wait for it.
   if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
   input.placeholder = 'Describe your event idea…';
+  suggest?.clear();
 
   input.value = '';
   input.style.height = 'auto';
@@ -728,6 +736,7 @@ async function send() {
     history.push({ role: 'assistant', content: data.answer || '' });
     addExcelLink(pending, message);
     addReportLink(pending, { question: message, answer: data.answer || '' });
+    if (data.answer && data.answer.trim()) suggest?.after(message, data.answer);
     refreshProgress();
     attach?.sent();
     if (data.conversation_id && data.conversation_id !== conversationId) {
@@ -1723,6 +1732,7 @@ function renderProgress(p) {
 function startNewPlan() {
   conversationId = null;
   attach?.reset();
+  suggest?.clear();
   history = [];
   progressSeq++;
   lastProgress = null; lastProgressKey = '';
@@ -1756,6 +1766,7 @@ async function openPlan(id) {
 
   conversationId = id;
   attach?.load(id);
+  suggest?.clear();
   // A different plan: its board starts from its own first reading, and a
   // slow reading of the plan just left is dropped rather than carried over.
   lastProgress = null; lastProgressKey = ''; progressSeq++;

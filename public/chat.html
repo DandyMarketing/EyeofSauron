@@ -25,6 +25,7 @@
 <link rel="modulepreload" href="/sse-parse.js">
 <link rel="modulepreload" href="/report-issue.js">
 <link rel="modulepreload" href="/attachments.js">
+<link rel="modulepreload" href="/suggest.js">
 <link rel="modulepreload" href="/answer-excel.js">
 <script>
 /* Light or dark, decided before anything draws so there is no flash: this
@@ -626,7 +627,7 @@
   }
 
   #question:focus { border-color: var(--accent); }
-  #question::placeholder { color: var(--text-muted); }
+  #question::placeholder { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   #send {
     background: var(--accent);
@@ -964,6 +965,7 @@ let myVenues = [];
   // How much of this week's brief is new to this person (menu badge).
   import('/brief-badge.js').then(m => m.briefBadge(authToken));
   startAttachments();
+  startSuggest();
   sidebar = window.ConvSidebar.mount({
     aside: document.getElementById('conv-sidebar'),
     header: document.querySelector('header'),
@@ -1588,6 +1590,13 @@ let conversationId = null;
  * token; until then the paperclip does nothing and questions carry no files.
  */
 let attach = null;
+/** The suggested next message after each answer (/suggest.js). */
+let suggest = null;
+function startSuggest() {
+  import('/suggest.js').then(m => {
+    suggest = m.createSuggest({ input: document.getElementById('question'), page: 'chat', token: () => authToken, before: document.querySelector('.input-row') });
+  }).catch(e => console.warn('[suggest] could not load:', e));
+}
 function startAttachments() {
   import('/attachments.js').then(m => {
     attach = m.createAttachments({
@@ -1603,6 +1612,7 @@ function startAttachments() {
 function startNewChat() {
   conversationId = null;
   attach?.reset();
+  suggest?.clear();
   history = [];
   // Back to how the app looks when you open it, chips and all.
   chat.innerHTML = WELCOME_HTML;
@@ -1636,6 +1646,7 @@ async function openConversation(id) {
 
   conversationId = id;
   attach?.load(id);
+  suggest?.clear();
   sidebar?.refresh();
   history = [];
 
@@ -1695,6 +1706,7 @@ async function send() {
   // A file still being read would miss this question; wait for it.
   if (attach?.busy()) { input.placeholder = 'Still reading your file, one moment…'; return; }
   input.placeholder = 'Ask about your venues...';
+  suggest?.clear();
 
   busy = true;
   sendBtn.disabled = true;
@@ -1777,6 +1789,7 @@ async function send() {
       ? data.answer
       : '_No response was returned. Please try asking again._';
     const answerBubble = addMessage('assistant', answerText);
+    if (data.answer && data.answer.trim()) suggest?.after(question, data.answer);
 
     // External sources, attached under the answer they belong to.
     //
