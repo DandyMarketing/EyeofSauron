@@ -1449,6 +1449,9 @@ have a file they want to upload to compare with something". Decided with
 Khai: **PDF, Excel/CSV and Word**, in **Query and Plan**, and only the **TEXT**
 is kept, with the conversation, for **30 days** (`conversation_files`,
 migration 069). The file itself is read at upload and thrown away.
+**Markdown and plain text** (.md, .txt) were added 21 Nov 2026 (migration 070
+widens the `kind` check to 'text'): already text, so read as they are, with a
+file containing a NUL byte refused as not text.
 
 - **Read on the server** (`src/lib/file-extract.ts`): spreadsheets through
   SheetJS (every sheet, .xls too), Word through its XML (headings and tables

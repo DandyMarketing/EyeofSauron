@@ -10,7 +10,7 @@
 export interface UploadedDocument {
   id: string;
   filename: string;
-  kind: 'pdf' | 'spreadsheet' | 'docx';
+  kind: 'pdf' | 'spreadsheet' | 'docx' | 'text';
   summary: string;
   content: string;
   truncated: boolean;

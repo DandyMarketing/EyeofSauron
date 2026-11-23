@@ -1,7 +1,8 @@
 /**
  * Documents people upload to Query and Plan, turned into text (Khai, 13 Nov
  * 2026: "they sometimes may have a file they want to upload to compare with
- * something"). PDF, Excel/CSV and Word, decided with Khai.
+ * something"). PDF, Excel/CSV and Word, decided with Khai; Markdown and plain
+ * text added 21 Nov 2026.
  *
  * TEXT IS WHAT IS KEPT, never the file: the extracted text is stored with the
  * conversation for 30 days (conversation_files, migration 069) and the upload
@@ -23,7 +24,7 @@
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
 
-export type FileKind = 'pdf' | 'spreadsheet' | 'docx';
+export type FileKind = 'pdf' | 'spreadsheet' | 'docx' | 'text';
 
 /** 10 MB: a phone photo of a PDF is well under; a raw export of a year is not. */
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -48,9 +49,11 @@ export function kindOf(filename: string): FileKind | { error: string } {
   if (ext === 'pdf') return 'pdf';
   if (['xlsx', 'xlsm', 'xls', 'csv'].includes(ext)) return 'spreadsheet';
   if (ext === 'docx') return 'docx';
+  // Markdown and plain text are already text: read as they are (21 Nov 2026).
+  if (['md', 'markdown', 'txt'].includes(ext)) return 'text';
   if (ext === 'doc') return { error: 'Old Word files (.doc) cannot be read. Open it in Word and save it as .docx, then upload that.' };
   if (['numbers', 'pages', 'key'].includes(ext)) return { error: 'Apple Numbers/Pages files cannot be read. Export it as Excel, PDF or Word first.' };
-  return { error: 'Only PDF, Excel (.xlsx, .xls), CSV and Word (.docx) files can be uploaded.' };
+  return { error: 'Only PDF, Excel (.xlsx, .xls), CSV, Word (.docx), Markdown (.md) and text (.txt) files can be uploaded.' };
 }
 
 export async function extractText(buf: Buffer, filename: string): Promise<Extracted> {
@@ -58,7 +61,25 @@ export async function extractText(buf: Buffer, filename: string): Promise<Extrac
   if (typeof kind !== 'string') throw new Error(kind.error);
   if (kind === 'spreadsheet') return spreadsheetText(buf, filename);
   if (kind === 'docx') return docxText(buf);
+  if (kind === 'text') return plainText(buf);
   return pdfText(buf);
+}
+
+// --- Markdown and plain text ---------------------------------------------------
+
+function plainText(buf: Buffer): Extracted {
+  // A NUL byte means a binary file renamed to .txt, not text.
+  if (buf.includes(0)) throw new Error('That file is not plain text.');
+  let text = buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const truncated = text.length > MAX_TEXT_CHARS;
+  if (truncated) text = text.slice(0, MAX_TEXT_CHARS) + '\n[The rest of the file is NOT shown here, to keep it within size.]';
+  return {
+    kind: 'text',
+    text,
+    summary: `${text.split(/\s+/).filter(Boolean).length.toLocaleString('en-SG')} words`,
+    truncated,
+    notes: truncated ? ['The file is longer than Sauron reads at once; only the first part was kept.'] : [],
+  };
 }
 
 // --- spreadsheets ------------------------------------------------------------

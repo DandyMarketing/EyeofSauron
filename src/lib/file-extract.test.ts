@@ -10,6 +10,9 @@ test('file kinds by name; unreadable kinds say what to do', () => {
   assert.equal(kindOf('old.xls'), 'spreadsheet');
   assert.equal(kindOf('export.csv'), 'spreadsheet');
   assert.equal(kindOf('brief.docx'), 'docx');
+  assert.equal(kindOf('notes.md'), 'text');
+  assert.equal(kindOf('notes.MARKDOWN'), 'text');
+  assert.equal(kindOf('list.txt'), 'text');
   assert.match((kindOf('brief.doc') as any).error, /save it as \.docx/);
   assert.match((kindOf('photo.jpg') as any).error, /Only PDF/);
 });
@@ -121,4 +124,20 @@ test('a PDF with no text layer is a scan, and is marked for Claude to read', asy
   assert.equal(x.needsVision, true);
   assert.equal(x.pages, 1);
   assert.equal(x.text, '');
+});
+
+test('Markdown and plain text are read as they are', async () => {
+  const md = '\uFEFF# Supplier notes\r\n\r\n| Item | Price |\r\n|---|---|\r\n| Limes | $4.20 |\r\n';
+  const x = await extractText(Buffer.from(md, 'utf8'), 'notes.md');
+  assert.equal(x.kind, 'text');
+  assert.equal(x.text, '# Supplier notes\n\n| Item | Price |\n|---|---|\n| Limes | $4.20 |\n');
+  assert.equal(x.summary, '14 words');
+  assert.equal(x.truncated, false);
+});
+
+test('a binary file renamed to .txt is refused, and a huge one is cut and says so', async () => {
+  await assert.rejects(() => extractText(Buffer.from([0x50, 0x4b, 0x00, 0x01]), 'fake.txt'), /not plain text/);
+  const x = await extractText(Buffer.from('word '.repeat(40000)), 'long.txt');
+  assert.equal(x.truncated, true);
+  assert.match(x.text, /NOT shown here/);
 });

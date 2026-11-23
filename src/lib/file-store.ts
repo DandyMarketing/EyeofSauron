@@ -99,7 +99,7 @@ export async function saveUpload(
     x = await extractText(file.bytes, name);
   } catch (e: any) {
     console.error(`[files] could not read ${name} for ${userId}: ${e?.message ?? e}`);
-    return { ok: false, error: `Sauron could not read that file (${String(e?.message ?? e).slice(0, 160)}). If it opens normally on your computer, try saving it again as ${kind === 'spreadsheet' ? '.xlsx' : kind === 'docx' ? '.docx' : 'PDF'}.` };
+    return { ok: false, error: `Sauron could not read that file (${String(e?.message ?? e).slice(0, 160)}). If it opens normally on your computer, try saving it again as ${kind === 'spreadsheet' ? '.xlsx' : kind === 'docx' ? '.docx' : kind === 'text' ? 'UTF-8 text' : 'PDF'}.` };
   }
 
   let readBy: 'text' | 'vision' = 'text';

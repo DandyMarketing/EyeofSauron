@@ -10,11 +10,11 @@
  * it to the conversation once that conversation exists.
  */
 
-const ACCEPT = '.pdf,.xlsx,.xls,.xlsm,.csv,.docx';
+const ACCEPT = '.pdf,.xlsx,.xls,.xlsm,.csv,.docx,.md,.markdown,.txt';
 const MAX_FILES = 5;
 const MAX_BYTES = 10 * 1024 * 1024;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const ICON = { pdf: 'PDF', spreadsheet: 'XLS', docx: 'DOC' };
+const ICON = { pdf: 'PDF', spreadsheet: 'XLS', docx: 'DOC', text: 'TXT' };
 
 function injectStyles() {
   if (document.getElementById('attach-css')) return;
@@ -69,7 +69,7 @@ export function createAttachments(opts) {
   opts.button.classList.add('att-btn');
   opts.button.type = 'button';
   opts.button.innerHTML = CLIP;
-  opts.button.title = 'Attach a PDF, Excel, CSV or Word file';
+  opts.button.title = 'Attach a PDF, Excel, CSV, Word, Markdown or text file';
   opts.button.setAttribute('aria-label', 'Attach a file');
   opts.button.addEventListener('click', () => picker.click());
   picker.addEventListener('change', () => {
