@@ -1479,7 +1479,10 @@ file containing a NUL byte refused as not text.
   a chip per file showing what was read (pages, sheets and rows) with × to
   remove, the blinking eye while reading, and a plain sentence when a file
   cannot be read (".doc: save it as .docx"). A file chosen before the first
-  question goes with it and joins the conversation once it is saved.
+  question goes with it and joins the conversation once it is saved. Once
+  sent, files fold into ONE line, "2 files in this chat", that opens on tap
+  (Khai, 23 Nov 2026: the full chips staying after reading looked weird and
+  would pile up); only files reading, waiting to go, or in error show in full.
 
 ### AI usage and cost per person, 22 Oct 2026
 

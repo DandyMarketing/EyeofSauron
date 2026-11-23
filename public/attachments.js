@@ -15,6 +15,11 @@ const MAX_FILES = 5;
 const MAX_BYTES = 10 * 1024 * 1024;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ICON = { pdf: 'PDF', spreadsheet: 'XLS', docx: 'DOC', text: 'TXT' };
+/** The badge from the name when the kind is missing, so nothing reads a bare "FILE". */
+const kindFromName = name => {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  return ext === 'pdf' ? 'PDF' : ['xlsx', 'xls', 'xlsm', 'csv'].includes(ext) ? 'XLS' : ext === 'docx' ? 'DOC' : ['md', 'markdown', 'txt'].includes(ext) ? 'TXT' : 'FILE';
+};
 
 function injectStyles() {
   if (document.getElementById('attach-css')) return;
@@ -37,6 +42,11 @@ function injectStyles() {
     .att-chip.err .att-msg { max-width: 300px; }
     .att-chip.warn .att-meta { color: var(--warning, var(--text-muted)); }
     .att-chip .eye-busy { flex: none; }
+    .att-summary { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer; }
+    .att-summary:hover { color: var(--text); border-color: var(--accent); }
+    .att-summary .att-clip svg { width: 14px; height: 14px; display: block; }
+    .att-summary .att-caret { font-size: 11px; }
     .att-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px;
       border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; padding: 0; }
     .att-btn:hover { color: var(--accent); border-color: var(--accent); }
@@ -78,25 +88,48 @@ export function createAttachments(opts) {
     for (const f of chosen) upload(f);
   });
 
+  /**
+   * Files already sent sit behind ONE line that opens on tap (Khai, 23 Nov
+   * 2026: the chips staying in full after reading "looks weird", and would
+   * pile up as a conversation grows). Only what still needs the person's eye
+   * shows in full: files reading, files going with the next message, and
+   * errors. A conversation holds at most MAX_FILES, so the opened list is
+   * bounded too.
+   */
+  let expanded = false;
+
+  function chipHtml(f) {
+    if (f.error) {
+      return '<span class="att-chip err" data-key="' + f.key + '"><span class="att-msg"><strong>' + esc(f.name) + '</strong>: ' + esc(f.error) + '</span>' +
+        '<button class="att-x" type="button" aria-label="Dismiss">×</button></span>';
+    }
+    if (f.busy) {
+      return '<span class="att-chip" data-key="' + f.key + '">' + (window.eyeBusy ? window.eyeBusy(18) : '') +
+        '<span class="att-name">' + esc(f.name) + '</span><span class="att-meta">reading…</span></span>';
+    }
+    const meta = [f.summary, f.read_by === 'vision' ? 'scan, read by Claude' : '', f.truncated ? 'partly read' : ''].filter(Boolean).join(' · ');
+    return '<span class="att-chip' + (f.truncated ? ' warn' : '') + '" data-key="' + f.key + '" title="' + esc(f.name) + (f.pending ? ' — goes with your next message' : ' — in this conversation for 30 days') + '">' +
+      '<span class="att-ico">' + (ICON[f.kind] || kindFromName(f.name)) + '</span><span class="att-name">' + esc(f.name) + '</span>' +
+      '<span class="att-meta">' + esc(meta) + '</span>' +
+      '<button class="att-x" type="button" aria-label="Remove ' + esc(f.name) + '">×</button></span>';
+  }
+
   function draw() {
     const live = files.filter(f => !f.error).length;
     opts.button.disabled = live >= MAX_FILES;
     opts.row.hidden = files.length === 0;
-    opts.row.innerHTML = files.map(f => {
-      if (f.error) {
-        return '<span class="att-chip err" data-key="' + f.key + '"><span class="att-msg"><strong>' + esc(f.name) + '</strong>: ' + esc(f.error) + '</span>' +
-          '<button class="att-x" type="button" aria-label="Dismiss">×</button></span>';
-      }
-      if (f.busy) {
-        return '<span class="att-chip" data-key="' + f.key + '">' + (window.eyeBusy ? window.eyeBusy(18) : '') +
-          '<span class="att-name">' + esc(f.name) + '</span><span class="att-meta">reading…</span></span>';
-      }
-      const meta = [f.summary, f.read_by === 'vision' ? 'scan, read by Claude' : '', f.truncated ? 'partly read' : ''].filter(Boolean).join(' · ');
-      return '<span class="att-chip' + (f.truncated ? ' warn' : '') + '" data-key="' + f.key + '" title="' + esc(f.name) + (f.pending ? ' — goes with your next message' : ' — in this conversation for 30 days') + '">' +
-        '<span class="att-ico">' + (ICON[f.kind] || 'FILE') + '</span><span class="att-name">' + esc(f.name) + '</span>' +
-        '<span class="att-meta">' + esc(meta) + '</span>' +
-        '<button class="att-x" type="button" aria-label="Remove ' + esc(f.name) + '">×</button></span>';
-    }).join('');
+    const sent = files.filter(f => f.id && !f.pending && !f.error && !f.busy);
+    const open = files.filter(f => !sent.includes(f));
+    let html = '';
+    if (sent.length) {
+      html += '<button type="button" class="att-summary" aria-expanded="' + expanded + '">' +
+        '<span class="att-clip">' + CLIP + '</span>' + sent.length + (sent.length === 1 ? ' file' : ' files') + ' in this chat' +
+        '<span class="att-caret">' + (expanded ? '▴' : '▾') + '</span></button>';
+      if (expanded) html += sent.map(chipHtml).join('');
+    }
+    html += open.map(chipHtml).join('');
+    opts.row.innerHTML = html;
+    opts.row.querySelector('.att-summary')?.addEventListener('click', () => { expanded = !expanded; draw(); });
     opts.row.querySelectorAll('.att-x').forEach(b => b.addEventListener('click', () => remove(b.closest('.att-chip').dataset.key)));
   }
 
@@ -150,13 +183,15 @@ export function createAttachments(opts) {
     /** The question went through: pending uploads now belong to the conversation. */
     sent() {
       files = files.filter(f => !f.error).map(f => ({ ...f, pending: false }));
+      expanded = false;
       draw();
     },
     /** A new, empty conversation. */
-    reset() { files = []; draw(); },
+    reset() { files = []; expanded = false; draw(); },
     /** A reopened conversation: show the files it still holds. */
     async load(conversationId) {
       files = [];
+      expanded = false;
       draw();
       try {
         const res = await fetch('/api/conversations/' + conversationId + '/files', { headers: { Authorization: 'Bearer ' + opts.token() } });
