@@ -1222,6 +1222,24 @@ with GR and Ops, launch comms, taking them down, the debrief. A test maps every
 NP template step to the row that now carries it. After-event tasks take a
 NEGATIVE "days before" (-7 is a week after the END), dated by `taskDue()`.
 
+**The task notes and their tags** (23 Nov 2026). The first NYE send made
+every sub-item and NONE of its notes: `create_update` refused `mentions_list`
+("Unknown argument") under the API version every call names, 2024-10 --
+which is no longer on Monday's version list at all. Only the tagged note now
+names 2026-10 (`MENTIONS_API`); everything else stays put until it can be
+tested against the boards. A refused tag costs the TAG, never the note: it is
+posted untagged and the send says so once. And sending again posts the note
+on any sub-item already there with NO update -- one with any update, ours or a
+person's, is left alone -- so the NYE group is repaired by sending it again
+(`postDetailNote()`, `monday-client.test.ts` with Monday faked at fetch).
+
+**Sending opens its own card in the middle of the screen** (Khai, same day:
+the progress sat at the foot of a long preview). It says the writing runs on
+the SERVER and carries on if the page is left -- true because the send never
+waits on the stream: a closed page only stops the progress messages -- and
+**Keep working** shrinks it to a badge above the message box, so Plan stays
+usable; tapping the badge opens it again. The results open when it finishes.
+
 **Not built:** reading Done / Stuck back into the brief.
 
 ### The look: warm light, Inter, settled 13 Oct 2026

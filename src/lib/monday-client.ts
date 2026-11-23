@@ -22,12 +22,27 @@ const MONDAY_API = 'https://api.monday.com/v2';
 
 export const PLANNING_WORKSPACE_ID = process.env.MONDAY_PLANNING_WORKSPACE_ID || '5127390';
 
-async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+/**
+ * The API version every call uses. 2024-10 is no longer on Monday's list of
+ * versions (checked 23 Nov 2026: 2025-04 to 2026-10 maintained, 2026-10
+ * current), so Monday answers with whatever it maps it to. Moving every call
+ * at once could change how column values are written, untested against the
+ * boards, so only a call that NEEDS a newer argument names one (MENTIONS_API).
+ */
+const DEFAULT_API = '2024-10';
+/**
+ * create_update's `mentions_list` -- tagging people on a note -- is unknown
+ * under DEFAULT_API: every sub-item note of the first NYE send failed with
+ * 'Unknown argument "mentions_list"' (Khai, 23 Nov 2026). It is in 2026-10.
+ */
+export const MENTIONS_API = '2026-10';
+
+async function gql<T>(query: string, variables: Record<string, unknown> = {}, apiVersion = DEFAULT_API): Promise<T> {
   const token = process.env.MONDAY_API_TOKEN;
   if (!token) throw new Error('MONDAY_API_TOKEN is not set');
   const res = await fetch(MONDAY_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: token, 'API-Version': '2024-10' },
+    headers: { 'Content-Type': 'application/json', Authorization: token, 'API-Version': apiVersion },
     body: JSON.stringify({ query, variables }),
   });
   if (!res.ok) throw new Error(`Monday.com ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -256,6 +271,35 @@ export async function readInactiveNames(ids: number[]): Promise<Map<number, stri
  *
  * `item_ids` lines up with `items`: null for an item skipped or not reached.
  */
+/**
+ * One task note, tagging its people. The note matters more than the tag: when
+ * Monday refuses the tags (an unknown argument, or a person it will not
+ * mention), the same note is posted untagged rather than lost. Answers
+ * 'tagged', 'untagged' (tags refused), 'posted' (no tags asked for), or why
+ * the note could not be posted at all.
+ */
+async function postDetailNote(itemId: string, body: string, people: number[], tag: boolean): Promise<string> {
+  if (tag && people.length) {
+    try {
+      await gql(
+        'mutation ($i: ID!, $b: String!, $m: [UpdateMention]) { create_update(item_id: $i, body: $b, mentions_list: $m) { id } }',
+        { i: itemId, b: body, m: people.map(id => ({ id: String(id), type: 'User' })) },
+        MENTIONS_API,
+      );
+      return 'tagged';
+    } catch (e: any) {
+      console.warn(`[monday] note tags refused on item ${itemId}, posting untagged: ${String(e?.message ?? e).slice(0, 200)}`);
+    }
+  }
+  try {
+    await gql('mutation ($i: ID!, $b: String!) { create_update(item_id: $i, body: $b) { id } }', { i: itemId, b: body });
+    // 'untagged' only when tags were tried and refused; 'posted' when none were asked for.
+    return tag && people.length ? 'untagged' : 'posted';
+  } catch (e: any) {
+    return String(e?.message ?? e);
+  }
+}
+
 export async function createGroupWithItems(
   board: BoardForPlan, title: string,
   items: SendItem[],
@@ -287,13 +331,19 @@ export async function createGroupWithItems(
   const notes: string[] = [];
   let created = 0;
   let skipped = 0;
+  // Once Monday refuses tags, the rest of the notes go untagged without asking again.
+  let mentionsRefused = false;
 
   // Parents by name: what is in the group already, then what this run makes.
   const parentId = new Map<string, string>();
   const subNames = new Map<string, Set<string>>();
+  const subIdByName = new Map<string, string>();
+  // Sub-items already on the board whose note may never have been posted.
+  const noteCheck: Array<{ id: string; item: typeof items[number] }> = [];
   for (const it of existing?.items ?? []) {
     parentId.set(key(it.name), it.id);
     subNames.set(it.id, new Set((it.subitems ?? []).map(x => key(x.name))));
+    for (const x of it.subitems ?? []) subIdByName.set(it.id + '|' + key(x.name), String(x.id));
   }
 
   const peopleRefused = (e: any) => /assign person|person with id/i.test(String(e?.message ?? e));
@@ -351,7 +401,12 @@ export async function createGroupWithItems(
     }
     const under = subNames.get(pid) ?? new Set<string>();
     // Its own name, or the long name an earlier send used before names were shortened.
-    if ([item.name, ...(item.aliases ?? [])].some(n => under.has(key(n)))) { skipped++; step(item.name); continue; }
+    const found = [item.name, ...(item.aliases ?? [])].find(n => under.has(key(n)));
+    if (found) {
+      const sid = subIdByName.get(pid + '|' + key(found));
+      if (sid && item.detail) noteCheck.push({ id: sid, item });
+      skipped++; step(item.name); continue;
+    }
     try {
       let r: { create_subitem: { id: string } };
       try {
@@ -372,20 +427,45 @@ export async function createGroupWithItems(
        */
       if (item.detail) {
         const people = [...new Set([...item.owner_ids, ...item.assigned_ids])];
-        try {
-          await gql(
-            'mutation ($i: ID!, $b: String!, $m: [UpdateMention]) { create_update(item_id: $i, body: $b, mentions_list: $m) { id } }',
-            { i: itemIds[i], b: detailUpdateHtml(item.detail, item.deadline, people.map(nameOf)), m: people.map(id => ({ id: String(id), type: 'User' })) },
-          );
-        } catch (e: any) {
-          notes.push(`"${item.name}" was made, but its detail note was not posted: ${e?.message ?? e}`);
-        }
+        const r = await postDetailNote(itemIds[i]!, detailUpdateHtml(item.detail, item.deadline, people.map(nameOf)), people, !mentionsRefused);
+        if (r === 'untagged') mentionsRefused = true;
+        else if (r !== 'tagged' && r !== 'posted') notes.push(`"${item.name}" was made, but its detail note was not posted: ${r}`);
       }
       step(item.name);
     } catch (e: any) {
       return { group_id: groupId, created, skipped, item_ids: itemIds, notes, error: `Stopped at "${item.name}": ${e?.message ?? e}` };
     }
   }
+  /**
+   * Sending again FINISHES a group, notes included (23 Nov 2026: the first NYE
+   * send made every sub-item but none of its notes, Monday having refused the
+   * tags). A sub-item already there with NO update at all gets its note now;
+   * one with any update -- ours or a person's -- is left alone, so nothing is
+   * posted twice.
+   */
+  let backfilled = 0;
+  for (let k = 0; k < noteCheck.length; k += 50) {
+    const chunk = noteCheck.slice(k, k + 50);
+    let bare: Set<string>;
+    try {
+      const d = await gql<{ items: Array<{ id: string; updates: Array<{ id: string }> }> }>(
+        'query ($i: [ID!]) { items(ids: $i) { id updates(limit: 1) { id } } }', { i: chunk.map(c => c.id) });
+      bare = new Set((d.items ?? []).filter(x => !(x.updates ?? []).length).map(x => String(x.id)));
+    } catch (e: any) {
+      notes.push(`Could not check the existing tasks for missing notes: ${e?.message ?? e}`);
+      break;
+    }
+    for (const c of chunk) {
+      if (!bare.has(c.id)) continue;
+      const people = [...new Set([...c.item.owner_ids, ...c.item.assigned_ids])];
+      const r = await postDetailNote(c.id, detailUpdateHtml(c.item.detail!, c.item.deadline, people.map(nameOf)), people, !mentionsRefused);
+      if (r === 'untagged') mentionsRefused = true;
+      if (r === 'tagged' || r === 'posted' || r === 'untagged') backfilled++;
+      else notes.push(`"${c.item.name}" is on the board, but its missing note could not be posted: ${r}`);
+    }
+  }
+  if (backfilled) notes.push(`${backfilled} task note${backfilled === 1 ? '' : 's'} an earlier send could not post ${backfilled === 1 ? 'was' : 'were'} added to tasks already on the board.`);
+  if (mentionsRefused) notes.push('The task notes were posted without tagging people: Monday refused the tags. Nobody was notified by them; the names are in each note.');
   return { group_id: groupId, created, skipped, item_ids: itemIds, notes };
 }
 
