@@ -209,14 +209,31 @@ for (const t of targets as any[]) {
       continue;
     }
 
+    /**
+     * The P&L in its OWN try (22 Nov 2026). It used to share one with the bills
+     * and sales invoices below, so when Xero answered Fat Prince's November P&L
+     * with a 500 the throw skipped the month's bills and sales too -- one
+     * failure on Xero's side cost a night of Flash COGS. A failed P&L is
+     * reported and the rest of the month is still fetched.
+     *
+     * A final P&L is not re-fetched just because its bills are missing --
+     * that would spend a call rewriting rows that cannot have changed.
+     */
+    let r: { stored: boolean; lines: number; error?: string; stale_removed?: number } =
+      { stored: false, lines: 0, error: undefined };
+    let plFailed = false;
+    if (!plFinal) {
+      try {
+        r = await ingestProfitAndLoss(t.tenant_id, period.start, period.end);
+      } catch (e: any) {
+        plFailed = true;
+        const message = String(e?.message ?? e);
+        console.error(`  ${period.label}: P&L FAILED — ${message.slice(0, 200)} (bills and sales are still fetched)`);
+        errors.push(`${label} ${period.label}: P&L ${message.slice(0, 200)}`);
+      }
+    }
+
     try {
-      /**
-       * A final P&L is not re-fetched just because its bills are missing --
-       * that would spend a call rewriting rows that cannot have changed.
-       */
-      const r = plFinal
-        ? { stored: false, lines: 0, error: undefined as string | undefined }
-        : await ingestProfitAndLoss(t.tenant_id, period.start, period.end);
 
       if (r.stored) {
         stored++;
@@ -230,7 +247,7 @@ for (const t of targets as any[]) {
         }
       }
 
-      if (salesReady && (r.stored || billsMissing || salesBackfill)) {
+      if (salesReady && (r.stored || billsMissing || salesBackfill || plFailed)) {
         const si = await ingestSalesInvoices(t.tenant_id, period.start, period.end, paceMs);
         const sc = await ingestCustomerCredits(t.tenant_id, period.start, period.end, paceMs);
         salesLines += si.lines + sc.lines;
@@ -244,7 +261,7 @@ for (const t of targets as any[]) {
         if (si.unusable + sc.unusable > 0) findings.push(`${label} ${period.label}: ${si.unusable + sc.unusable} sales document(s) had no id or no readable date and were skipped`);
       }
 
-      if (withBills && (r.stored || billsMissing)) {
+      if (withBills && (r.stored || billsMissing || plFailed)) {
         const b = await ingestSupplierBills(t.tenant_id, period.start, period.end, paceMs);
         if (plFinal) billsBackfilled++;
         billLines += b.lines;
@@ -298,7 +315,7 @@ for (const t of targets as any[]) {
         }
       }
 
-      if (!plFinal && !r.stored) {
+      if (!plFinal && !r.stored && !plFailed) {
         // Reconciliation refused it. This is a FINDING about the ledger, not a
         // failed run -- and the whole reason the gate exists.
         console.log(`  ${period.label}: REFUSED — ${r.error ?? 'did not reconcile'}`);

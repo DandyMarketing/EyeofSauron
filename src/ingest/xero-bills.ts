@@ -6,6 +6,7 @@ import {
   toSalesInvoiceRow, toSalesInvoiceLineRows, toCustomerCreditRow, toCustomerCreditLineRows,
 } from '../parsers/xero/sales-invoices.js';
 import { payrollAccountIds, looksLikePersonalPay } from '../lib/payroll-accounts.js';
+import { xeroFetch } from './xero-fetch.js';
 
 /**
  * Supplier bills from Xero, with their lines.
@@ -344,7 +345,8 @@ async function ingestDocuments(
   let unmappedAccountLines = 0;
 
   for (;;) {
-    const res = await fetch(`${XERO_API}/${source.endpoint}?where=${where}&page=${page}`, {
+    // Retried on Xero's own 5xx and rate limits (22 Nov 2026): see xero-fetch.ts.
+    const res = await xeroFetch(`${XERO_API}/${source.endpoint}?where=${where}&page=${page}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Xero-tenant-id': tenantId,

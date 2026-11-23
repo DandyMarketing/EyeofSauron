@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getAccessToken } from './xero.js';
 import { parseProfitAndLoss, reconcileSections, type SectionCheck } from '../parsers/xero/profit-and-loss.js';
+import { xeroFetch } from './xero-fetch.js';
 
 /**
  * Fetch and store a Profit & Loss period from Xero.
@@ -57,7 +58,8 @@ export async function fetchProfitAndLoss(
    */
   const url = `${XERO_API}/Reports/ProfitAndLoss?fromDate=${fromDate}&toDate=${toDate}&standardLayout=true`;
 
-  const res = await fetch(url, {
+  // Retried on Xero's own 5xx and rate limits (22 Nov 2026): see xero-fetch.ts.
+  const res = await xeroFetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Xero-tenant-id': tenantId,

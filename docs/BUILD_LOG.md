@@ -1641,6 +1641,27 @@ result sizes from `tool_trace` before reaching for summaries: the next largest
 are `query_profit_and_loss` (48,000 characters on average) and
 `query_supplier_bills` (16,000).
 
+### 5.16 One Xero 500 cost a venue a night of bills
+**Symptom.** The nightly Xero job on 22 Nov 2026 showed as crashed in Railway.
+Its log: Fat Prince's November P&L "FAILED — Xero P&L request failed: 500 ...
+An error occurred in Xero". Firangi and Neon Pigeon ran normally. Less obvious
+in the same log: Fat Prince had NO bills, credit notes or sales invoices
+fetched that night, where the night before it had 156 bills.
+**Root cause.** Two, stacked. Xero's P&L and invoice requests had no retry,
+so one failure on Xero's side -- gone by the next request -- failed the
+month. And the P&L shared one `try` with the bills and sales invoices after
+it, so the P&L's throw skipped them too: Flash COGS for the venue went a
+night stale over a report that had nothing to do with bills. The job then
+exited 1, which Railway shows as a crash.
+**Fix.** `xeroFetch()` (`src/ingest/xero-fetch.ts`) retries 429 (honouring
+Retry-After, capped at a minute), 500/502/503/504 and dropped connections,
+three times with 2/4/8-second waits, and never retries 400/401/403/404. Both
+the P&L and the invoice fetchers use it. The P&L now has its own `try`; a
+failed one is reported and the month's bills and sales are still fetched. No
+data was lost: November is not final, so the next night re-fetches it.
+**Recurs?** **Any job that runs several independent fetches in one `try`.**
+One failure should cost its own data, never its neighbours'.
+
 ---
 
 ## 6. Process failures
