@@ -15,6 +15,7 @@ import { netSalesOf, serviceChargeOf, foodAndBevSalesOf, grossSalesOf, salesFigu
 import { groupPosts, ratioContextFrom, type Dimension } from './post-patterns.js';
 import { fetchMediaThumbnails } from '../ingest/meta.js';
 import { retentionRates, retentionCaveats, totalCounts, cohortRates, comparableCohorts, lookbackCoverage, truncationCaveat, type RetentionCounts, type Cohort } from '../lib/retention.js';
+import { valueByGroup, VALUE_NOTE, type ValueRow } from '../lib/guest-value.js';
 import { monthlyDistribution, distributionCaveats, rateChange, type VisitRow } from '../lib/visit-distribution.js';
 import { monthlyLeadTime, leadTimeCaveats, medianChange, leadTimeWindow, bookingsByCreatedDay, type LeadTimeRow } from '../lib/booking-lead-time.js';
 import { decompose, compareTill, precedingPeriod, TILL_BASIS, type PeriodRow, type TillTotals } from '../lib/revenue-decomposition.js';
@@ -2203,6 +2204,14 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
     : scopeVenues(allVenues, input);
   if (venues.length === 0) return JSON.stringify({ error: `Unknown venue: "${input.venue_slug}"` });
 
+  /**
+   * What each group SPENDS (migration 072, Khai 26 Nov 2026), asked at the
+   * same moment as the counts. Fail-soft: before 072 runs, or if it fails,
+   * the retention answer is exactly what it was, with a note saying why the
+   * spend is missing -- spend is an addition, never a reason to lose the counts.
+   */
+  const valuePromise = supabase.rpc('guest_value', { p_start: input.start_date, p_end: input.end_date, p_lookback: lookback })
+    .then(r => r, (e: any) => ({ data: null, error: { message: String(e?.message ?? e) } as any }));
   const { data, error } = await supabase.rpc('guest_retention', {
     p_start: input.start_date,
     p_end: input.end_date,
@@ -2291,6 +2300,17 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
     };
   });
 
+  // Spend per group, per venue in view; the group line sums venues before dividing.
+  const valueRes = await valuePromise;
+  const valueRows = ((valueRes as any).data ?? []) as Array<ValueRow & { venue_id: string }>;
+  const valueError: string | null = (valueRes as any).error ? String((valueRes as any).error.message) : null;
+  if (valueError) console.warn(`[guest_value] spend not added to retention: ${valueError}`);
+  const inView = new Set(venues.map(v => v.id));
+  for (const sv of scoped as any[]) {
+    const id = venues.find(v => v.slug === sv.slug)?.id;
+    sv.spend_by_group = valueError ? null : valueByGroup(valueRows.filter(r => r.venue_id === id));
+  }
+
   const total = totalCounts(scoped.map(s => ({
     booked_guests: s.booked_guests,
     returning_here: s.returning_here,
@@ -2304,7 +2324,13 @@ async function queryGuestRetention(input: Record<string, any>): Promise<string> 
     venues: scoped,
     // Only meaningful when more than one venue is in view -- a "group" of one
     // is the venue again under a different heading.
-    group: venues.length > 1 ? { ...total, rates: retentionRates(total) } : null,
+    group: venues.length > 1 ? {
+      ...total, rates: retentionRates(total),
+      spend_by_group: valueError ? null : valueByGroup(valueRows.filter(r => inView.has(r.venue_id))),
+    } : null,
+    spend: valueError
+      ? { available: false, why: /does not exist|PGRST202|42883/i.test(valueError) ? 'Spend by group needs migration 072 (guest_value), not yet applied.' : `Spend by group could not be read: ${valueError}` }
+      : { available: true, how_to_read: VALUE_NOTE },
     /**
      * The same measure twice: once for the model, once for the person.
      *

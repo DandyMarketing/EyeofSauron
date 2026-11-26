@@ -1011,6 +1011,30 @@ year of history or less is withheld. The six months come from their own cache,
 refreshed daily, two RPCs at a time. In Query, any answer quoting or comparing
 a retention rate must also chart at least the six months before it.
 
+**What each kind of guest spends** (Khai, 26 Nov 2026). Revel's SevenRooms
+integration writes the POS bill onto the reservation, and Sauron had stored it
+all along (`pos_ticket_id`, `payment_net`) without using it. Checked first,
+last 90 days: 97.6-99.3% of completed bookings carry a bill, 98-99% of those
+a spend above zero, none over $1,000 a cover, no bill on two bookings; and
+SevenRooms spend is 86-92% of Revel net sales in every month May-Nov 2026 at
+every venue -- under 100%, so no tax or service charge is added; the rest is
+walk-ups never put in SevenRooms. `guest_value()` (migration 072) returns spend
+by the SAME groups as `guest_retention()` -- returning here, crossed from a
+sister, new to the group -- checked on synthetic data to give identical guest
+counts. Spend counts only bookings with a bill AND a spend above zero; per
+cover divides by THOSE bookings' covers, never all covers; under 95% linked a
+group is marked thin (`src/lib/guest-value.ts`). `query_guest_retention`
+returns it as `spend_by_group`, fail-soft before 072 runs. **Not the
+dashboard yet** (Khai: Query first). **A guest is the profile the booking is
+under** -- usually the booker -- so a regular booked by a friend counts as the
+friend, and the people at the table are not counted at all; whether SevenRooms
+records them is unchecked (`npm run probe:guest` lists every field it sends).
+
+**Changing POS** (Khai, 26 Nov 2026): the guest-to-order link is the bill
+number on the SevenRooms reservation, not an email or mobile. The new POS
+needs a SevenRooms integration that writes its bill number there, and the
+same number on its own orders and exports, or the link is lost on switch day.
+
 ### Event P&L in Excel: built 12 Oct 2026
 
 The planner's brief downloads as a workbook in the group's own template shape
